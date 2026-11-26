@@ -1,4 +1,4 @@
-// The billing tables' half of linking a login (link-sunsynk) and claiming a shared plant
+// The billing tables' half of linking a login (link) and claiming a shared plant
 // (claim-share), SOLAR-641. Before the switch-over the old tables decide and the new rows are
 // copied (a failure is only noted). Once billing is live the new tables decide: a refusal
 // stops the link or claim before any plant is linked, and the browser hears why.
@@ -37,8 +37,8 @@ async function write(rpc: Rpc, live: boolean, note: Note, what: string, args: Re
   throw new Error(`${what}: ${error.message}`);
 }
 
-/** A SunSynk login's email as it is stored and sent: one case, so a reconnect typed in
- *  another case is the same login (SunSynk ignores the case). */
+/** A the brand login's email as it is stored and sent: one case, so a reconnect typed in
+ *  another case is the same login (the brand ignores the case). */
 export const loginName = (s: unknown) => String(s ?? "").trim().toLowerCase();
 
 /** Before the switch: the login and its whole plant list copied into the billing tables. */

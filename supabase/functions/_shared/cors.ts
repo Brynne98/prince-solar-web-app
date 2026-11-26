@@ -1,4 +1,4 @@
-// Browser origins allowed to call link-sunsynk and billing. app.princesolarhub.co.za in
+// Browser origins allowed to call link and billing. app.princesolarhub.co.za in
 // production, the two local dev ports otherwise. Anything else is refused at preflight. A custom domain is
 // added with the LINK_ALLOWED_ORIGINS secret (comma-separated), no redeploy of code:
 //   supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com,https://example.com

@@ -121,6 +121,17 @@ begin
   perform pg_temp.ok('R20 ... and writes nothing', not exists (select 1 from public.agg_minute where plant_id = p));
 end $$;
 
+-- R13, R14: the fake plants' logins are brand mock; the grid rule is one function
+do $$
+begin
+  perform pg_temp.ok('R14 a login ending @mock is brand mock', plants.brand_for_username('Tester@Mock') = 'mock'
+    and plants.brand_for_username('owner@example.com') = plants.default_brand());
+  perform pg_temp.ok('R14 no mock plant keeps an old id', not exists (select 1 from plants.plants where brand = 'mock' and id < 1000000000000));
+  perform pg_temp.ok('R13 no mock inverter keeps a bare serial', not exists (select 1 from private.inverters i
+    join plants.plants p on p.id = i.plant_id where p.brand = 'mock' and i.sn not like 'mock:%'));
+  perform pg_temp.ok('R23 grid present: over 100 V, one rule', public.grid_live(100.1) and not public.grid_live(100) and public.grid_live(null) is null);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; bad int := 0;

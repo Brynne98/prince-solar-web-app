@@ -101,7 +101,7 @@ begin
                 else avg(batt_soc) filter (where batt_soc > 0 and ts = v_ts) end as soc,
            sum(pv_today_kwh) as today_pv, sum(grid_import_today_kwh) as today_imp, sum(grid_export_today_kwh) as today_exp,
            -- a phase that has dropped while another is live (three-phase only)
-           bool_or(grid_volt_v > 100 and least(coalesce(grid_volt_l2_v, 999), coalesce(grid_volt_l3_v, 999)) < 100) filter (where ts = v_ts) as phase_down
+           bool_or(public.grid_live(grid_volt_v) and not public.grid_live(least(coalesce(grid_volt_l2_v, 999), coalesce(grid_volt_l3_v, 999)))) filter (where ts = v_ts) as phase_down
       from inv
   ),
   -- q_grid_present's rule on the rows already in r (same plant, same ts); calling
@@ -109,7 +109,7 @@ begin
   gv as (select grid_volt_v, device_time from r where grid_volt_v is not null and ts = v_ts),
   gp as (
     select case when not exists (select 1 from gv) then null
-                else (select bool_or(v.grid_volt_v > 100) from gv v
+                else (select bool_or(public.grid_live(v.grid_volt_v)) from gv v
                        where v.device_time is not distinct from (select max(device_time) from gv)) end as present
   ),
   -- q_day_agg's day and 5-minute blocks, grid only (0260)

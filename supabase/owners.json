@@ -1,5 +1,5 @@
 {
- "note": "SOLAR-681 R1, R2. See scripts/owners-check.mjs.",
+ "note": "SOLAR-681 R1, R2. See scripts/owners-check.mjs. parts.plants.readers is empty: no file outside the part reads its tables.",
  "tables": {
   "billing.account_events": {
    "part": "billing",
@@ -249,6 +249,7 @@
     "supabase/schemas/functions/plants/remove_login.sql",
     "supabase/schemas/functions/plants/tokens_saved.sql",
     "supabase/schemas/functions/plants/user_logins_delete.sql",
+    "supabase/schemas/functions/plants/user_secrets_clear.sql",
     "supabase/schemas/functions/private/refresh_store.sql",
     "supabase/schemas/functions/public/account_access_set.sql",
     "supabase/schemas/functions/public/account_disable.sql",
@@ -325,7 +326,7 @@
   "private.inverters": {
    "part": "plants",
    "writers": [
-    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/plants/purge.sql",
     "supabase/schemas/functions/public/inverters_seed.sql"
    ]
   },
@@ -357,7 +358,7 @@
   "private.meta": {
    "part": "plants",
    "writers": [
-    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/plants/purge.sql",
     "supabase/schemas/functions/public/meta_upsert.sql",
     "supabase/schemas/functions/public/poll_commit.sql",
     "supabase/schemas/functions/public/poll_commit_batch.sql"
@@ -476,8 +477,8 @@
   "public.config_changes": {
    "part": "plants",
    "writers": [
-    "supabase/schemas/functions/private/log_config_change.sql",
-    "supabase/schemas/functions/private/purge_plant.sql"
+    "supabase/schemas/functions/plants/purge.sql",
+    "supabase/schemas/functions/private/log_config_change.sql"
    ]
   },
   "public.email_prefs": {
@@ -533,10 +534,11 @@
     "public/data.jsx",
     "supabase/functions/recover/index.ts",
     "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/plants/purge.sql",
     "supabase/schemas/functions/private/plant_start_fill.sql",
-    "supabase/schemas/functions/private/purge_plant.sql",
     "supabase/schemas/functions/public/batt_sign_detect.sql",
     "supabase/schemas/functions/public/battery_banks_detect.sql",
+    "supabase/schemas/functions/public/plant_bookmarks_clear.sql",
     "supabase/schemas/functions/public/plant_config_seed.sql",
     "supabase/schemas/functions/public/plant_features_detect.sql"
    ]
@@ -659,73 +661,12 @@
     "supabase/schemas/functions/public/link_succeeded.sql",
     "supabase/schemas/functions/public/plant_features_detect.sql",
     "supabase/schemas/functions/public/battery_banks_detect.sql",
-    "supabase/schemas/functions/public/batt_sign_detect.sql"
+    "supabase/schemas/functions/public/batt_sign_detect.sql",
+    "supabase/schemas/functions/public/plants_configured.sql",
+    "supabase/schemas/functions/public/plant_bookmarks_clear.sql",
+    "supabase/schemas/functions/public/plant_history_loading.sql"
    ],
-   "readers": {
-    "plants.logins": [
-     "supabase/schemas/functions/private/login_copies.sql",
-     "supabase/schemas/functions/private/login_lock.sql",
-     "supabase/schemas/functions/private/refresh_store.sql",
-     "supabase/schemas/functions/private/username_logins.sql",
-     "supabase/schemas/functions/public/account_by_username.sql",
-     "supabase/schemas/functions/public/account_disable.sql",
-     "supabase/schemas/functions/public/account_mark.sql",
-     "supabase/schemas/functions/public/account_refresh_get.sql",
-     "supabase/schemas/functions/public/api_link_remove.sql",
-     "supabase/schemas/functions/public/api_logins.sql",
-     "supabase/schemas/functions/public/share_account_get.sql",
-     "supabase/schemas/functions/public/share_account_set.sql",
-     "supabase/schemas/functions/public/share_claim_any.sql",
-     "supabase/schemas/functions/public/share_retry_due.sql"
-    ],
-    "plants.login_plants": [
-     "supabase/schemas/functions/private/login_lock.sql",
-     "supabase/schemas/functions/public/api_link_remove.sql",
-     "supabase/schemas/functions/public/link_login_live.sql",
-     "supabase/schemas/functions/public/plants_of_login.sql",
-     "supabase/schemas/functions/public/share_claim_any.sql"
-    ],
-    "plants.claims": [
-     "supabase/schemas/functions/public/api_link_remove.sql",
-     "supabase/schemas/functions/public/share_claim_any.sql"
-    ],
-    "plants.plants": [
-     "supabase/schemas/functions/public/plant_vendor.sql",
-     "supabase/schemas/functions/public/plants_of_login.sql",
-     "supabase/schemas/functions/public/share_claim_any.sql"
-    ],
-    "public.plant_config": [
-     "supabase/functions/_shared/db.ts",
-     "supabase/functions/notify/index.ts",
-     "supabase/schemas/functions/private/purge_plant.sql",
-     "supabase/schemas/functions/public/batt_sign_detect.sql",
-     "supabase/schemas/functions/public/battery_banks_detect.sql",
-     "supabase/schemas/functions/public/plant_bootstrap_kick.sql",
-     "supabase/schemas/functions/public/plant_cfg.sql",
-     "supabase/schemas/functions/public/plant_features_detect.sql"
-    ],
-    "private.meta": [
-     "supabase/schemas/functions/private/purge_plant.sql",
-     "supabase/schemas/functions/public/inverters_cached_many.sql"
-    ],
-    "public.config_changes": [
-     "supabase/schemas/functions/private/purge_plant.sql"
-    ],
-    "private.inverters": [
-     "supabase/schemas/functions/private/purge_plant.sql",
-     "supabase/schemas/functions/public/api_logins.sql",
-     "supabase/schemas/functions/public/inverters_cached_many.sql",
-     "supabase/schemas/functions/public/inverters_list.sql",
-     "supabase/schemas/functions/public/plant_inverters.sql"
-    ],
-    "private.link_attempts": [
-     "supabase/schemas/functions/public/link_attempt.sql",
-     "supabase/schemas/functions/public/link_succeeded.sql"
-    ],
-    "plants.login_events": [
-     "supabase/schemas/functions/public/share_retry_due.sql"
-    ]
-   }
+   "readers": {}
   },
   "reading": {
    "files": []

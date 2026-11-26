@@ -5,6 +5,7 @@
 // CSS variables, so charts and the flow follow Dark or Light (SOLAR-318). Values live on :root.
 import React from 'react';
 import { plantNow } from './data.jsx';
+import { minutesText } from '../supabase/functions/_shared/text.ts';
 const COLORS = {
   pv: 'var(--pv)', // solar green
   batt: 'var(--batt)', // battery purple
@@ -73,12 +74,8 @@ function dayText(s, opts = { weekday: 'short', day: 'numeric', month: 'short' })
   // en-GB says "Sept"; every other short month has three letters
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' }).replace(',', '').replace(/\bSept\b/, 'Sep');
 }
-/** Whole minutes as "12 min" / "2h 33m": spoken, not decimal hours, like everything else here. */
-function fmtDuration(mins) {
-  if (mins < 60) return mins + ' min';
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return m ? h + 'h ' + m + 'm' : h + 'h';
-}
+/** Whole minutes as "12 min" / "2h 33m": the mail's own wording (text.ts minutesText, SOLAR-681 R23). */
+const fmtDuration = (mins) => minutesText(mins);
 // A plant's name, from any of its shapes (api_me's {id, name}, a login's {plant_id, plant_name}).
 const plantLabel = (p) => p.name || p.plant_name || 'Plant ' + (p.id ?? p.plant_id);
 function fmtKwh(k) {

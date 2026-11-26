@@ -16,12 +16,12 @@ AS $function$
     select v.ts, max(v.device_time) as dt from voters v group by v.ts
   ),
   ours as (
-    select v.ts, bool_or(v.grid_volt_v > 100) as present
+    select v.ts, bool_or(public.grid_live(v.grid_volt_v)) as present
       from voters v join newest n on n.ts = v.ts
      where v.device_time is not distinct from n.dt
      group by v.ts
   ),
-  -- 0167: SunSynk's history for the minutes we have no reading for
+  -- 0167: the brand's history for the minutes we have no reading for
   hist as (
     select (h.ts / 60) * 60 as ts, bool_or(h.grid_fac_hz >= 40) as present
       from public.inverter_history h

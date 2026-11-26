@@ -75,12 +75,12 @@ export async function reportError(fn: string, e: unknown, userId: string | null 
   await send(fn, e, userId, false);
 }
 
-// Caught failures (SOLAR-336): a refund Paystack refused, a SunSynk 502, a Resend
+// Caught failures (SOLAR-336): a refund Paystack refused, a the brand 502, a Resend
 // refusal. Noted as they happen, sent when the request ends (serve), one report per kind
-// with a count, so a run where 40 plants hit the same SunSynk 504 is one report. Each
+// with a count, so a run where 40 plants hit the same the brand 504 is one report. Each
 // kind is its own PostHog issue (the fingerprint), named by the kind, whatever ids its
 // message holds.
-// hourly: a kind that can repeat every minute (SunSynk, Resend) sends at most once an
+// hourly: a kind that can repeat every minute (the brand, Resend) sends at most once an
 // hour; the gap is kept in app_config, so it holds across runs. Only ids go with it:
 // the user's Supabase id, plant ids, a payment reference.
 // day: a date the failure is about (SOLAR-525); every "plant:day" pair is sent as `days`.

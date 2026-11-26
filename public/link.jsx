@@ -96,7 +96,7 @@ export function useLinkStatus() {
 };
 
 export async function linkSunsynk(username, password) {
-  const [res, body] = await edgePost('link-sunsynk', { username, password });
+  const [res, body] = await edgePost('link', { username, password });
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   window.track('plant_linked');
   return body;
@@ -630,7 +630,7 @@ function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 
       {ask && <div className="confirm-text keep-ask">{ask}</div>}
       {logins.map(acc => (
         <div key={acc.account_id} className="login-grp plant-logins">
-          <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
+          <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.username}</span></div></div>
           {acc.plants.map(p => {
             const name = plantLabel(p), on = value.includes(p.plant_id), shut = !!(lock && lock(p));
             return (
@@ -657,7 +657,7 @@ const acctLogins = (a, keep = () => true) => {
   const seen = new Set(), groups = [];
   const put = (id, kind, name, p) => {
     let g = groups.find(x => x.account_id === id);
-    if (!g) groups.push(g = { account_id: id, kind, sunsynk_username: name, plants: [] });
+    if (!g) groups.push(g = { account_id: id, kind, username: name, plants: [] });
     g.plants.push({ plant_id: p.plant, plant_name: AT.plantName(p) });
   };
   for (const p of a.plants) {

@@ -719,9 +719,11 @@ const isoDay = (epoch: number, tz: string) => {
   return `${p.year}-${p.month}-${p.day}`;
 };
 /** How long something lasted, as the app writes it: 45 min, 1h 33m, 2h. */
+/** Whole minutes as "12 min" / "2h 33m": the one way a length of time reads, in app and mail (R23). */
+export const minutesText = (m: number): string =>
+  m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
 export function lasted(from: number, to: number): string {
-  const m = Math.max(1, Math.round((to - from) / 60));
-  return m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
+  return minutesText(Math.max(1, Math.round((to - from) / 60)));
 }
 /** A data value as text, as SQL's ->> read it. */
 const jtext = (v: unknown): string | null => v == null ? null : typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v);

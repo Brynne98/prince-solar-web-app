@@ -6,10 +6,10 @@ CREATE OR REPLACE FUNCTION public.account_upsert(p_user uuid, p_username text, p
 AS $function$
 begin
   -- the link without a refresh token yet (the bootstrap login): link_login_live's path
-  if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
+  if not plants.link_allowed(p_user, plants.brand_for_username(p_username), p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;
-  return plants.link_login(billing.account_of(p_user), plants.default_brand(), p_username, '[]'::jsonb, now(), 'owner',
+  return plants.link_login(billing.account_of(p_user), plants.brand_for_username(p_username), p_username, '[]'::jsonb, now(), 'owner',
                            null, p_access, p_expires);
 end
 $function$;

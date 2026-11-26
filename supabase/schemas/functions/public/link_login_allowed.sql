@@ -4,5 +4,5 @@ CREATE OR REPLACE FUNCTION public.link_login_allowed(p_user uuid, p_username tex
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
-  select plants.link_allowed(p_user, plants.default_brand(), p_username)
+  select plants.link_allowed(p_user, plants.brand_for_username(p_username), p_username)
 $function$;

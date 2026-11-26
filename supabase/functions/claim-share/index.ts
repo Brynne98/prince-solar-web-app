@@ -1,14 +1,14 @@
-// `claim-share` — link a plant the owner shared to our SunSynk login (SOLAR-310).
+// `claim-share` — link a plant the owner shared to our the brand login (SOLAR-310).
 //
 // The browser POSTs { ref } with the user's Supabase JWT: the plant id or an inverter
 // serial. claimShared() checks it live against what the share login sees, then links
-// it to the user (0172 share_claim). No SunSynk password from the user, ever.
+// it to the user (0172 share_claim). No the brand password from the user, ever.
 //
 // Answers: 200 {result: "claimed" | "claimed_paused" | "yours", plantId, plantName},
 // 404 {error: "not_shared"}, 409 {error: "taken" | "no plan"}, 429 too many tries. A taken plant's id
 // is not sent back: a serial typed from someone else's inverter would reveal it.
 import { db } from "../_shared/db.ts";
-import { saveAllCalls } from "../_shared/brands/index.ts";
+import { brandOf, DEFAULT_BRAND, saveAllCalls } from "../_shared/brands/index.ts";
 import { claimShared } from "../_shared/plants.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -42,7 +42,7 @@ serve("claim-share", async (req) => {
   if (limitErr) {
     console.error(`claim-share limit check failed for user ${userId}: ${limitErr.message}`);
     noteError("limit_check_failed", new Error(`link_attempt: ${limitErr.message}`), { user: userId });
-    return json({ error: "could not reach SunSynk" }, 502, cors);
+    return json({ error: `could not reach ${brandOf(DEFAULT_BRAND).displayName}` }, 502, cors);
   }
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
@@ -67,7 +67,7 @@ serve("claim-share", async (req) => {
     if (e instanceof Refused) return json({ error: e.answer }, 409, cors);
     console.error(`claim-share failed for user ${userId}: ${e instanceof Error ? e.message : e}`);
     noteError("claim_failed", e, { user: userId });
-    return json({ error: "could not reach SunSynk" }, 502, cors);
+    return json({ error: `could not reach ${brandOf(DEFAULT_BRAND).displayName}` }, 502, cors);
   } finally {
     await saveAllCalls();
   }

@@ -30,11 +30,11 @@ export type AccountResult = {
   noData?: string[];
   /** inverters whose today's temperatures were fetched this minute: rows banked, or the error (SOLAR-398) */
   temps?: Record<string, number | string>;
-  /** inverter list re-read from SunSynk this minute (else served from cache) */
+  /** inverter list re-read from the brand this minute (else served from cache) */
   listRefreshed: boolean;
-  /** SunSynk requests spent on the inverter / plant lists this minute (0, 1 or 2+) */
+  /** the brand requests spent on the inverter / plant lists this minute (0, 1 or 2+) */
   listCalls: number;
-  /** SunSynk requests this account cost this minute, retries included */
+  /** the brand requests this account cost this minute, retries included */
   apiCalls: number;
   /** ms after the minute that poll_commit_v2 answered: when the readings became visible */
   commitMs?: number;
@@ -62,7 +62,7 @@ export async function accountFailed(acc: Account, jobs: { plantId: number }[], e
     p_account: acc.id, p_status: needsRelink ? "needs_reconnect" : "ok", p_error: msg,
   }).catch(() => {});
   console.error(`poll: account ${acc.id} failed:`, msg);
-  // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
+  // A dead login is the owner's to fix and is mailed to them; the rest are ours or the brand's.
   if (!needsRelink) {
     const kind = fault === "sign_in" ? "sign_in" : fault;
     for (const j of jobs) noteError(`account_failed_${kind}`, e, { user: acc.user_id, plant: j.plantId, hourly: true });
@@ -72,8 +72,8 @@ export async function accountFailed(acc: Account, jobs: { plantId: number }[], e
 }
 
 /**
- * How a login's minute went, for email_poll_step (0102), or null to leave it out. SunSynk's
- * fault and ours are told apart so our own outage is never mailed as SunSynk's: our errors
+ * How a login's minute went, for email_poll_step (0102), or null to leave it out. the brand's
+ * fault and ours are told apart so our own outage is never mailed as the brand's: our errors
  * are rpc failures ("fn: message"); a dead login is left out, and so is one we could not
  * sign in (SOLAR-451): no read was made, so it says nothing about the inverter.
  */
@@ -86,7 +86,7 @@ export function emailOutcome(r: AccountResult): { account: string; outcome: stri
   };
 }
 
-/** SunSynk requests made for this account since `since`. */
+/** the brand requests made for this account since `since`. */
 const callsSince = (acc: Account, since: number) => brandOf(acc.brand).callCount(acc) - since;
 
 // Today's inverter temperatures (SOLAR-398): each inverter's day so far once in ten minutes,
@@ -211,7 +211,7 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
   // and let recover bank it from the inverter's own uploads. Absent beats false.
   // (A carry has no input payload by design — it dates itself from the previous row.)
   // An input that answers without a time is no anchor either: a logger gone quiet
-  // gets that from SunSynk, with zeros on the other endpoints (2504193036 on
+  // gets that from the brand, with zeros on the other endpoints (2504193036 on
   // 31 Oct, 12:59-16:03: load 0 for three hours, SOLAR-296).
   const noAnchor = (f: Fetched) => !brand.anchored(f);
   const usable = perInv.filter((f) => !noAnchor(f));

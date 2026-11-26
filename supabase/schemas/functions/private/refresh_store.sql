@@ -16,7 +16,7 @@ begin
     update plants.logins set refresh_secret_id = null where id = p_account;
     delete from vault.secrets where id = old_id;
   end if;
-  new_id := vault.create_secret(p_refresh, 'sunsynk_refresh_' || p_account::text,
-                                'SunSynk refresh token for account ' || p_account::text);
+  new_id := vault.create_secret(p_refresh, 'brand_refresh_' || p_account::text,
+                                'brand refresh token for login ' || p_account::text);
   update plants.logins set refresh_secret_id = new_id where id = p_account;
 end $function$;

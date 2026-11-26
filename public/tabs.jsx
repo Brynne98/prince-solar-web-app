@@ -2758,7 +2758,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
             const plants = acc.plants || [];
             // Plants shared to our login (SOLAR-310): the login is ours, so no password to change.
             const shared = acc.kind === 'share';
-            const who = shared ? 'Shared plants' : acc.sunsynk_username;
+            const who = shared ? 'Shared plants' : acc.username;
             const at = shared ? 0 : who.indexOf('@') + 1; // 0 when there is no @
             // Amber at the age the header pill calls offline (15 minutes without a reading). A login
             // with no plant on is never read, so its age means nothing (SOLAR-285, SOLAR-483).
@@ -2778,7 +2778,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
                 </div>
                 {mode === acc.account_id && (
                   <LinkDialog title={ok ? 'Change SunSynk password' : 'Reconnect'} relink changing={ok}
-                    initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+                    initialUsername={acc.username} onLinked={changed} onCancel={() => setMode(null)} />
                 )}
                 {confirming === acc.account_id && (
                   <ConfirmCard modal

@@ -29,7 +29,7 @@ begin
            count(distinct status),
            (array_agg(grid_relay_status order by ts desc))[1],
            count(*) filter (where grid_relay_status = '0'),
-           count(*) filter (where device_time is not null and grid_volt_v is not null and grid_volt_v <= 100),
+           count(*) filter (where device_time is not null and grid_volt_v is not null and not public.grid_live(grid_volt_v)),
            avg(pv_w),
            min(pv_w),
            max(pv_w),

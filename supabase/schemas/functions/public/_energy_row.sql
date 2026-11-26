@@ -17,7 +17,7 @@ AS $function$
          'label', to_char(p_period, 'Dy'),
          'monthLabel', to_char(p_period, 'Mon'))
      else
-       -- SunSynk's year endpoint returns zero-padded month numbers ("05"), and the
+       -- the brand's year endpoint returns zero-padded month numbers ("05"), and the
        -- charts key off this string, so pad rather than emitting "5"
        jsonb_build_object(
          'time', to_char(p_period, 'MM'),

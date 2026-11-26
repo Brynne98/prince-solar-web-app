@@ -8,7 +8,7 @@ import { join } from "node:path";
 // The repo is commonjs, so node reads the .ts as ESM only under .mts (as card-tests.mts does).
 const copy = join(mkdtempSync(join(tmpdir(), "gate-")), "gate.mts");
 copyFileSync(new URL("../../supabase/functions/_shared/gate.ts", import.meta.url), copy);
-const { payClosed, mockClosed, fakeSunsynk } = await import(copy);
+const { payClosed, mockClosed, fakeLogin } = await import(copy);
 const PAT = String.raw`^brynneprince98\+test\d*@gmail\.com$`;
 
 const HOSTED = "https://pmakzojwhouamawgszrc.supabase.co", LOCAL = "http://127.0.0.1:55321";
@@ -26,11 +26,11 @@ assert.equal(mockClosed("installer@mock", HOSTED, A, A), false, "@mock, hosted, 
 assert.equal(mockClosed("installer@mock", LOCAL, "", A), false, "@mock, local: passes");
 assert.equal(mockClosed("me@gmail.com", HOSTED, "", A), false, "real login: never refused here");
 const REAL = "https://openapi.sunsynk.net", MOCK = `${HOSTED}/functions/v1/mock-sunsynk`, LOCAL_MOCK = "http://127.0.0.1:4010";
-assert.equal(fakeSunsynk("solo@mock", REAL, MOCK), true, "production: a fake login is not counted");
-assert.equal(fakeSunsynk("at:solo@mock", REAL, MOCK), true, "production: a fake token is not counted");
-assert.equal(fakeSunsynk("me@gmail.com", REAL, MOCK), false, "production: a real login is counted");
-assert.equal(fakeSunsynk("eyJreal.token", REAL, MOCK), false, "production: a real token is counted");
-assert.equal(fakeSunsynk("solo@mock", LOCAL_MOCK, LOCAL_MOCK), false, "local: every call goes to the mock and counts");
+assert.equal(fakeLogin("solo@mock", REAL, MOCK), true, "production: a fake login is not counted");
+assert.equal(fakeLogin("at:solo@mock", REAL, MOCK), true, "production: a fake token is not counted");
+assert.equal(fakeLogin("me@gmail.com", REAL, MOCK), false, "production: a real login is counted");
+assert.equal(fakeLogin("eyJreal.token", REAL, MOCK), false, "production: a real token is counted");
+assert.equal(fakeLogin("solo@mock", LOCAL_MOCK, LOCAL_MOCK), false, "local: every call goes to the mock and counts");
 for (const e of ["brynneprince98+test@gmail.com", "brynneprince98+test2@gmail.com", "Brynneprince98+Test17@gmail.com"])
   assert.equal(mockClosed("flat@mock", HOSTED, "", A, PAT, e), false, `${e}: passes`);
 for (const e of ["brynneprince98+testx@gmail.com", "someone+test2@gmail.com", "brynneprince98+test2@gmail.com.evil.com", "x.brynneprince98+test2@gmail.com", ""])

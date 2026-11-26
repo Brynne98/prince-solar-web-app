@@ -1,4 +1,4 @@
-// Hold last good (SOLAR-551). For 20-40 s after an upload SunSynk serves each realtime
+// Hold last good (SOLAR-551). For 20-40 s after an upload the brand serves each realtime
 // endpoint old or new on its own, so one minute's read can mix two uploads and solar +
 // grid + battery stops matching home. When an inverter's row is off by more than
 // HOLD_GAP_W, its previous row (the minute before) balanced, and the gap jumped by more
@@ -15,7 +15,7 @@
 export const HOLD_GAP_W = 400;
 // One minute: a mixed read clears by the next full read, a real step does not. At 5 a
 // real step was held 5 minutes: 538820's geysers at 04:00 on 13-17 Nov, where the slave's
-// own loss at ~5 kW is ~550 W (SOLAR-551). Until SunSynk opens /inverter/{sn}/flow.
+// own loss at ~5 kW is ~550 W (SOLAR-551). Until the brand opens /inverter/{sn}/flow.
 export const MAX_HOLD_RUN = 1;
 const POWER = ["pv_w", "batt_w", "grid_w", "load_w"] as const;
 

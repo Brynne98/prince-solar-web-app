@@ -1,6 +1,6 @@
 // A new day's first rows (SOLAR-648). Until an inverter's first upload after the plant's
 // midnight, its "today" counters are still yesterday's: a carried or skipped row copies
-// them, a failed endpoint falls back to the last row's, and SunSynk itself serves yesterday's
+// them, a failed endpoint falls back to the last row's, and the brand itself serves yesterday's
 // battery and grid counters (495944 read 19.8 kWh charged at 00:00 on most nights). The
 // inverter resets its counters at its own midnight, so an upload dated before the row's day
 // holds yesterday's figures whatever its clock says, and today so far is 0.

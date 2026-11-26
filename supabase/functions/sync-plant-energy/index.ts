@@ -1,9 +1,9 @@
-// `sync-plant-energy` — cache SunSynk's plant-level kWh totals into Postgres, per plant.
+// `sync-plant-energy` — cache the brand's plant-level kWh totals into Postgres, per plant.
 //
 // These cover the plant's whole life, back to commissioning, so they cannot be
 // derived from agg_minute (our own history starts 2026-05-30). Express fetched them
 // live on every request; caching them here means the browser never triggers a
-// SunSynk call and never needs a credential — which was the point of the port.
+// the brand call and never needs a credential — which was the point of the port.
 //
 // Runs daily. The numbers only change for the current day/month, so a nightly run
 // fetches this year and the last 2 months: 3 API calls per plant. On Sunday (plant's
@@ -48,7 +48,7 @@ const isSunday = (tz: string) =>
 async function syncPlant(job: PlantJob, dailyMonths: number, started: number, full: boolean) {
   const { plantId, account, timezone: tz } = job;
 
-  // SunSynk counts grid import/export only on CT-bearing inverters (the slave has
+  // the brand counts grid import/export only on CT-bearing inverters (the slave has
   // no CT), while PV and load are already full-plant. Scale grid up so these rows
   // share the convention of the live grid tile and the arrows compare like for like.
   const { gridMul, gridErr } = gridScale(await db.rpc("q_grid_feed_scale", { p_plant: plantId }));

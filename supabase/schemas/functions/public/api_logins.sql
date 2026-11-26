@@ -1,5 +1,5 @@
 CREATE OR REPLACE FUNCTION public.api_logins()
- RETURNS TABLE(account_id uuid, sunsynk_username text, status text, linked_at timestamp with time zone, last_ok_at timestamp with time zone, plants jsonb, kind text)
+ RETURNS TABLE(account_id uuid, username text, status text, linked_at timestamp with time zone, last_ok_at timestamp with time zone, plants jsonb, kind text)
  LANGUAGE sql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'private', 'pg_temp'

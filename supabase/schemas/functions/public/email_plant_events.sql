@@ -61,7 +61,7 @@ AS $function$
      order by m.ord nulls last, d.sn, d.no limit 1
   ),
 
-  -- SunSynk's own clock: the newest device_time across the plant, read only from
+  -- the brand's own clock: the newest device_time across the plant, read only from
   -- rows our polls wrote in the last 3 minutes. No such rows: our polls are failing,
   -- which is not the inverter going quiet, so no logger row at all.
   dev as (

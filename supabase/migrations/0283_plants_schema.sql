@@ -237,6 +237,14 @@ create function plants.default_brand() returns text
   select b.code from plants.brands b where b.is_default
 $$;
 
+-- the brand a login belongs to by its username (the link and the share login use it)
+create function plants.brand_for_username(p_username text) returns text
+  language sql stable set search_path to '' as $$
+  select case when lower(p_username) like '%@mock' then 'mock' else plants.default_brand() end
+$$;
+revoke all on function plants.brand_for_username(text) from public, anon, authenticated;
+
+
 -- R11: the one way a plant is found or made from the brand's own id
 create function plants.plant_for(p_brand text, p_vendor_id text) returns bigint
   language plpgsql security definer set search_path to '' as $$
@@ -660,6 +668,92 @@ revoke all on function public.plant_vendor(bigint) from public, anon, authentica
 grant execute on function public.plant_vendor(bigint) to service_role;
 
 -- ---------------------------------------------------------------------------
+-- SOLAR-681 R2: other parts read this part's tables only through its doors. The doors are these
+-- views (no tokens, no secrets) and the plants.* functions. Only this part's own files read the
+-- tables; scripts/owners-check.mjs fails on a new direct read.
+create or replace view plants.login_info as
+  select id, account, user_id, brand, kind, username, status, linked_at, last_ok_at, last_error, last_try_at, last_try
+    from plants.logins;
+-- the reader's two job doors carry the login's access token (poll_jobs_v2, billing.history_take)
+create or replace view plants.login_tokens as
+  select id, access_token, access_expires_at from plants.logins;
+create or replace view plants.list_info as
+  select login, plant, plant_name, last_seen_at, gone_at, missing_since, linked_at from plants.login_plants;
+create or replace view plants.claim_info as
+  select plant, account, claimed_at, plant_name from plants.claims;
+create or replace view plants.plant_info as
+  select id, brand, vendor_id, time_zone, version, legacy, created_at from plants.plants;
+create or replace view plants.settings as select * from public.plant_config;
+create or replace view plants.inverter_info as select * from private.inverters;
+create or replace view plants.meta_info as select * from private.meta;
+create or replace view plants.config_log as select * from public.config_changes;
+do $$
+declare v text;
+begin
+  foreach v in array array['login_info', 'login_tokens', 'list_info', 'claim_info', 'plant_info', 'settings',
+                           'inverter_info', 'meta_info', 'config_log'] loop
+    execute format('revoke all on plants.%I from public, anon, authenticated', v);
+  end loop;
+end $$;
+
+-- a plant's own rows in this part, for the history purge (private.purge_plant)
+create or replace function plants.purge(p_plant bigint) returns jsonb
+  language plpgsql security definer set search_path to '' as $$
+declare n int; out jsonb := '{}';
+begin
+  delete from public.plant_config   where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_config', n);
+  delete from public.config_changes where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('config_changes', n);
+  delete from private.meta          where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('meta', n);
+  delete from private.inverters     where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverters', n);
+  return out;
+end $$;
+revoke all on function plants.purge(bigint) from public, anon, authenticated;
+
+-- R23: grid present is one rule: mains over 100 V (q_grid_present's, 0055). Every reader calls
+-- this; the brand adapter's carry rule (brands/sunsynk/realtime.ts LOW_VOLT_V) uses the same
+-- number, and scripts/sql/plants-tests.sql checks both.
+create or replace function public.grid_live(p_volts double precision) returns boolean
+  language sql immutable set search_path to '' as $$ select p_volts > 100 $$;
+
+-- the edge's doors to plant settings (R2): which plants have settings, dropping the history
+-- bookmarks of plants that are not read, and whether a plant's history is still loading
+create or replace function public.plants_configured(p_plants bigint[]) returns setof bigint
+  language sql stable security definer set search_path to '' as $$
+  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}'))
+$$;
+create or replace function public.plant_bookmarks_clear(p_plants bigint[]) returns void
+  language sql security definer set search_path to '' as $$
+  update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
+   where plant_id = any (coalesce(p_plants, '{}'))
+$$;
+create or replace function public.plant_history_loading(p_plant bigint) returns boolean
+  language sql stable security definer set search_path to '' as $$
+  select exists (select 1 from public.plant_config c where c.plant_id = p_plant and c.backfill_next is not null)
+$$;
+do $$
+declare f text;
+begin
+  foreach f in array array['public.plants_configured(bigint[])', 'public.plant_bookmarks_clear(bigint[])', 'public.plant_history_loading(bigint)'] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+    execute format('grant execute on function %s to service_role', f);
+  end loop;
+end $$;
+
+-- a user's logins' refresh tokens out of Vault (a token another user's copy still holds stays)
+create or replace function plants.user_secrets_clear(p_user uuid) returns void
+  language plpgsql security definer set search_path to '' as $$
+declare r record;
+begin
+  for r in select l.id, l.refresh_secret_id from plants.logins l where l.user_id = p_user and l.refresh_secret_id is not null order by l.id loop
+    if not exists (select 1 from plants.logins o where o.refresh_secret_id = r.refresh_secret_id and o.user_id <> p_user) then
+      delete from vault.secrets s where s.id = r.refresh_secret_id;
+    end if;
+    update plants.logins set refresh_secret_id = null where id = r.id;
+  end loop;
+end $$;
+revoke all on function plants.user_secrets_clear(uuid) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
 -- every function that read or wrote the old tables, whole (supabase/schemas/functions/)
 
 CREATE OR REPLACE FUNCTION billing.account_state(p_account uuid, p_at timestamp with time zone DEFAULT now())
@@ -688,17 +782,17 @@ begin
   -- the smallest plan that fits every linked plant; null when none does
   select p.code into fit from billing.plans p where p.places >= st.linked order by p.places limit 1;
 
-  login_count := (select count(*) from plants.logins l where l.account = p_account);
+  login_count := (select count(*) from plants.login_info l where l.account = p_account);
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'plant', x.plant,
-           'name', coalesce((select lp.plant_name from plants.login_plants lp join plants.logins l on l.id = lp.login
+           'name', coalesce((select lp.plant_name from plants.list_info lp join plants.login_info l on l.id = lp.login
                               where l.account = p_account and lp.plant = x.plant and lp.plant_name is not null limit 1),
-                            (select c.plant_name from plants.claims c where c.account = p_account and c.plant = x.plant),
+                            (select c.plant_name from plants.claim_info c where c.account = p_account and c.plant = x.plant),
                             -- a share removed (no claim left): the name it had
                             (select pu.plant_name from plants.user_plants pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
                                 and pu.plant_id = x.plant and pu.plant_name is not null limit 1),
-                            (select lp.plant_name from plants.login_plants lp join plants.logins s on s.id = lp.login and s.kind = 'share'
+                            (select lp.plant_name from plants.list_info lp join plants.login_info s on s.id = lp.login and s.kind = 'share'
                               where lp.plant = x.plant and lp.plant_name is not null limit 1)),
            'chosen', x.chosen,
            'locked', not x.chosen,
@@ -874,7 +968,7 @@ AS $function$
     having count(*) > 0
     union all
     select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'delete_at', ps->'delete_at')
-      from plants.plants p cross join lateral billing.plant_state(p.id, p_at) ps
+      from plants.plant_info p cross join lateral billing.plant_state(p.id, p_at) ps
       left join billing.plant_facts f on f.plant = p.id
      where f.history_purged_at is null and ps->>'delete_at' is not null
        and (ps->>'delete_at')::timestamptz <= p_at - interval '1 hour'
@@ -882,7 +976,7 @@ AS $function$
     union all
     -- history no seat holds, the last seat closed over an hour ago: the delete job missed it
     select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'closed_at', max(se.closed_at))
-      from plants.plants p join billing.seats se on se.plant = p.id
+      from plants.plant_info p join billing.seats se on se.plant = p.id
       left join billing.plant_facts f on f.plant = p.id
      where f.history_purged_at is null
        and not exists (select 1 from billing.seats o where o.plant = p.id and o.closed_at is null)
@@ -987,12 +1081,12 @@ declare
 begin
   if not billing.is_live() then return jsonb_build_object('live', false); end if;
   if not pg_try_advisory_xact_lock(hashtext('billing.delete_due')) then return jsonb_build_object('busy', true); end if;
-  for p in select pp.id from plants.plants pp left join billing.plant_facts f on f.plant = pp.id
+  for p in select pp.id from plants.plant_info pp left join billing.plant_facts f on f.plant = pp.id
             where f.history_purged_at is null order by pp.id loop
     ps := billing.plant_state(p.id, p_at);
     continue when ps->>'delete_at' is null or (ps->>'delete_at')::timestamptz > p_at;
     -- a plant being written now is left for the next run
-    perform 1 from plants.plants where id = p.id for update skip locked;
+    perform 1 from plants.plant_info where id = p.id for update skip locked;
     if not found then busy := busy || p.id; continue; end if;
     -- the clock moved while the job ran: one time from here on, after the lock, for every
     -- check and the delete itself; a seat opened since the job started keeps the plant
@@ -1020,13 +1114,13 @@ CREATE OR REPLACE FUNCTION billing.fetch_lane(p_account uuid, p_plant bigint)
  SET search_path TO 'billing', 'private', 'pg_temp'
 AS $function$
   select coalesce(
-    (select l.id from plants.logins l
-       join plants.login_plants lp on lp.login = l.id and lp.plant = p_plant and lp.gone_at is null
-       join plants.logins sa on sa.id = l.id and sa.status = 'ok'
+    (select l.id from plants.login_info l
+       join plants.list_info lp on lp.login = l.id and lp.plant = p_plant and lp.gone_at is null
+       join plants.login_info sa on sa.id = l.id and sa.status = 'ok'
       where l.account = p_account and l.status = 'ok'
       order by l.linked_at, l.id limit 1),
-    (select sa.id from plants.claims c
-       join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
+    (select sa.id from plants.claim_info c
+       join plants.login_info sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
       where c.account = p_account and c.plant = p_plant limit 1))
 $function$;
 
@@ -1036,10 +1130,10 @@ CREATE OR REPLACE FUNCTION billing.has_route(p_account uuid, p_plant bigint, p_n
  STABLE
  SET search_path TO 'billing', 'pg_temp'
 AS $function$
-  select exists (select 1 from plants.logins l join plants.login_plants lp on lp.login = l.id
+  select exists (select 1 from plants.login_info l join plants.list_info lp on lp.login = l.id
                   where l.account = p_account and lp.plant = p_plant and lp.gone_at is null
                     and (not p_need_ok or l.status = 'ok'))
-      or exists (select 1 from plants.claims c where c.account = p_account and c.plant = p_plant)
+      or exists (select 1 from plants.claim_info c where c.account = p_account and c.plant = p_plant)
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.history_take(p_at timestamp with time zone DEFAULT now())
@@ -1097,24 +1191,24 @@ begin
                           and o.id <> h.id and o.claimed_until > p_at)
        and not exists (select 1 from billing.history_lanes hl where hl.lane = h.lane and hl.backoff_until > p_at)
        and billing.reads_plant(h.account, h.plant, p_at)
-       and exists (select 1 from plants.logins sa where sa.id = h.lane and sa.status = 'ok')
+       and exists (select 1 from plants.login_info sa where sa.id = h.lane and sa.status = 'ok')
      order by h.lane, h.next_step_at, h.id),
   w as (
     update billing.history_fetches h
        set claimed_until = p_at + interval '90 seconds', claim = gen_random_uuid(),
-           version = (select bp.version from plants.plants bp where bp.id = h.plant)
+           version = (select bp.version from plants.plant_info bp where bp.id = h.plant)
      where h.id in (select id from due)
     returning h.*)
   select coalesce(jsonb_agg(jsonb_build_object(
            'id', w.id, 'claim', w.claim, 'plant', w.plant, 'account', w.account, 'day', w.day_next, 'floor', w.day_floor,
            'target_s', w.target_s, 'version', w.version,
-           'timezone', plants.tz(w.plant), 'vendor_plant_id', (select p.vendor_id from plants.plants p where p.id = w.plant),
+           'timezone', plants.tz(w.plant), 'vendor_plant_id', (select p.vendor_id from plants.plant_info p where p.id = w.plant),
            'login', jsonb_build_object('id', sa.id, 'user_id', sa.user_id, 'username', sa.username, 'brand', sa.brand,
-                                       'access_token', sa.access_token, 'access_expires_at', sa.access_expires_at))
+                                       'access_token', tk.access_token, 'access_expires_at', tk.access_expires_at))
            order by w.id), '[]'::jsonb)
     into out
-    from w join plants.logins sa on sa.id = w.lane
-    left join public.plant_config c on c.plant_id = w.plant;
+    from w join plants.login_info sa on sa.id = w.lane join plants.login_tokens tk on tk.id = sa.id
+    left join plants.settings c on c.plant_id = w.plant;
   perform billing.heartbeat('history', p_at, jsonb_build_object('handed_out', jsonb_array_length(out)));
   return out;
 end $function$;
@@ -1125,10 +1219,10 @@ CREATE OR REPLACE FUNCTION billing.linked_plants(p_account uuid)
  STABLE
  SET search_path TO 'billing', 'pg_temp'
 AS $function$
-  select lp.plant from plants.logins l join plants.login_plants lp on lp.login = l.id
+  select lp.plant from plants.login_info l join plants.list_info lp on lp.login = l.id
    where l.account = p_account and lp.gone_at is null
   union
-  select c.plant from plants.claims c where c.account = p_account
+  select c.plant from plants.claim_info c where c.account = p_account
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.lock_plants(p_plants bigint[])
@@ -1136,7 +1230,7 @@ CREATE OR REPLACE FUNCTION billing.lock_plants(p_plants bigint[])
  LANGUAGE sql
  SET search_path TO 'billing', 'pg_temp'
 AS $function$
-  select null from (select id from plants.plants where id = any (p_plants) order by id for update) x
+  select null from (select id from plants.plant_info where id = any (p_plants) order by id for update) x
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.outbox_guard(o billing.outbox, p_at timestamp with time zone)
@@ -1349,10 +1443,10 @@ begin
       'ended', case when o.key = 'plan_ended' then billing.plan_ended_facts(o) end,
       'event', (select jsonb_build_object('kind', e.kind, 'before', e.before, 'after', e.after)
                   from billing.account_events e where o.key in ('change_booked', 'change_undone') and e.id = o.ref::bigint),
-      'plant', (select jsonb_build_object('id', p.id, 'name', coalesce((select lp.plant_name from plants.login_plants lp
-                         join plants.logins l on l.id = lp.login where l.account = o.account and lp.plant = p.id limit 1),
+      'plant', (select jsonb_build_object('id', p.id, 'name', coalesce((select lp.plant_name from plants.list_info lp
+                         join plants.login_info l on l.id = lp.login where l.account = o.account and lp.plant = p.id limit 1),
                          (select pu.plant_name from plants.user_plants pu where pu.plant_id = p.id and pu.user_id = u.id limit 1)))
-                  from plants.plants p where o.key = 'history_deleted' and p.id = o.ref::bigint)));
+                  from plants.plant_info p where o.key = 'history_deleted' and p.id = o.ref::bigint)));
   end loop;
   return out;
 end $function$;
@@ -1373,7 +1467,7 @@ declare
   seat_count int := 0;
   delete_at timestamptz;
 begin
-  if not exists (select 1 from plants.plants where id = p_plant) then return null; end if;
+  if not exists (select 1 from plants.plant_info where id = p_plant) then return null; end if;
   purged := exists (select 1 from billing.plant_facts f where f.plant = p_plant and f.history_purged_at is not null);
   for se in select s.account from billing.seats s
              where s.plant = p_plant and s.chosen_at <= p_at and (s.closed_at is null or s.closed_at > p_at)
@@ -1416,9 +1510,9 @@ AS $function$
   )
   select distinct se.plant
     from se join st on st.account = se.account and st.live and not st.must_choose
-   where exists (select 1 from plants.logins l join plants.login_plants lp on lp.login = l.id
+   where exists (select 1 from plants.login_info l join plants.list_info lp on lp.login = l.id
                   where l.account = se.account and lp.plant = se.plant and lp.gone_at is null and l.status = 'ok')
-      or exists (select 1 from plants.claims c where c.account = se.account and c.plant = se.plant)
+      or exists (select 1 from plants.claim_info c where c.account = se.account and c.plant = se.plant)
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.purge_now(p_plant bigint, p_at timestamp with time zone)
@@ -1464,14 +1558,14 @@ AS $function$
   )
   select se.plant, se.account, l.id, false, l.linked_at
     from seat se join live using (account)
-    join plants.logins l on l.account = se.account and l.status = 'ok'
-    join plants.login_plants lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
-    join plants.logins sa on sa.id = l.id and sa.status = 'ok'
+    join plants.login_info l on l.account = se.account and l.status = 'ok'
+    join plants.list_info lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
+    join plants.login_info sa on sa.id = l.id and sa.status = 'ok'
   union all
   select se.plant, se.account, sa.id, true, c.claimed_at
     from seat se join live using (account)
-    join plants.claims c on c.plant = se.plant and c.account = se.account
-    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
+    join plants.claim_info c on c.plant = se.plant and c.account = se.account
+    join plants.login_info sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.reading_routes_set(p_at timestamp with time zone)
@@ -1490,14 +1584,29 @@ AS $function$
   )
   select se.plant, se.account, l.id, false, l.linked_at, least(lv.ends_at, se.closed_at)
     from seat se join live lv on lv.account = se.account
-    join plants.logins l on l.account = se.account and l.status = 'ok'
-    join plants.login_plants lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
-    join plants.logins sa on sa.id = l.id and sa.status = 'ok'
+    join plants.login_info l on l.account = se.account and l.status = 'ok'
+    join plants.list_info lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
+    join plants.login_info sa on sa.id = l.id and sa.status = 'ok'
   union all
   select se.plant, se.account, sa.id, true, c.claimed_at, least(lv.ends_at, se.closed_at)
     from seat se join live lv on lv.account = se.account
-    join plants.claims c on c.plant = se.plant and c.account = se.account
-    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
+    join plants.claim_info c on c.plant = se.plant and c.account = se.account
+    join plants.login_info sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
+$function$;
+
+CREATE OR REPLACE FUNCTION billing.readings_start(p_account uuid, p_plants bigint[], p_at timestamp with time zone)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  insert into private.plant_alert_state (plant_id, started_at)
+  select c.plant_id, extract(epoch from p_at)::bigint from plants.settings c
+   where c.plant_id = any (p_plants)
+     and not exists (select 1 from billing.seats s where s.plant = c.plant_id and s.account <> p_account
+                        and s.closed_at is null and billing.reads_plant(s.account, c.plant_id, p_at))
+  on conflict (plant_id) do update
+    set started_at = greatest(coalesce(private.plant_alert_state.started_at, 0), excluded.started_at)
 $function$;
 
 CREATE OR REPLACE FUNCTION billing.screen_state(p_account uuid, p_at timestamp with time zone DEFAULT now())
@@ -1549,15 +1658,15 @@ begin
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
            -- the logins that list it now, and the ones it went from (removing the last route deletes it)
-           'logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
-                                 join plants.login_plants lp on lp.login = l.id
+           'logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.login_info l
+                                 join plants.list_info lp on lp.login = l.id
                                 where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null), '[]'::jsonb),
-           'gone_logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
-                                      join plants.login_plants lp on lp.login = l.id
+           'gone_logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.login_info l
+                                      join plants.list_info lp on lp.login = l.id
                                      where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is not null), '[]'::jsonb),
-           'claimed', exists (select 1 from plants.claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
+           'claimed', exists (select 1 from plants.claim_info c where c.account = p_account and c.plant = (p->>'plant')::bigint),
            -- it came through the share: removing the shared group lets it go (api_link_remove)
-           'shared', exists (select 1 from plants.user_plants pu join plants.logins sa on sa.id = pu.account_id
+           'shared', exists (select 1 from plants.user_plants pu join plants.login_info sa on sa.id = pu.account_id
                               where sa.kind = 'share' and pu.plant_id = (p->>'plant')::bigint
                                 and pu.user_id = a.user_id))
          order by (p->>'plant')::bigint), '[]'::jsonb)
@@ -1599,7 +1708,7 @@ begin
     'prices', prices,
     'logins', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'brand', l.brand, 'username', l.username,
                           'status', l.status) order by l.linked_at)
-                          from plants.logins l where l.account = p_account), '[]'::jsonb),
+                          from plants.login_info l where l.account = p_account), '[]'::jsonb),
     'bills', coalesce((select jsonb_agg(b order by b->>'paid_at' desc) from (
                 select jsonb_build_object('id', i.id, 'kind', i.kind, 'plan', i.plan,
                          'plan_name', i.plan_name, 'interval', i.interval,
@@ -1710,7 +1819,7 @@ declare
   ok bigint[] := '{}';
   p record;
 begin
-  for p in select bp.id, bp.version from plants.plants bp
+  for p in select bp.id, bp.version from plants.plant_info bp
             where bp.id in (select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k)
             order by bp.id for share
   loop
@@ -1730,8 +1839,8 @@ AS $function$
 declare ids bigint[];
 begin
   ids := array(select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k);
-  perform 1 from plants.plants where id = any (ids) order by id for share;
-  return array(select bp.id from plants.plants bp
+  perform 1 from plants.plant_info where id = any (ids) order by id for share;
+  return array(select bp.id from plants.plant_info bp
                 where bp.id = any (ids)
                   and bp.version = (p_versions->>(bp.id::text))::bigint
                   and bp.id in (select billing.plants_read_now(ids, p_at))
@@ -1802,11 +1911,11 @@ AS $function$
                 and not private.plant_live(q.user_id, q.plant_id) then 'plant not live'
            when q.kind = 'welcome' and exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id)
              then 'plant linked'
-           when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
+           when q.kind = 'need_a_hand' and exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                 and not private.pick_waiting(q.user_id)
              then 'login added'
            when q.kind = 'add_plant_reminder'
-                and (exists (select 1 from plants.logins a where a.user_id = q.user_id)
+                and (exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                      or exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id))
              then 'login or plant added'
            when coalesce(q.to_email, (select u.email::text from auth.users u where u.id = q.user_id), p_o.to_email) is null
@@ -1866,7 +1975,7 @@ begin
   if not pg_try_advisory_xact_lock(hashtext('private.alerts_minute')) then return jsonb_build_object('busy', true); end if;
   m := greatest(coalesce(last_done, upto - 60), upto - 600) + 60;
   while m <= upto loop
-    perform public.email_poll_step(m, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1), '[]'::jsonb);
+    perform public.email_poll_step(m, '[]'::jsonb, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1));
     insert into public.app_config (key, value, note) values ('ALERTS_DONE_TS', m, 'the last minute the alert step ran for (private.alerts_minute)')
     on conflict (key) do update set value = excluded.value;
     n := n + 1;
@@ -1979,6 +2088,145 @@ begin
   return null;
 end $function$;
 
+CREATE OR REPLACE FUNCTION private.email_plant_apply(p_plant bigint, p_ts bigint, f jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  s private.plant_alert_state;
+  present boolean := (f->>'present')::boolean;
+  dev bigint := (f->>'dev')::bigint;
+  temp numeric := (f->>'temp')::numeric;
+  spread numeric := (f->>'spread')::numeric;
+  k text;
+  off jsonb;                                                                     -- 0164
+begin
+  insert into private.plant_alert_state (plant_id) values (p_plant) on conflict do nothing;
+  select * into s from private.plant_alert_state where plant_id = p_plant for update;
+  if s.stepped_ts is not null and p_ts <= s.stepped_ts then return; end if;
+
+  -- Grid. Unknown minutes (no voltage reported) are skipped. Back needs 5 known minutes
+  -- with grid once a Grid off went out (0151); a dip inside them is the same outage.
+  if present is not null then
+    if present is distinct from s.grid_run_on then
+      s.grid_run_on := present; s.grid_run_n := 1; s.grid_run_start := p_ts;
+    else
+      s.grid_run_n := s.grid_run_n + 1;
+    end if;
+    if s.grid_on is distinct from s.grid_run_on
+       and s.grid_run_n >= (case when not s.grid_run_on then 3 when s.grid_off_key is not null then 5 else 2 end) then
+      if s.grid_on is null then
+        null;                                       -- first state seen: taken silently
+      elsif not s.grid_run_on then
+        k := 'grid_down:' || p_plant || ':' || s.grid_run_start;
+        off := private.grid_off_start(p_plant, s.grid_run_start);                    -- 0164
+        perform private.email_enqueue_plant(p_plant, 'grid_down', k, off || jsonb_build_object(   -- 0164
+          'chargePct', (select round(a.soc)::int from public.agg_minute a
+                         where a.plant_id = p_plant and a.ts between p_ts - 600 and p_ts and a.soc is not null
+                         order by a.ts desc limit 1)));
+        s.grid_off_key := k;
+        s.grid_run_start := (off->>'since')::bigint;                                 -- 0164: grid back counts from here
+      elsif s.grid_off_key is not null then
+        perform private.email_enqueue_plant(p_plant, 'grid_back', 'grid_back:' || p_plant || ':' || s.grid_since,
+          jsonb_build_object('since', s.grid_since, 'at', s.grid_run_start), s.grid_off_key);
+        s.grid_off_key := null;
+      end if;
+      s.grid_on := s.grid_run_on; s.grid_since := s.grid_run_start;
+    end if;
+  end if;
+
+  -- Readings: SunSynk's own clock, the newest device_time on the plant this minute.
+  -- While stale, back once readings have come for 15 min with no gap over 10 min (0151).
+  if dev is not null and dev > coalesce(s.last_dev, 0) then
+    if s.stale then
+      if s.stale_clear_at is null or dev - s.last_dev > 600 then s.stale_clear_at := dev; end if;
+      if extract(epoch from now()) - dev <= 900 and dev - s.stale_clear_at >= 900 then
+        if s.stale_key is not null then
+          perform private.email_enqueue_plant(p_plant, 'logger_back', 'logger_back:' || substr(s.stale_key, 14),
+            jsonb_build_object('since', split_part(s.stale_key, ':', 3)::bigint, 'at', s.stale_clear_at), s.stale_key);
+        end if;
+        s.stale := false; s.stale_key := null; s.stale_clear_at := null;
+      end if;
+    end if;
+    s.last_dev := dev;
+  end if;
+
+  -- Battery temperature: the hottest inverter this minute, over 45 C (unrounded, as the
+  -- app judges it) for 3 minutes in a row. A minute with no temperature, or a gap of
+  -- more than 2 minutes, starts the count again. Ends after 15 min at 43 C or below.
+  if (f->>'has_batt')::boolean and temp is not null then
+    s.hot_run_n := case when temp <= 45 then 0
+                        when p_ts - coalesce(s.hot_at, 0) <= 120 then s.hot_run_n + 1 else 1 end;
+    s.hot_temp := round(temp); s.hot_at := p_ts;
+    if not s.hot and s.hot_run_n >= 3 then
+      s.hot := true; s.hot_since := p_ts - 120; s.hot_n := 1; s.hot_sent_at := now(); s.hot_clear_at := null;
+      perform private.email_enqueue_plant(p_plant, 'batt_hot', 'batt_hot:' || p_plant || ':' || s.hot_since || ':1',
+        jsonb_build_object('at', p_ts, 'tempC', round(temp)));
+    elsif s.hot and temp <= 43 then
+      s.hot_clear_at := coalesce(s.hot_clear_at, p_ts);
+      if p_ts - s.hot_clear_at >= 900 then
+        perform private.email_enqueue_plant(p_plant, 'batt_hot_back', 'batt_hot_back:' || p_plant || ':' || s.hot_since,
+          jsonb_build_object('since', s.hot_since, 'at', s.hot_clear_at, 'tempC', round(temp)),
+          'batt_hot:' || p_plant || ':' || s.hot_since || ':1');
+        s.hot := false; s.hot_clear_at := null;
+      end if;
+    elsif s.hot then
+      s.hot_clear_at := null;
+    end if;
+  end if;
+
+  -- Charge spread between inverters' own batteries. Ends after 15 min under 8 points.
+  if (f->>'has_batt')::boolean and not (f->>'shared')::boolean then
+    if spread is not null then
+      if spread >= 10 then
+        s.drift_run_start := coalesce(s.drift_run_start, p_ts);
+        s.drift_clear_at := null;
+        s.drift_banks := (select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn),
+                                                              'chargePct', round(r.batt_soc)::int) order by m.ord nulls last, r.sn)
+                            from public.readings r left join plants.meta_info m on m.sn = r.sn
+                           where r.plant_id = p_plant and r.ts = p_ts and r.batt_soc between 1 and 100);
+        if not s.drift and p_ts - s.drift_run_start >= 3600 then
+          s.drift := true; s.drift_since := s.drift_run_start; s.drift_n := 1; s.drift_sent_at := now();
+          perform private.email_enqueue_plant(p_plant, 'bank_drift', 'bank_drift:' || p_plant || ':' || s.drift_since || ':1',
+            jsonb_build_object('since', s.drift_since, 'banks', s.drift_banks));
+        end if;
+      else
+        s.drift_run_start := null;
+        if s.drift and spread < 8 then
+          s.drift_clear_at := coalesce(s.drift_clear_at, p_ts);
+          if p_ts - s.drift_clear_at >= 900 then
+            perform private.email_enqueue_plant(p_plant, 'bank_drift_back', 'bank_drift_back:' || p_plant || ':' || s.drift_since,
+              jsonb_build_object('since', s.drift_since, 'at', s.drift_clear_at,
+                'banks', (select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn),
+                                                              'chargePct', round(r.batt_soc)::int) order by m.ord nulls last, r.sn)
+                            from public.readings r left join plants.meta_info m on m.sn = r.sn
+                           where r.plant_id = p_plant and r.ts = p_ts and r.batt_soc between 1 and 100)),
+              'bank_drift:' || p_plant || ':' || s.drift_since || ':1');
+            s.drift := false; s.drift_clear_at := null;
+          end if;
+        elsif s.drift then
+          s.drift_clear_at := null;
+        end if;
+      end if;
+    end if;
+  elsif s.drift or s.drift_run_start is not null then
+    s.drift := false; s.drift_run_start := null; s.drift_clear_at := null;
+  end if;
+
+  s.stepped_ts := p_ts;
+  update private.plant_alert_state set
+    grid_on = s.grid_on, grid_since = s.grid_since, grid_off_key = s.grid_off_key,
+    grid_run_on = s.grid_run_on, grid_run_n = s.grid_run_n, grid_run_start = s.grid_run_start,
+    last_dev = s.last_dev, stale = s.stale, stale_key = s.stale_key, stale_clear_at = s.stale_clear_at,
+    hot = s.hot, hot_since = s.hot_since, hot_temp = s.hot_temp, hot_at = s.hot_at, hot_sent_at = s.hot_sent_at, hot_n = s.hot_n,
+    hot_run_n = s.hot_run_n, hot_clear_at = s.hot_clear_at,
+    drift = s.drift, drift_run_start = s.drift_run_start, drift_since = s.drift_since, drift_banks = s.drift_banks,
+    drift_sent_at = s.drift_sent_at, drift_n = s.drift_n, drift_clear_at = s.drift_clear_at, stepped_ts = s.stepped_ts
+  where plant_id = p_plant;
+end $function$;
+
 CREATE OR REPLACE FUNCTION private.first_load_continue()
  RETURNS void
  LANGUAGE plpgsql
@@ -2000,7 +2248,7 @@ begin
     )
     select plant_id from taken
     union
-    select pc.plant_id from public.plant_config pc
+    select pc.plant_id from plants.settings pc
      where pc.backfill_next is not null
         or (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(pc.plant_id)) - 1)
   loop
@@ -2024,6 +2272,44 @@ begin
       on conflict (plant_id) do update set request_id = excluded.request_id, at = now();
   end loop;
 end $function$;
+
+CREATE OR REPLACE FUNCTION private.grid_minutes(p_plant bigint, p_from bigint, p_to bigint)
+ RETURNS TABLE(ts bigint, present boolean)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  with voters as (
+    select r.ts, r.grid_volt_v, r.device_time
+      from public.readings r
+     where r.plant_id = p_plant
+       and r.ts >= p_from and r.ts < p_to
+       and r.grid_volt_v is not null
+       and (r.grid_volt_v <> 0 or r.device_time is not null)
+  ),
+  newest as (
+    select v.ts, max(v.device_time) as dt from voters v group by v.ts
+  ),
+  ours as (
+    select v.ts, bool_or(public.grid_live(v.grid_volt_v)) as present
+      from voters v join newest n on n.ts = v.ts
+     where v.device_time is not distinct from n.dt
+     group by v.ts
+  ),
+  -- 0167: the brand's history for the minutes we have no reading for
+  hist as (
+    select (h.ts / 60) * 60 as ts, bool_or(h.grid_fac_hz >= 40) as present
+      from public.inverter_history h
+     where h.plant_id = p_plant
+       and h.ts >= p_from and h.ts < p_to
+       and h.grid_fac_hz is not null
+       and coalesce((select c.has_grid from plants.settings c where c.plant_id = p_plant), true)
+     group by 1
+  )
+  select o.ts, o.present from ours o
+  union all
+  select h.ts, h.present from hist h where not exists (select 1 from ours o where o.ts = h.ts)
+$function$;
 
 CREATE OR REPLACE FUNCTION private.grid_off_update_all()
  RETURNS jsonb
@@ -2120,8 +2406,8 @@ begin
   -- After a wipe that is running now, never under it.
   perform pg_advisory_xact_lock(p_plant);
   delete from private.plant_wipe where plant_id = p_plant;
-  if not exists (select 1 from public.plant_config where plant_id = p_plant) then
-    -- Linked stopped, so never seeded (sunsynk.ts syncPlants). South Africa only;
+  if not exists (select 1 from plants.settings where plant_id = p_plant) then
+    -- Linked stopped, so never seeded (plants.ts syncPlants). South Africa only;
     -- the seed sets the 60-day bookmarks.
     perform public.plant_config_seed(jsonb_build_array(jsonb_build_object('plant_id', p_plant)));
   else
@@ -2151,7 +2437,7 @@ CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
 AS $function$
   with n as (
     select greatest(1, ceil(count(*)::numeric / greatest(p_per_shard, 1)))::int as shards
-      from plants.logins
+      from plants.login_info
      where status = 'ok'
   )
   -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every
@@ -2184,10 +2470,7 @@ begin
   end if;
 
   out := private.plant_readings_delete(p_plant);
-  delete from public.plant_config          where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_config', n);
-  delete from public.config_changes        where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('config_changes', n);
-  delete from private.meta                 where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('meta', n);
-  delete from private.inverters            where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverters', n);
+  out := out || plants.purge(p_plant);   -- this part's rows: settings, their log, inverters, meta (R1, R2)
   delete from private.plant_alert_state    where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_alert_state', n);
   delete from private.inverter_alert_state where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverter_alert_state', n);
   delete from private.string_alert_state   where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('string_alert_state', n);
@@ -2214,8 +2497,8 @@ begin
     update plants.logins set refresh_secret_id = null where id = p_account;
     delete from vault.secrets where id = old_id;
   end if;
-  new_id := vault.create_secret(p_refresh, 'sunsynk_refresh_' || p_account::text,
-                                'SunSynk refresh token for account ' || p_account::text);
+  new_id := vault.create_secret(p_refresh, 'brand_refresh_' || p_account::text,
+                                'brand refresh token for login ' || p_account::text);
   update plants.logins set refresh_secret_id = new_id where id = p_account;
 end $function$;
 
@@ -2238,6 +2521,170 @@ AS $function$
                        else extract(day from l.t) = 1 and extract(month from l.t) = 1 end
      -- the days from linked_on to the day before the report: at least min_days
      and l.linked_on <= l.t::date - p.min_days
+$function$;
+
+CREATE OR REPLACE FUNCTION private.rollup_partition(p_parent text, p_child text, p_from bigint DEFAULT NULL::bigint, p_to bigint DEFAULT NULL::bigint, p_plant bigint DEFAULT NULL::bigint)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+declare n bigint; f text := '';
+begin
+  if (p_from is null) <> (p_to is null) then
+    raise exception 'rollup_partition: give both p_from and p_to, or neither';
+  end if;
+  if p_from is not null then
+    -- a slice never cuts a 5-minute bucket: on conflict do nothing would keep half of it
+    if p_from % 300 <> 0 or p_to % 300 <> 0 then
+      raise exception 'rollup_partition: % to % is not on 5-minute bounds', p_from, p_to;
+    end if;
+    f := format(' and ts >= %s and ts < %s', p_from, p_to);
+  end if;
+  if p_plant is not null then
+    f := f || format(' and plant_id = %s', p_plant);
+  end if;
+  if p_parent = 'readings' then
+    execute format($q$
+      insert into public.readings_5m (plant_id, sn, ts, n, n_fresh, n_carried, status_last, status_kinds, relay_last, relay_open_min, grid_off_min, pv_w_avg, pv_w_min, pv_w_max, batt_w_avg, batt_w_min, batt_w_max, batt_power_w_avg, batt_power_w_min, batt_power_w_max, grid_w_avg, grid_w_min, grid_w_max, load_w_avg, load_w_min, load_w_max, output_w_avg, output_w_min, output_w_max, batt2_power_w_avg, batt2_power_w_min, batt2_power_w_max, batt_current_a_avg, batt_current_a_min, batt_current_a_max, batt2_current_a_avg, batt2_current_a_min, batt2_current_a_max, batt_voltage_v_avg, batt_voltage_v_min, batt_voltage_v_max, batt2_voltage_v_avg, batt2_voltage_v_min, batt2_voltage_v_max, grid_volt_v_avg, grid_volt_v_min, grid_volt_v_max, grid_volt_l2_v_avg, grid_volt_l2_v_min, grid_volt_l2_v_max, grid_volt_l3_v_avg, grid_volt_l3_v_min, grid_volt_l3_v_max, output_volt_v_avg, output_volt_v_min, output_volt_v_max, output_volt_l2_v_avg, output_volt_l2_v_min, output_volt_l2_v_max, output_volt_l3_v_avg, output_volt_l3_v_min, output_volt_l3_v_max, batt_soc_avg, batt_soc_min, batt_soc_max, batt2_soc_avg, batt2_soc_min, batt2_soc_max, batt_temp_c_avg, batt_temp_c_min, batt_temp_c_max, batt2_temp_c_avg, batt2_temp_c_min, batt2_temp_c_max, grid_freq_hz_min, grid_freq_hz_max, load_freq_hz_min, load_freq_hz_max, output_freq_hz_min, output_freq_hz_max, grid_pf_avg, grid_in_w_avg, grid_out_w_avg, batt_pos_w_avg, batt_neg_w_avg, pv_today_kwh, pv_total_kwh, batt_chg_today_kwh, batt_dischg_today_kwh, batt_chg_total_kwh, batt_dischg_total_kwh, grid_import_today_kwh, grid_export_today_kwh, grid_import_total_kwh, grid_export_total_kwh, load_today_kwh, load_total_kwh)
+      select plant_id, sn, (ts / 300) * 300,
+           count(*),
+           count(*) filter (where device_time is not null and not coalesce(carried, false)),
+           count(*) filter (where carried),
+           (array_agg(status order by ts desc))[1],
+           count(distinct status),
+           (array_agg(grid_relay_status order by ts desc))[1],
+           count(*) filter (where grid_relay_status = '0'),
+           count(*) filter (where device_time is not null and grid_volt_v is not null and not public.grid_live(grid_volt_v)),
+           avg(pv_w),
+           min(pv_w),
+           max(pv_w),
+           avg(batt_w),
+           min(batt_w),
+           max(batt_w),
+           avg(batt_power_w),
+           min(batt_power_w),
+           max(batt_power_w),
+           avg(grid_w),
+           min(grid_w),
+           max(grid_w),
+           avg(load_w),
+           min(load_w),
+           max(load_w),
+           avg(output_w),
+           min(output_w),
+           max(output_w),
+           avg(batt2_power_w),
+           min(batt2_power_w),
+           max(batt2_power_w),
+           avg(batt_current_a),
+           min(batt_current_a),
+           max(batt_current_a),
+           avg(batt2_current_a),
+           min(batt2_current_a),
+           max(batt2_current_a),
+           avg(batt_voltage_v),
+           min(batt_voltage_v),
+           max(batt_voltage_v),
+           avg(batt2_voltage_v),
+           min(batt2_voltage_v),
+           max(batt2_voltage_v),
+           avg(grid_volt_v),
+           min(grid_volt_v),
+           max(grid_volt_v),
+           avg(grid_volt_l2_v),
+           min(grid_volt_l2_v),
+           max(grid_volt_l2_v),
+           avg(grid_volt_l3_v),
+           min(grid_volt_l3_v),
+           max(grid_volt_l3_v),
+           avg(output_volt_v),
+           min(output_volt_v),
+           max(output_volt_v),
+           avg(output_volt_l2_v),
+           min(output_volt_l2_v),
+           max(output_volt_l2_v),
+           avg(output_volt_l3_v),
+           min(output_volt_l3_v),
+           max(output_volt_l3_v),
+           avg(nullif(batt_soc, 0)),
+           min(nullif(batt_soc, 0)),
+           max(nullif(batt_soc, 0)),
+           avg(nullif(batt2_soc, 0)),
+           min(nullif(batt2_soc, 0)),
+           max(nullif(batt2_soc, 0)),
+           avg(case when batt_temp_c < -50 then null else batt_temp_c end),
+           min(case when batt_temp_c < -50 then null else batt_temp_c end),
+           max(case when batt_temp_c < -50 then null else batt_temp_c end),
+           avg(case when batt2_temp_c < -50 then null else batt2_temp_c end),
+           min(case when batt2_temp_c < -50 then null else batt2_temp_c end),
+           max(case when batt2_temp_c < -50 then null else batt2_temp_c end),
+           min(grid_freq_hz),
+           max(grid_freq_hz),
+           min(load_freq_hz),
+           max(load_freq_hz),
+           min(output_freq_hz),
+           max(output_freq_hz),
+           avg(grid_pf),
+           avg(greatest(grid_w, 0)),
+           avg(greatest(-grid_w, 0)),
+           avg(greatest(batt_w, 0)),
+           avg(greatest(-batt_w, 0)),
+           (array_agg(pv_today_kwh order by ts desc) filter (where pv_today_kwh is not null))[1],
+           (array_agg(pv_total_kwh order by ts desc) filter (where pv_total_kwh <> 0))[1],
+           (array_agg(batt_chg_today_kwh order by ts desc) filter (where batt_chg_today_kwh is not null))[1],
+           (array_agg(batt_dischg_today_kwh order by ts desc) filter (where batt_dischg_today_kwh is not null))[1],
+           (array_agg(batt_chg_total_kwh order by ts desc) filter (where batt_chg_total_kwh <> 0))[1],
+           (array_agg(batt_dischg_total_kwh order by ts desc) filter (where batt_dischg_total_kwh <> 0))[1],
+           (array_agg(grid_import_today_kwh order by ts desc) filter (where grid_import_today_kwh is not null))[1],
+           (array_agg(grid_export_today_kwh order by ts desc) filter (where grid_export_today_kwh is not null))[1],
+           (array_agg(grid_import_total_kwh order by ts desc) filter (where grid_import_total_kwh <> 0))[1],
+           (array_agg(grid_export_total_kwh order by ts desc) filter (where grid_export_total_kwh <> 0))[1],
+           (array_agg(load_today_kwh order by ts desc) filter (where load_today_kwh is not null))[1],
+           (array_agg(load_total_kwh order by ts desc) filter (where load_total_kwh <> 0))[1]
+        from public.%I
+       where plant_id is not null%s
+       group by plant_id, sn, (ts / 300) * 300
+      on conflict do nothing$q$, p_child, f);
+  elsif p_parent = 'strings' then
+    execute format($q$
+      insert into public.strings_5m (plant_id, sn, no, ts, n, volt_v_avg, volt_v_min, volt_v_max, current_a_avg, current_a_min, current_a_max, power_w_avg, power_w_min, power_w_max, today_kwh)
+      select plant_id, sn, no, (ts / 300) * 300,
+           count(*),
+           avg(volt_v),
+           min(volt_v),
+           max(volt_v),
+           avg(current_a),
+           min(current_a),
+           max(current_a),
+           avg(power_w),
+           min(power_w),
+           max(power_w),
+           (array_agg(today_kwh order by ts desc) filter (where today_kwh <> 0))[1]
+        from public.%I
+       where plant_id is not null%s
+       group by plant_id, sn, no, (ts / 300) * 300
+      on conflict do nothing$q$, p_child, f);
+  else
+    raise exception 'rollup_partition: unknown parent %', p_parent;
+  end if;
+  get diagnostics n = row_count;
+  return n;
+end $function$;
+
+CREATE OR REPLACE FUNCTION private.setup_steps_open(p_plant bigint)
+ RETURNS text[]
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  select array_remove(array[
+           case when not coalesce(c.tariff_import > 0, false) then 'rate' end,
+           case when c.has_battery is distinct from false and not coalesce(c.battery_kwh > 0, false) then 'size' end,
+           case when c.has_battery is distinct from false and not coalesce(c.battery_reserve_confirmed, false)
+                 and coalesce(c.battery_reserve_pct, 20) = 20 then 'reserve' end,
+           case when not coalesce(c.system_kwp > 0, false) then 'panels' end], null)
+    from (select 1) one
+    left join plants.settings c on c.plant_id = p_plant
 $function$;
 
 CREATE OR REPLACE FUNCTION private.username_logins(p_user uuid, p_username text)
@@ -2338,10 +2785,10 @@ CREATE OR REPLACE FUNCTION public.account_upsert(p_user uuid, p_username text, p
 AS $function$
 begin
   -- the link without a refresh token yet (the bootstrap login): link_login_live's path
-  if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
+  if not plants.link_allowed(p_user, plants.brand_for_username(p_username), p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;
-  return plants.link_login(billing.account_of(p_user), plants.default_brand(), p_username, '[]'::jsonb, now(), 'owner',
+  return plants.link_login(billing.account_of(p_user), plants.brand_for_username(p_username), p_username, '[]'::jsonb, now(), 'owner',
                            null, p_access, p_expires);
 end
 $function$;
@@ -2374,7 +2821,7 @@ begin
                'name', pu.plant_name,
                'email', u.email,
                'linkedAt', pu.linked_at,
-               'inverters', (select count(*) from private.meta m where m.plant_id = pu.plant_id),
+               'inverters', (select count(*) from plants.meta_info m where m.plant_id = pu.plant_id),
                'lastTs', (select a.ts from public.agg_minute a
                            where a.plant_id = pu.plant_id order by a.ts desc limit 1)
              ) order by u.email, pu.plant_id), '[]'::jsonb)
@@ -2383,13 +2830,13 @@ begin
     'logins', (
       select coalesce(jsonb_agg(jsonb_build_object(
                'email', u.email,
-               'sunsynkUser', s.username,
+               'sunsynkUser', s.username,   -- reuse-check: allow (the admin page reads this key)
                'status', s.status,
                'linkedAt', s.linked_at,
                'lastOkAt', s.last_ok_at,
                'lastError', left(s.last_error, 300)
              ) order by u.email, s.linked_at), '[]'::jsonb)
-        from plants.logins s
+        from plants.login_info s
         join auth.users u on u.id = s.user_id),
     'errors', (
       select coalesce(jsonb_agg(jsonb_build_object(
@@ -2423,20 +2870,15 @@ begin
   -- the other way round deadlocks (scripts/billing-lock-test.mjs)
   perform pg_advisory_xact_lock_shared(3, 0);
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
-  for acc in select x.id from (select id from plants.logins where user_id = uid
+  for acc in select x.id from (select id from plants.login_info where user_id = uid
                                union select account_id from plants.user_plants where user_id = uid and account_id is not null) x
               order by x.id loop
     perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
   end loop;
-  perform 1 from plants.login_plants lp join plants.logins l on l.id = lp.login
+  perform 1 from plants.list_info lp join plants.login_info l on l.id = lp.login
    where l.user_id = uid order by lp.login, lp.plant for update of lp;
   -- the logins' secrets first: billing.delete_account's cascade takes the login rows with it
-  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
-    if acc.refresh_secret_id is not null
-       and not exists (select 1 from plants.logins o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
-      delete from vault.secrets s where s.id = acc.refresh_secret_id;
-    end if;
-  end loop;
+  perform plants.user_secrets_clear(uid);
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;
@@ -2510,6 +2952,64 @@ AS $function$
       '[]'::jsonb));
 $function$;
 
+CREATE OR REPLACE FUNCTION public.api_balance(p_plant bigint DEFAULT NULL::bigint)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  with pl as (select public.my_plant(p_plant) as id),
+  pz as (select public.plant_tz((select id from pl)) as tz),
+  now_s as (select extract(epoch from now())::bigint as t),
+  -- newest first, take one: max(ts) read every month of readings, because the plant id
+  -- comes from pl and the planner can't use the index to stop early (SOLAR-35)
+  latest_ts as (select (select ts from public.readings where plant_id = (select id from pl) and batt_soc is not null order by ts desc limit 1) as ts),
+  -- one shared pack counts as one bank however many inverters read it (0042)
+  nbanks as (select case when (select battery_banks from plants.settings where plant_id = (select id from pl)) = 'shared' then least(1, count(distinct r.sn)) else count(distinct r.sn) end as n
+               from public.readings r, latest_ts where r.plant_id = (select id from pl) and r.ts = latest_ts.ts and r.batt_soc between 1 and 100),
+  bal as (
+    select r.ts, max(r.batt_soc) - min(r.batt_soc) as socspread, max(r.batt_voltage_v) - min(r.batt_voltage_v) as vspread
+      from public.readings r, now_s
+     where r.plant_id = (select id from pl) and r.ts >= now_s.t - 72 * 3600
+       and r.batt_soc is not null and r.batt_soc between 1 and 100
+     group by r.ts
+    having count(distinct r.sn) >= 2 and (max(r.batt_soc) - min(r.batt_soc)) <= 25
+  ),
+  last_r as (select * from bal order by ts desc limit 1),
+  win as (select count(*) >= 2 and (max(ts) - min(ts)) >= 9 * 60 as have_window, min(socspread) as min_spread from bal, now_s where bal.ts >= now_s.t - 600),
+  spreads as (select (select round(socspread * 10) / 10 from last_r) as soc_spread, (select round(vspread * 100) / 100 from last_r) as v_spread),
+  st as (
+    select case when (select n from nbanks) < 2 then 'single'
+                when s.soc_spread is null then 'unknown'
+                when not coalesce(w.have_window, false) then 'balanced'
+                when w.min_spread >= 5 then 'drifting' when w.min_spread >= 3 then 'watch' else 'balanced' end as status,
+           case when (select n from nbanks) < 2 then 'single'
+                when s.soc_spread is null then 'unknown'
+                when s.soc_spread < 3 then 'balanced' when s.soc_spread < 5 then 'watch' else 'drifting' end as live_band,
+           s.soc_spread, s.v_spread
+      from spreads s, win w
+  ),
+  today_lo as (select public.day_start_epoch_tz(public.today_tz((select tz from pz)), (select tz from pz)) as lo),
+  health as (
+    select (select batt_temp_c from public.readings where plant_id = (select id from pl) and batt_temp_c > 0 and batt_temp_c < 80 order by ts desc limit 1) as temp_c,
+           (select coalesce(round(sum(case when soc >= 98 then 1 else 0 end) / 60.0, 1), 0)
+              from public.agg_minute, today_lo where plant_id = (select id from pl) and ts >= today_lo.lo and ts < today_lo.lo + 86400) as hrs_full
+  )
+  select jsonb_build_object(
+    'banks', coalesce((select jsonb_agg(jsonb_build_object('sn', r.sn, 'soc', r.batt_soc, 'voltage', r.batt_voltage_v, 'current', r.batt_current_a) order by r.sn)
+              from public.readings r, latest_ts where r.plant_id = (select id from pl) and r.ts = latest_ts.ts), '[]'::jsonb),
+    'bankCount', (select n from nbanks),
+    'socSpread', st.soc_spread, 'vSpread', st.v_spread, 'status', st.status,
+    'pending', st.live_band not in ('unknown', 'balanced', 'single') and st.status = 'balanced',
+    'max24h', (select round(max(socspread) * 10) / 10 from bal, now_s where bal.ts >= now_s.t - 24 * 3600),
+    'max72h', (select round(max(socspread) * 10) / 10 from bal),
+    'samples', (select count(*) from bal),
+    'tempC', h.temp_c, 'hrsAtFullToday', h.hrs_full,
+    'tempHot', h.temp_c is not null and h.temp_c > 35,
+    'stale', (select ts from latest_ts) is null or ((select t from now_s) - (select ts from latest_ts)) > 600)
+  from st, health h
+$function$;
+
 CREATE OR REPLACE FUNCTION public.api_grid_today(p_plant bigint DEFAULT NULL::bigint, p_date date DEFAULT NULL::date)
  RETURNS jsonb
  LANGUAGE sql
@@ -2533,7 +3033,7 @@ AS $function$
   ),
   v as (
     select ((r.ts - lo.t0) / 300)::int as b,
-           avg(r.grid_volt_v) filter (where r.grid_volt_v > 100) as volt
+           avg(r.grid_volt_v) filter (where public.grid_live(r.grid_volt_v)) as volt
       from lo join public.readings r on r.plant_id = lo.id and r.ts >= lo.t0 and r.ts < lo.t1
      group by 1
   ),
@@ -2553,6 +3053,58 @@ AS $function$
     'offMinutes', (select count(*) from m where not m.present),
     'asOf', extract(epoch from now())::bigint                                    -- 0167
   )
+$function$;
+
+CREATE OR REPLACE FUNCTION public.api_inverter_history(p_date date DEFAULT NULL::date, p_plant bigint DEFAULT NULL::bigint)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  with pl as (select public.my_plant(p_plant) as id),
+  pz as (select public.plant_tz((select id from pl)) as tz),
+  d as (select coalesce(p_date, public.today_tz((select tz from pz))) as day),
+  lo as (select public.day_start_epoch_tz((select day from d), (select tz from pz)) as t0),
+  raw as (
+    select t.sn, ((t.ts - (select t0 from lo)) / 300)::int as bkt, t.ts, t.ac_c, t.dc_c, t.vac_v, t.fac_hz, t.grid_fac_hz
+      from public.inverter_history t, lo
+     where t.plant_id = (select id from pl) and t.ts >= lo.t0 and t.ts < lo.t0 + 86400
+  ),
+  fromraw as (
+    select sn, bkt, count(*)::int as n, count(dc_c)::int as dcn,
+           max(ac_c) as ac, max(dc_c) as dc, min(dc_c) as dcmin,
+           min(vac_v) as vmin, max(vac_v) as vmax,
+           (array_agg(vac_v order by ts desc) filter (where vac_v is not null))[1] as v,
+           min(fac_hz) as fmin, max(fac_hz) as fmax,
+           min(grid_fac_hz) as gmin, max(grid_fac_hz) as gmax
+      from raw group by sn, bkt
+  ),
+  b as (
+    select * from fromraw
+    union all
+    select f.sn, ((f.ts - (select t0 from lo)) / 300)::int, f.n::int, case when f.dc_max is null then 0 else f.n::int end,
+           f.ac_max, f.dc_max, f.dc_min, f.vac_min, f.vac_max, f.vac_last,
+           f.fac_min, f.fac_max, f.gfac_min, f.gfac_max
+      from public.inverter_history_5m f, lo
+     where f.plant_id = (select id from pl) and f.ts >= lo.t0 and f.ts < lo.t0 + 86400
+       and not exists (select 1 from fromraw r
+                        where r.sn = f.sn and r.bkt = ((f.ts - lo.t0) / 300)::int)
+  ),
+  sns as (
+    select r.sn, coalesce(nullif(m.alias, ''), r.sn) as alias
+      from (select distinct sn from b) r left join plants.meta_info m on m.sn = r.sn
+  )
+  select jsonb_build_object(
+    'date', (select day from d)::text,
+    'inverters', coalesce((select jsonb_agg(jsonb_build_object(
+        'sn', s.sn, 'alias', s.alias,
+        'dcFlat', (select sum(x.dcn) > 1 and min(x.dcmin) = max(x.dc) from b x where x.sn = s.sn),
+        'last', (select public._hm(max(bkt)) from b x where x.sn = s.sn),
+        'points', (select jsonb_agg(jsonb_build_object('time', public._hm(g.i),
+                     'ac', x.ac, 'dc', x.dc, 'vmin', x.vmin, 'vmax', x.vmax, 'v', x.v,
+                     'fmin', x.fmin, 'fmax', x.fmax, 'gmin', x.gmin, 'gmax', x.gmax) order by g.i)
+                     from generate_series(0, 287) g(i) left join b x on x.sn = s.sn and x.bkt = g.i)
+      ) order by s.alias) from sns s), '[]'::jsonb))
 $function$;
 
 CREATE OR REPLACE FUNCTION public.api_link_remove(p_account uuid)
@@ -2588,33 +3140,6 @@ begin
 end
 $function$;
 
-CREATE OR REPLACE FUNCTION public.api_logins()
- RETURNS TABLE(account_id uuid, sunsynk_username text, status text, linked_at timestamp with time zone, last_ok_at timestamp with time zone, plants jsonb, kind text)
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'private', 'pg_temp'
-AS $function$
-  with me as (select auth.uid() u, (select id from billing.accounts where user_id = auth.uid()) acc)
-  select a.id, a.username, a.status,
-         case when a.kind = 'share' then (select min(x.linked_at) from plants.user_plants x where x.account_id = a.id and x.user_id = me.u)
-              else a.linked_at end,
-         a.last_ok_at,
-         coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
-                     'paused', not exists (select 1 from billing.seats se where se.account = me.acc and se.plant = pu.plant_id
-                                              and se.closed_at is null),
-                     'linked_at', pu.linked_at,
-                     'inverters', (select count(*) from private.inverters i where i.plant_id = pu.plant_id),
-                     'share_gone', pu.share_gone_at is not null,
-                     'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id))
-                   order by pu.linked_at, pu.plant_id)
-                     from plants.user_plants pu where pu.account_id = a.id and pu.user_id = me.u), '[]'::jsonb),
-         a.kind
-    from plants.logins a cross join me
-   where a.user_id = me.u
-      or (a.kind = 'share' and exists (select 1 from plants.user_plants x where x.account_id = a.id and x.user_id = me.u))
-   order by 4 desc
-$function$;
-
 CREATE OR REPLACE FUNCTION public.api_me()
  RETURNS jsonb
  LANGUAGE sql
@@ -2630,7 +3155,7 @@ AS $function$
                'config', (to_jsonb(c) - 'plant_id' - 'updated_by') || jsonb_build_object('timezone', plants.tz(pu.plant_id)))
              order by pu.linked_at, pu.plant_id)
         from plants.user_plants pu
-        left join public.plant_config c on c.plant_id = pu.plant_id
+        left join plants.settings c on c.plant_id = pu.plant_id
        where pu.user_id = auth.uid() and pu.plant_id in (select public.my_plant_ids())), '[]'::jsonb))
 $function$;
 
@@ -2696,7 +3221,7 @@ begin
   -- variables, not a join to a CTE, so each probe opens only the window's partitions
   -- (sn_ts index).
   r as (
-    select x.*, x.ts >= v_lo as is_today from private.inverters i
+    select x.*, x.ts >= v_lo as is_today from plants.inverter_info i
       cross join lateral (select rd.* from public.readings rd
                            where rd.sn = i.sn and rd.plant_id = v_plant and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
@@ -2751,7 +3276,7 @@ begin
            case when r.is_today then r.grid_export_today_kwh else 0 end as grid_export_today_kwh,
            r.grid_volt_v, r.grid_volt_l2_v, r.grid_volt_l3_v,
            coalesce(m.ord, 9999) as ord
-      from r left join private.meta m on m.sn = r.sn left join st on st.sn = r.sn
+      from r left join plants.meta_info m on m.sn = r.sn left join st on st.sn = r.sn
   ),
   -- live figures from the inverters in the newest minute only; day counters from every row
   totals as (
@@ -2763,7 +3288,7 @@ begin
                 else avg(batt_soc) filter (where batt_soc > 0 and ts = v_ts) end as soc,
            sum(pv_today_kwh) as today_pv, sum(grid_import_today_kwh) as today_imp, sum(grid_export_today_kwh) as today_exp,
            -- a phase that has dropped while another is live (three-phase only)
-           bool_or(grid_volt_v > 100 and least(coalesce(grid_volt_l2_v, 999), coalesce(grid_volt_l3_v, 999)) < 100) filter (where ts = v_ts) as phase_down
+           bool_or(public.grid_live(grid_volt_v) and not public.grid_live(least(coalesce(grid_volt_l2_v, 999), coalesce(grid_volt_l3_v, 999)))) filter (where ts = v_ts) as phase_down
       from inv
   ),
   -- q_grid_present's rule on the rows already in r (same plant, same ts); calling
@@ -2771,7 +3296,7 @@ begin
   gv as (select grid_volt_v, device_time from r where grid_volt_v is not null and ts = v_ts),
   gp as (
     select case when not exists (select 1 from gv) then null
-                else (select bool_or(v.grid_volt_v > 100) from gv v
+                else (select bool_or(public.grid_live(v.grid_volt_v)) from gv v
                        where v.device_time is not distinct from (select max(device_time) from gv)) end as present
   ),
   -- q_day_agg's day and 5-minute blocks, grid only (0260)
@@ -2807,7 +3332,7 @@ begin
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
                    public.today_tz(plants.tz(v_plant)) as today,
                    plants.tz(v_plant) as tz
-              from public.plant_config pc, cfg c where pc.plant_id = v_plant) s
+              from plants.settings pc, cfg c where pc.plant_id = v_plant) s
   ),
   plant as (select pu.plant_id as id, pu.plant_name as name from plants.user_plants pu
              where pu.plant_id = v_plant and pu.user_id = auth.uid() limit 1)
@@ -2880,7 +3405,7 @@ begin
     v_from := least(v_floor, v_lo);
     select count(*), count(*) filter (where x.ts = v_ts and x.status::text in ('1', 'online', 'true'))
       into v_total, v_on
-      from private.inverters i
+      from plants.inverter_info i
       cross join lateral (select rd.ts, rd.status from public.readings rd
                            where rd.sn = i.sn and rd.plant_id = p.plant_id and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
@@ -2907,13 +3432,170 @@ begin
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
                    public.today_tz(plants.tz(pc.plant_id)) as today,
                    plants.tz(pc.plant_id) as tz
-              from public.plant_config pc where pc.plant_id = p.plant_id) s;
+              from plants.settings pc where pc.plant_id = p.plant_id) s;
 
     v_out := v_out || jsonb_build_array(jsonb_build_object(
       'id', p.plant_id, 'lastTs', v_ts, 'inverters', v_total, 'online', v_on, 'sync', v_sync));
   end loop;
   return v_out;
 end $function$;
+
+CREATE OR REPLACE FUNCTION public.api_trends_compare(p_plant bigint DEFAULT NULL::bigint)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  with pl as (select public.my_plant(p_plant) as id),
+  tz as (select public.plant_tz((select id from pl)) as tz),
+  t as (select public.today_tz((select tz from tz)) as d),
+  b as (
+    select d,
+           date_trunc('week', d)::date  as week_start,
+           date_trunc('month', d)::date as month_start,
+           date_trunc('year', d)::date  as year_start
+      from t
+  ),
+  -- same day number last month, null when last month has no such day
+  lastm as (
+    select g::date as cur,
+           case when extract(day from (date_trunc('month', g) - interval '1 month' + (extract(day from g)::int - 1) * interval '1 day'))::int
+                     = extract(day from g)::int
+                then (date_trunc('month', g) - interval '1 month' + (extract(day from g)::int - 1) * interval '1 day')::date end as prev
+      from b, generate_series(b.month_start, b.d, interval '1 day') g
+  ),
+  -- finished current-slice days with the previous-period day each is paired to
+  pairs as (
+    select 'week' as k, g::date as cur, (g - interval '7 days')::date as prev
+      from b, generate_series(b.week_start, b.d - 1, interval '1 day') g
+    union all
+    select 'month', cur, prev from lastm, b where cur < b.d
+    union all
+    -- same date last year; 29 Feb pairs with nothing
+    select 'year', g::date,
+           case when (g - interval '1 year') + interval '1 year' = g then (g - interval '1 year')::date end
+      from b, generate_series(b.year_start, b.d - 1, interval '1 day') g
+  ),
+  span as (
+    select min(least(cur, coalesce(prev, cur))) as lo,
+           max(greatest(cur, coalesce(prev, cur))) as hi
+      from pairs
+  ),
+  e as (select * from public._plant_day_energy((select id from pl), (select lo from span), (select hi from span))),
+  matched as (
+    select p.k, p.cur, p.prev,
+           c.pv_kwh as c_pv, c.load_kwh as c_load, c.imp_kwh as c_imp,
+           v.pv_kwh as p_pv, v.load_kwh as p_load, v.imp_kwh as p_imp
+      from pairs p
+      join e c on c.period = p.cur
+      join e v on v.period = p.prev
+  ),
+  -- every period gets a row, even on its first day when no finished day pairs yet
+  spans as (
+    select ks.k, count(p.cur) as span
+      from (values ('week'), ('month'), ('year')) ks(k) left join pairs p on p.k = ks.k
+     group by ks.k
+  ),
+  sums as (
+    select s.k,
+           jsonb_build_object(
+             'cur',  jsonb_build_object('pv', coalesce(round(sum(m.c_pv)::numeric, 1), 0), 'load', coalesce(round(sum(m.c_load)::numeric, 1), 0), 'imp', coalesce(round(sum(m.c_imp)::numeric, 1), 0)),
+             'prev', jsonb_build_object('pv', coalesce(round(sum(m.p_pv)::numeric, 1), 0), 'load', coalesce(round(sum(m.p_load)::numeric, 1), 0), 'imp', coalesce(round(sum(m.p_imp)::numeric, 1), 0)),
+             'days', count(m.cur),
+             'span', s.span) as v
+      from spans s left join matched m on m.k = s.k
+     group by s.k, s.span
+  ),
+  -- ---- today so far, and the day it pairs with up to the same time ----
+  tlo as (select public.day_start_epoch_tz(b.d, (select tz from tz)) as lo from b),
+  -- today's latest poll, the one the tiles show; it must be today's
+  latest as (
+    select r.ts from public.readings r, tlo
+     where r.plant_id = (select id from pl) and r.ts >= tlo.lo
+     order by r.ts desc limit 1
+  ),
+  -- today's latest poll as a local clock time; each matching day is read at that clock time
+  el as (select (to_timestamp(latest.ts) at time zone (select tz from tz))::time as t from latest),
+  tpairs as (
+    select 'today' as k, (b.d - 1) as prev from b
+    union all select 'week', (b.d - 7) from b
+    union all select 'month', (select prev from lastm, b where lastm.cur = b.d)
+    union all select 'year', case when (b.d - interval '1 year') + interval '1 year' = b.d then (b.d - interval '1 year')::date end from b
+  ),
+  tc as (
+    select p.k, p.prev, x.lo, extract(epoch from ((p.prev + el.t) at time zone (select tz from tz)))::bigint as cut
+      from tpairs p, el,
+           lateral (select public.day_start_epoch_tz(p.prev, (select tz from tz)) as lo) x
+     where p.prev is not null
+  ),
+  -- each known inverter with a row in the last 2 days (SOLAR-555; was: those in today's
+  -- latest poll, which drops one the poller left out): its last good reading on the matching day at or
+  -- before the moment, from readings, else the 5-minute history (counters as at the
+  -- bucket's end). One index probe per inverter per pair.
+  inv as (
+    select i.sn from plants.inverter_info i
+     where i.plant_id = (select id from pl)
+       and exists (select 1 from public.readings r
+                    where r.sn = i.sn and r.plant_id = i.plant_id
+                      and r.ts > extract(epoch from now())::bigint - 2 * 86400 and r.ts <= (select ts from latest))
+  ),
+  per as (
+    select tc.k, i.sn,
+           coalesce(x.pv, y.pv) as pv, coalesce(x.load, y.load) as load, coalesce(x.imp, y.imp) as imp,
+           (x.ts is not null or y.ts is not null) as found
+      from tc cross join inv i
+      left join lateral (
+        -- an upload dated before the matching day holds that day's eve: 0 so far (SOLAR-648)
+        select r.ts,
+               case when r.device_time ~ '^\d{4}-\d{2}-\d{2} ' and left(r.device_time, 10) < tc.prev::text then 0 else r.pv_today_kwh end as pv,
+               case when r.device_time ~ '^\d{4}-\d{2}-\d{2} ' and left(r.device_time, 10) < tc.prev::text then 0 else r.load_today_kwh end as load,
+               case when r.device_time ~ '^\d{4}-\d{2}-\d{2} ' and left(r.device_time, 10) < tc.prev::text then 0 else r.grid_import_today_kwh end as imp
+          from public.readings r
+         where r.sn = i.sn and r.plant_id = (select id from pl)
+           and r.ts >= tc.lo and r.ts <= tc.cut and r.device_time is not null
+         order by r.ts desc limit 1) x on true
+      left join lateral (
+        select f.ts, f.pv_today_kwh as pv, f.load_today_kwh as load, f.grid_import_today_kwh as imp
+          from public.readings_5m f
+         where x.ts is null
+           and f.plant_id = (select id from pl) and f.sn = i.sn
+           and f.ts >= tc.lo and f.ts <= tc.cut - 300 and f.pv_today_kwh is not null
+         order by f.ts desc limit 1) y on true
+  ),
+  ctr as (
+    select k, sum(pv) as pv, sum(load) as load, sum(imp) as imp
+      from per group by k
+    having bool_and(found)
+  ),
+  -- the matching day from the minute history, 5-minute power summed to kWh: the grid
+  -- figure always, solar and home when no inverter counters cover that day (SOLAR-508)
+  ig as (
+    select tc.k,
+           coalesce(sum(case when a.grid_w > 0 then a.grid_w * (5.0/60) / 1000 else 0 end), 0) as imp,
+           coalesce(sum(greatest(a.pv_w, 0) * (5.0/60) / 1000), 0) as pv,
+           coalesce(sum(greatest(a.load_w, 0) * (5.0/60) / 1000), 0) as load,
+           count(a.hm) as n
+      from tc left join lateral (
+        select q.hm, q.grid_w, q.pv_w, q.load_w from public.q_day_agg((select id from pl), tc.prev, null) q
+         where q.hm <= to_char(public.local_ts_tz(tc.cut, (select tz from tz)), 'HH24:MI')) a on true
+     group by tc.k
+  ),
+  -- counters first; a plant just imported has none for yesterday, only the minute history
+  nowv as (
+    select g.k, jsonb_build_object(
+             'pv',   coalesce(round(coalesce(c.pv, g.pv)::numeric, 1), 0),
+             'load', coalesce(round(coalesce(c.load, g.load)::numeric, 1), 0),
+             'imp',  coalesce(round((case when g.n > 5 then g.imp else c.imp end)::numeric, 1), 0)) as v
+      from ig g left join ctr c on c.k = g.k
+     where c.k is not null or g.n > 5
+  )
+  select coalesce((select jsonb_object_agg(s.k, s.v || jsonb_build_object('now', (select v from nowv where nowv.k = s.k))) from sums s), '{}'::jsonb)
+         || jsonb_build_object('today', jsonb_build_object(
+              'cur',  jsonb_build_object('pv', 0, 'load', 0, 'imp', 0),
+              'prev', coalesce((select v from nowv where k = 'today'), jsonb_build_object('pv', 0, 'load', 0, 'imp', 0)),
+              'days', case when exists (select 1 from nowv where k = 'today') then 1 else 0 end,
+              'span', 1))
+$function$;
 
 CREATE OR REPLACE FUNCTION public.billing_jobs(p_cmd text, p_args jsonb DEFAULT '{}'::jsonb)
  RETURNS jsonb
@@ -2956,7 +3638,7 @@ begin
   acc := billing.account_of((p_args->>'user')::uuid);
   return case p_cmd
     when 'state' then billing.account_state(acc) || jsonb_build_object('live', true,
-                        'login_known', exists (select 1 from plants.logins l where l.account = acc
+                        'login_known', exists (select 1 from plants.login_info l where l.account = acc
                                                   and lower(l.username) = lower(p_args->>'username')))
     when 'claim_plant' then (select billing.account_state(acc) from (select plants.claim(acc,
                                coalesce(p_args->>'brand', plants.default_brand()), p_args->>'plant', p_args->>'name')) x)
@@ -3041,6 +3723,29 @@ begin
   end;
 end $function$;
 
+CREATE OR REPLACE FUNCTION public.email_plant_inverters(p_plant bigint)
+ RETURNS TABLE(sn text, last_dev bigint)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select i.sn, s.last_dev
+    from plants.inverter_info i
+    left join private.inverter_alert_state s on s.plant_id = i.plant_id and s.sn = i.sn
+   where i.plant_id = p_plant
+   order by i.sn
+$function$;
+
+CREATE OR REPLACE FUNCTION public.independence_pct(p_home double precision, p_import double precision)
+ RETURNS double precision
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO ''
+AS $function$
+  select case when coalesce(p_home, 0) > 0
+              then greatest(0, least(100, ((p_home - coalesce(p_import, 0)) / p_home) * 100)) else 0 end
+$function$;
+
 CREATE OR REPLACE FUNCTION public.inverters_cached_many(p_accounts uuid[], p_plants bigint[] DEFAULT NULL::bigint[])
  RETURNS TABLE(account_id uuid, sn text, plant_id bigint, alias text, model text, soft_ver text, hmi_ver text, gsn text, comm_type text, plant_name text, ord integer, status integer, last_reading jsonb, carried_run integer, upload_s integer)
  LANGUAGE plpgsql
@@ -3099,7 +3804,7 @@ CREATE OR REPLACE FUNCTION public.link_login_allowed(p_user uuid, p_username tex
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
-  select plants.link_allowed(p_user, plants.default_brand(), p_username)
+  select plants.link_allowed(p_user, plants.brand_for_username(p_username), p_username)
 $function$;
 
 CREATE OR REPLACE FUNCTION public.link_login_live(p_user uuid, p_username text, p_access text, p_expires bigint, p_refresh text, p_plants jsonb)
@@ -3118,12 +3823,12 @@ begin
   mine := private.username_logins(p_user, p_username);
   perform private.login_lock(mine, 'ok', p_user,
     array(select lp.plant from plants.login_plants lp where lp.login = any (mine)
-          union select (x->>'id')::bigint from jsonb_array_elements(plants.list_ids(plants.default_brand(), p_plants)) x));
-  if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
+          union select (x->>'id')::bigint from jsonb_array_elements(plants.list_ids(plants.brand_for_username(p_username), p_plants)) x));
+  if not plants.link_allowed(p_user, plants.brand_for_username(p_username), p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;
   acc := billing.account_of(p_user);
-  login := plants.link_login(acc, plants.default_brand(), p_username, coalesce(p_plants, '[]'::jsonb), now(), 'owner',
+  login := plants.link_login(acc, plants.brand_for_username(p_username), p_username, coalesce(p_plants, '[]'::jsonb), now(), 'owner',
                              null, p_access, p_expires);
   -- a fresh sign-in replaces whatever the other copies of this username held
   update plants.logins
@@ -3227,7 +3932,7 @@ begin
          q.kind, q.key,
          -- email_claim's per-kind data (0247): need a hand with a login names choosing plants;
          -- a report has no free-week wording since billing went live
-         case when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
+         case when q.kind = 'need_a_hand' and exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                 then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
               when q.kind like 'report\_%' then q.data - 'freeWeekEnds'
               else q.data end,
@@ -3340,7 +4045,7 @@ CREATE OR REPLACE FUNCTION public.my_plant_ids()
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
   select se.plant from billing.seats se join billing.accounts a on a.id = se.account
-    join plants.plants p on p.id = se.plant
+    join plants.plant_info p on p.id = se.plant
    where a.user_id = auth.uid() and se.closed_at is null and (select f.history_purged_at from billing.plant_facts f where f.plant = p.id) is null
      and not private.history_deleting(se.plant)                                -- 0277
      -- a share removed or a plant gone from the login: hidden; its history stays and shows again
@@ -3451,6 +4156,45 @@ AS $function$
   on conflict (plant_id) do nothing
 $function$;
 
+CREATE OR REPLACE FUNCTION public.plant_features_detect(p_plant bigint)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  cur record;
+  hb boolean;
+  hg boolean;
+  n  bigint;
+  v_floor bigint := extract(epoch from now())::bigint - 86400;
+begin
+  select has_battery, has_grid, features_source, features_checked_at into cur from public.plant_config where plant_id = p_plant;
+  if cur.features_source = 'user' then
+    return jsonb_build_object('plant', p_plant, 'skipped', 'user override');
+  end if;
+  -- battery and grid rarely change: once decided, a day between checks
+  if cur.features_source = 'detected' and cur.features_checked_at > now() - interval '1 day' then
+    return jsonb_build_object('plant', p_plant, 'skipped', 'checked today');
+  end if;
+  select count(*),
+         bool_or((batt_soc between 1 and 100) or coalesce(batt_voltage_v, 0) > 10),
+         bool_or(coalesce(public.grid_live(grid_volt_v), false) or coalesce(grid_import_today_kwh, 0) > 0
+                 or coalesce(grid_export_today_kwh, 0) > 0 or abs(coalesce(grid_w, 0)) > 50)
+    into n, hb, hg
+    from public.readings
+   where plant_id = p_plant and ts > v_floor and not carried;
+  if n < 30 then
+    return jsonb_build_object('plant', p_plant, 'decided', false, 'rows', n);
+  end if;
+  update public.plant_config
+     set has_battery = hb, has_grid = hg, features_source = 'detected', features_updated_at = now()
+   where plant_id = p_plant
+     and (has_battery is distinct from hb or has_grid is distinct from hg or features_source = 'default');
+  update public.plant_config set features_checked_at = now() where plant_id = p_plant;
+  return jsonb_build_object('plant', p_plant, 'decided', true, 'hasBattery', hb, 'hasGrid', hg, 'rows', n);
+end $function$;
+
 CREATE OR REPLACE FUNCTION public.plant_link(p_user uuid, p_plant bigint)
  RETURNS jsonb
  LANGUAGE sql
@@ -3505,7 +4249,7 @@ CREATE OR REPLACE FUNCTION public.plants_seen_before(p_user uuid, p_plants bigin
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
   select count(*)::int
-    from plants.plants p
+    from plants.plant_info p
    where p.id = any (coalesce(p_plants, '{}'))
      and (select f.trial_used_at from billing.plant_facts f where f.plant = p.id) < (select u.created_at from auth.users u where u.id = p_user)
      and not exists (select 1 from billing.seats se join billing.accounts a on a.id = se.account
@@ -3556,7 +4300,7 @@ begin
    where m.sn = c.sn and m.string_slots is distinct from c.n;
   delete from _st t
    where not private.string_live(t.volt_v, t.current_a, t.power_w, t.today_kwh)
-     and not exists (select 1 from private.meta m where m.sn = t.sn and t.no = any(m.used_strings));
+     and not exists (select 1 from plants.meta_info m where m.sn = t.sn and t.no = any(m.used_strings));
   delete from public.strings s using _st where s.ts = p_ts and s.ts = _st.ts and s.sn = _st.sn and s.no = _st.no;
   insert into public.strings select * from _st on conflict do nothing;
   select count(*) into n_strings from _st;
@@ -3647,7 +4391,7 @@ begin
   foreach x in array accts loop
     perform pg_advisory_xact_lock(1, hashtext(x::text));
   end loop;
-  perform 1 from plants.logins sa where sa.id = any (accts) order by sa.id for update;
+  perform 1 from plants.login_info sa where sa.id = any (accts) order by sa.id for update;
   -- the newer token wins (0250): the last object with the latest expiry, when not older than the stored one
   perform plants.tokens_saved((select coalesce(jsonb_agg(jsonb_build_object('account', t.account, 'access', t.access, 'expires', t.expires)), '[]'::jsonb)
                                  from (select distinct on (b.account) b.account, b.access, b.expires from _bin b
@@ -3657,13 +4401,13 @@ begin
   -- since step 8 updates it (two batches holding it for share would deadlock there). Then
   -- the version each read started on (looked up under the plant's own id, as write_allowed
   -- does) and read_now.
-  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plants bp
+  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plant_info bp
             where bp.id in (select k::bigint from _bin b cross join jsonb_object_keys(b.versions) k)
             order by bp.id loop
     if pl.purged then
-      perform 1 from plants.plants where id = pl.id for no key update;
+      perform 1 from plants.plant_info where id = pl.id for no key update;
     else
-      perform 1 from plants.plants where id = pl.id for share;
+      perform 1 from plants.plant_info where id = pl.id for share;
     end if;
   end loop;
   create temp table _bok on commit drop as
@@ -3671,7 +4415,7 @@ begin
                  from _bin b cross join jsonb_object_keys(b.versions) k)
     select v.i, v.plant from v
      where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), greatest(p_at, clock_timestamp())) pr)   -- R20: the database's clock, after the locks
-       and exists (select 1 from plants.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
+       and exists (select 1 from plants.plant_info bp where bp.id = v.plant and bp.version = v.version::bigint);
   -- one object sending an inverter twice fails in poll_commit_v2 (on conflict cannot update a
   -- row twice); here too, so the caller's login-by-login save fails that login alone
   if exists (select 1 from _bin b cross join jsonb_array_elements(b.inverters) e
@@ -3704,14 +4448,14 @@ begin
       from _bin b cross join jsonb_array_elements(b.strings) with ordinality e (v, n)
      where (e.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i);
   delete from _bst where (rw).plant_id is null;
-  perform 1 from private.meta m
+  perform 1 from plants.meta_info m
    where m.sn in (select (t.rw).sn from _bst t
                   union select e->>'sn' from _bin b cross join jsonb_array_elements(b.meta) e)
    order by m.sn for no key update;
   -- poll_commit_v2 updates an inverter's string records only once its meta row exists: from the
   -- batch's start (avail 0), or from the object after the first one that sent its meta
   create temp table _bme on commit drop as
-    select m.sn, 0 as avail from private.meta m where m.sn in (select (t.rw).sn from _bst t);
+    select m.sn, 0 as avail from plants.meta_info m where m.sn in (select (t.rw).sn from _bst t);
   insert into _bme
   select e->>'sn', min(b.i) + 1 from _bin b cross join jsonb_array_elements(b.meta) e
    where (e->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)
@@ -3743,7 +4487,7 @@ begin
   -- used before the batch, or live in this or an earlier object once the meta row existed
   delete from _bst t
    where not private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh)
-     and not exists (select 1 from private.meta m join _bme x on x.sn = m.sn
+     and not exists (select 1 from plants.meta_info m join _bme x on x.sn = m.sn
                       where m.sn = (t.rw).sn and x.avail <= t.i
                         and ((t.rw).no = any (m.used_strings)
                              or exists (select 1 from _bst t2
@@ -3845,13 +4589,13 @@ begin
     return public.poll_commit(p_account, p_ts, p_readings, p_strings, p_agg, p_meta, p_inverters, p_access, p_expires);
   end if;
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
-  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plants bp
+  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plant_info bp
              where bp.id in (select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k)
              order by bp.id loop
     if pl.purged then
-      perform 1 from plants.plants where id = pl.id for no key update;
+      perform 1 from plants.plant_info where id = pl.id for no key update;
     else
-      perform 1 from plants.plants where id = pl.id for share;
+      perform 1 from plants.plant_info where id = pl.id for share;
     end if;
   end loop;
   ok := billing.write_allowed(p_versions, greatest(p_at, clock_timestamp()));   -- R20: the database's clock, after the locks
@@ -3885,17 +4629,18 @@ begin
      order by r.plant, r.via_share, r.since, r.lane
   )
   select p.plant,
-         (select lp.plant_name from plants.login_plants lp
+         (select lp.plant_name from plants.list_info lp
            where lp.plant = p.plant and lp.plant_name is not null order by lp.last_seen_at desc nulls last limit 1),
          bp.time_zone, c.batt_positive_means,
          c.backfill_next::text, c.backfill_until::text, coalesce(c.backfill_tries, 0),
          c.temp_next::text, coalesce(c.temp_tries, 0), c.has_grid,
-         sa.id, sa.user_id, sa.username, sa.access_token, sa.access_expires_at,
+         sa.id, sa.user_id, sa.username, tk.access_token, tk.access_expires_at,
          bp.version, bp.brand, bp.vendor_id
     from pick p
-    join plants.logins sa on sa.id = p.lane
-    join plants.plants bp on bp.id = p.plant
-    left join public.plant_config c on c.plant_id = p.plant
+    join plants.login_info sa on sa.id = p.lane
+    join plants.login_tokens tk on tk.id = sa.id
+    join plants.plant_info bp on bp.id = p.plant
+    left join plants.settings c on c.plant_id = p.plant
    where case when p_account is not null then sa.id = p_account
               else ('x' || lpad(substr(replace(sa.id::text, '-', ''), 1, 8), 16, '0'))::bit(64)::bigint
                    % greatest(1, p_shards) = p_shard end
@@ -3913,33 +4658,75 @@ AS $function$
       from billing.reading_routes_set(p_at) r
      order by r.plant, r.via_share, r.since, r.lane
   ), pk as (
-    select p.plant, p.lane, p.ends_at, bp.version from pick p join plants.plants bp on bp.id = p.plant
+    select p.plant, p.lane, p.ends_at, bp.version from pick p join plants.plant_info bp on bp.id = p.plant
   ), lane_inv as (
     select pk.lane, count(i.sn) as n
-      from pk left join private.inverters i on i.plant_id = pk.plant
+      from pk left join plants.inverter_info i on i.plant_id = pk.plant
      group by pk.lane
   ), sec as (
     select pk.*, case when sa.kind = 'share' or li.n > 10 then private.read_second(pk.plant::text)
                       else private.read_second(pk.lane::text) end as s
       from pk
-      join plants.logins sa on sa.id = pk.lane
+      join plants.login_info sa on sa.id = pk.lane
       join lane_inv li on li.lane = pk.lane
   )
   select sec.plant, sec.lane, sec.version, plants.tz(sec.plant), c.batt_positive_means,
          c.has_grid, sec.ends_at, sec.s
-    from sec left join public.plant_config c on c.plant_id = sec.plant
+    from sec left join plants.settings c on c.plant_id = sec.plant
    where sec.s = any (p_seconds)
    order by sec.plant
 $function$;
 
-CREATE OR REPLACE FUNCTION public.share_account_get()
- RETURNS TABLE(id uuid, user_id uuid, sunsynk_username text, access_token text, access_expires_at bigint, status text)
+CREATE OR REPLACE FUNCTION public.q_grid_present(p_plant bigint, p_ts bigint)
+ RETURNS boolean
  LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'private', 'pg_temp'
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
-  select a.id, a.user_id, a.username, a.access_token, a.access_expires_at, a.status
-    from plants.logins a where a.kind = 'share'
+  with voters as (
+    select grid_volt_v, device_time
+      from public.readings
+     where plant_id = p_plant
+       and ts = p_ts
+       and grid_volt_v is not null
+  ),
+  newest as (
+    -- NULL device_time cannot be dated, so it never wins. When every voter is
+    -- undated -- readings from before 0031 stored device_time -- max() is NULL
+    -- and the `is not distinct from` below lets them all vote, which is the old
+    -- behaviour and the only thing left to do with them.
+    select max(device_time) as dt from voters
+  )
+  select case when not exists (select 1 from voters) then null
+              else (select bool_or(public.grid_live(v.grid_volt_v))
+                      from voters v
+                     where v.device_time
+                           is not distinct from (select dt from newest)) end
+$function$;
+
+CREATE OR REPLACE FUNCTION public.q_missing_minutes(p_plant bigint, p_day date)
+ RETURNS TABLE(ts bigint)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  with b as (
+    select (select min(a.ts) from public.agg_minute a where a.plant_id = p_plant) as first_ts,
+           (select public.day_start_epoch_tz(c.backfill_next, public.plant_tz(p_plant))
+              from plants.settings c where c.plant_id = p_plant and c.backfill_next is not null) as bf_ts,
+           public.day_start_epoch_tz(p_day, public.plant_tz(p_plant))            as day_start,
+           extract(epoch from now())::bigint                                    as now_ts
+  ),
+  bounds as (
+    select ceil(greatest(day_start, least(first_ts, bf_ts)) / 60.0)::bigint * 60 as lo,
+           least(day_start + 86400, now_ts - 600)                                as hi
+      from b where first_ts is not null or bf_ts is not null
+  )
+  select g as ts from bounds, generate_series(bounds.lo, bounds.hi - 60, 60) g
+   where bounds.hi > bounds.lo
+     and not exists (select 1 from public.agg_minute a where a.plant_id = p_plant and a.ts = g
+                                                  and a.source <> 'poller_partial')
+   order by g
 $function$;
 
 CREATE OR REPLACE FUNCTION public.share_account_set(p_user uuid, p_username text, p_access text, p_expires bigint)
@@ -4010,6 +4797,67 @@ AS $function$
    where a.kind = 'share' and a.status = 'needs_reconnect'
      and coalesce((select max(e.at) from plants.login_events e
                     where e.account_id = a.id and e.event = 'died'), '-infinity') < now() - interval '55 minutes'
+$function$;
+
+CREATE OR REPLACE FUNCTION public.soc_at(p_plant bigint, p_at bigint)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select round(a.soc)::int from public.agg_minute a
+   where a.plant_id = p_plant and a.ts between p_at - 600 and p_at and a.soc is not null
+   order by a.ts desc limit 1
+$function$;
+
+CREATE OR REPLACE FUNCTION public.span_figures(p_plant bigint, p_from date, p_to date)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select jsonb_build_object(
+           'made_kwh', coalesce(sum(e.pv_kwh), 0), 'home_kwh', coalesce(sum(e.load_kwh), 0),
+           'import_kwh', coalesce(sum(e.imp_kwh), 0),
+           'independence_pct', public.independence_pct(coalesce(sum(e.load_kwh), 0), coalesce(sum(e.imp_kwh), 0)))
+    from public._plant_day_energy(p_plant, p_from, p_to) e
+   -- a day of zeros is the brand's filler for a day with no readings (notify hasData)
+   where coalesce(e.load_kwh, 0) > 0 or coalesce(e.pv_kwh, 0) > 0
+$function$;
+
+CREATE OR REPLACE FUNCTION public.grid_live(p_volts double precision)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO ''
+AS $function$ select p_volts > 100 $function$;
+
+CREATE OR REPLACE FUNCTION public.plant_bookmarks_clear(p_plants bigint[])
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
+   where plant_id = any (coalesce(p_plants, '{}'))
+$function$;
+
+CREATE OR REPLACE FUNCTION public.plant_history_loading(p_plant bigint)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select exists (select 1 from public.plant_config c where c.plant_id = p_plant and c.backfill_next is not null)
+$function$;
+
+CREATE OR REPLACE FUNCTION public.plants_configured(p_plants bigint[])
+ RETURNS SETOF bigint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}'))
 $function$;
 
 -- ---------------------------------------------------------------------------
@@ -4623,7 +5471,7 @@ begin
   if not pg_try_advisory_xact_lock(hashtext('private.alerts_minute')) then return jsonb_build_object('busy', true); end if;
   m := greatest(coalesce(last_done, upto - 60), upto - 600) + 60;
   while m <= upto loop
-    perform public.email_poll_step(m, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1), '[]'::jsonb);
+    perform public.email_poll_step(m, '[]'::jsonb, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1));
     insert into public.app_config (key, value, note) values ('ALERTS_DONE_TS', m, 'the last minute the alert step ran for (private.alerts_minute)')
     on conflict (key) do update set value = excluded.value;
     n := n + 1;
@@ -4792,6 +5640,180 @@ revoke all on function public.soc_at(bigint, bigint) from public, anon, authenti
 grant execute on function public.soc_at(bigint, bigint) to service_role;
 
 -- ---------------------------------------------------------------------------
+-- SOLAR-681 R13, R14: the fake tester plants (SOLAR-270, logins ending @mock) are brand `mock`,
+-- with our own ids from plants.plant_id_seq and their serials as mock:<serial>: the first live use
+-- of our own plant ids, and a brand whose ids can never meet SunSynk's.
+
+update plants.logins set brand = 'mock' where kind = 'login' and lower(username) like '%@mock';
+
+do $$
+declare
+  p record;
+  n bigint;
+  tc record;
+  moved int := 0;
+  serials text[];
+begin
+  for p in
+    select pl.* from plants.plants pl
+     where pl.brand = 'sunsynk'
+       and exists (select 1 from plants.login_plants lp join plants.logins l on l.id = lp.login where lp.plant = pl.id and l.brand = 'mock')
+       and not exists (select 1 from plants.login_plants lp join plants.logins l on l.id = lp.login where lp.plant = pl.id and l.brand <> 'mock')
+       and not exists (select 1 from plants.claims c where c.plant = pl.id)
+     order by pl.id
+  loop
+    n := nextval('plants.plant_id_seq');
+    insert into plants.plants (id, brand, vendor_id, time_zone, version, legacy, created_at)
+    values (n, 'mock', p.vendor_id, p.time_zone, p.version + 1, false, p.created_at);
+    -- every table that keys on a plant: its rows move to the new id (partitioned tables by their parent)
+    for tc in
+      select cl.relnamespace::regnamespace::text as sch, cl.relname as tab, a.attname as col
+        from pg_attribute a join pg_class cl on cl.oid = a.attrelid
+       where a.attname in ('plant_id', 'plant') and a.atttypid = 'bigint'::regtype and not a.attisdropped
+         and cl.relkind in ('r', 'p') and not cl.relispartition
+         and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
+         and not (cl.relnamespace::regnamespace::text = 'plants' and cl.relname = 'plants')
+    loop
+      execute format('update %I.%I set %I = $1 where %I = $2', tc.sch, tc.tab, tc.col, tc.col) using n, p.id;
+    end loop;
+    update public.app_config set value = n where key = 'CALIBRATION_PLANT' and value = p.id;
+    delete from plants.plants where id = p.id;
+    moved := moved + 1;
+  end loop;
+
+  -- their inverters: mock:<serial>, in every table that keys on a serial
+  serials := array(select i.sn from private.inverters i join plants.plants pl on pl.id = i.plant_id
+                    where pl.brand = 'mock' and i.sn not like 'mock:%');
+  if cardinality(serials) > 0 then
+    for tc in
+      select cl.relnamespace::regnamespace::text as sch, cl.relname as tab
+        from pg_attribute a join pg_class cl on cl.oid = a.attrelid
+       where a.attname = 'sn' and a.atttypid = 'text'::regtype and not a.attisdropped
+         and cl.relkind in ('r', 'p') and not cl.relispartition
+         and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
+    loop
+      execute format('update %I.%I set sn = ''mock:'' || sn where sn = any ($1)', tc.sch, tc.tab) using serials;
+    end loop;
+  end if;
+  raise notice 'R14: % fake plants moved to brand mock, % serials prefixed', moved, coalesce(cardinality(serials), 0);
+  if exists (select 1 from plants.plants pl where pl.brand = 'mock' and pl.id < 1000000000000) then
+    raise exception 'R14: a mock plant kept an old id';
+  end if;
+end $$;
+
+-- R16: returned columns by the login's own word (were sunsynk_username)
+drop function public.api_logins();
+drop function public.share_account_get();
+CREATE OR REPLACE FUNCTION public.api_logins()
+ RETURNS TABLE(account_id uuid, username text, status text, linked_at timestamp with time zone, last_ok_at timestamp with time zone, plants jsonb, kind text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  with me as (select auth.uid() u, (select id from billing.accounts where user_id = auth.uid()) acc)
+  select a.id, a.username, a.status,
+         case when a.kind = 'share' then (select min(x.linked_at) from plants.user_plants x where x.account_id = a.id and x.user_id = me.u)
+              else a.linked_at end,
+         a.last_ok_at,
+         coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
+                     'paused', not exists (select 1 from billing.seats se where se.account = me.acc and se.plant = pu.plant_id
+                                              and se.closed_at is null),
+                     'linked_at', pu.linked_at,
+                     'inverters', (select count(*) from private.inverters i where i.plant_id = pu.plant_id),
+                     'share_gone', pu.share_gone_at is not null,
+                     'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id))
+                   order by pu.linked_at, pu.plant_id)
+                     from plants.user_plants pu where pu.account_id = a.id and pu.user_id = me.u), '[]'::jsonb),
+         a.kind
+    from plants.logins a cross join me
+   where a.user_id = me.u
+      or (a.kind = 'share' and exists (select 1 from plants.user_plants x where x.account_id = a.id and x.user_id = me.u))
+   order by 4 desc
+$function$;
+
+CREATE OR REPLACE FUNCTION public.share_account_get()
+ RETURNS TABLE(id uuid, user_id uuid, username text, access_token text, access_expires_at bigint, status text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'private', 'pg_temp'
+AS $function$
+  select a.id, a.user_id, a.username, a.access_token, a.access_expires_at, a.status
+    from plants.logins a where a.kind = 'share'
+$function$;
+
+CREATE OR REPLACE FUNCTION private.refresh_store(p_account uuid, p_refresh text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'private', 'vault', 'pg_temp'
+AS $function$
+declare
+  old_id uuid;
+  new_id uuid;
+begin
+  -- Vault secret names are unique, so the old one must go before the new one is
+  -- created under the same name. Same transaction: there is never a moment with
+  -- no secret on file.
+  select refresh_secret_id into old_id from plants.logins where id = p_account;
+  if old_id is not null then
+    update plants.logins set refresh_secret_id = null where id = p_account;
+    delete from vault.secrets where id = old_id;
+  end if;
+  new_id := vault.create_secret(p_refresh, 'brand_refresh_' || p_account::text,
+                                'brand refresh token for login ' || p_account::text);
+  update plants.logins set refresh_secret_id = new_id where id = p_account;
+end $function$;
+
+CREATE OR REPLACE FUNCTION private.schedule_jobs()
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_temp'
+AS $function$
+declare j record;
+begin
+  -- pg_cron keys a job by name and user: run as anyone else, every job would be made twice
+  if current_user <> 'postgres' then
+    raise exception 'run private.schedule_jobs() as postgres, not %', current_user using errcode = '42501';
+  end if;
+  for j in select * from (values
+    ('agg-minute-rollup',    '40 4 * * *',         $c$select private.agg_minute_rollup(31)$c$),
+    ('alerts',               '* * * * *',          $c$select private.alerts_minute()$c$),
+    ('plant-check',          '* * * * *',          $c$select private.plant_checks()$c$),
+    ('plant-sync',           '* * * * *',          $c$select private.call_fn('poll', '{"task":"sync"}', 55000)$c$),
+    ('temps',                '* * * * *',          $c$select private.call_fn('poll', '{"task":"temps"}', 55000)$c$),
+    ('billing-delete',       '*/5 * * * *',        $c$select billing.delete_due()$c$),
+    ('billing-history',      '* * * * *',          $c$select private.call_fn('recover?queue=1', '{}', 60000)$c$),
+    ('billing-run',          '*/5 4-5 * * *',      $c$select private.call_fn('billing/run', '{}', 120000)$c$),
+    ('ensure-partitions',    '0 3 * * *',          $c$select private.ensure_partitions()$c$),
+    ('first-load-continue',  '*/2 * * * *',        $c$select private.first_load_continue()$c$),
+    ('grid-off',             '10 4 * * *',         $c$select private.grid_off_update_all()$c$),
+    ('history-delete',       '* * * * *',          $c$call private.history_delete_run()$c$),
+    ('history-delete-slow',  '*/15 * * * *',       $c$call private.history_delete_check()$c$),
+    ('job-check',            '2-59/5 * * * *',     $c$select private.call_fn('job-check', '{}', 30000)$c$),
+    ('notify-email',         '* * * * *',          $c$select private.call_fn('notify-email', '{}', 55000)$c$),
+    ('notify-push',          '* * * * *',          $c$select private.call_fn('notify-push', '{}', 55000)$c$),
+    ('purge-cron-log',       '45 4 * * *',         $c$delete from cron.job_run_details where end_time < now() - make_interval(days => 7)$c$),
+    ('rollup-old-days',      '*/5 5-7 * * *',      $c$call private.rollup_old_days(31)$c$),
+    ('plant-energy',         '15 2 * * *',         $c$select private.call_fn('sync-plant-energy', '{}', 150000)$c$),
+    ('reader',               '* * * * *',          $c$select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from private.poll_shards() s$c$),
+    ('recover',              '5 4,10,16,22 * * *', $c$select private.call_fn('recover', '{}', 150000)$c$)
+  ) t(name, sched, cmd) loop
+    perform cron.schedule(j.name, j.sched, j.cmd);   -- by name: an existing job is updated in place
+  end loop;
+  -- the names before SOLAR-681 R16: gone, so no job runs twice
+  perform cron.unschedule(jobname) from cron.job where jobname in ('sunsynk-poll', 'sunsynk-recover', 'sunsynk-plant-energy');
+end $function$;
+
+revoke all on function public.api_logins() from public, anon;
+grant execute on function public.api_logins() to authenticated, service_role;
+revoke all on function public.share_account_get() from public, anon, authenticated;
+grant execute on function public.share_account_get() to service_role;
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then perform private.schedule_jobs(); end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- the latest bodies of the functions the parts above made again
 
 CREATE OR REPLACE FUNCTION public.email_sweep()
@@ -4822,14 +5844,14 @@ begin
            count(*) filter (where a.last_try_at > now() - interval '3 minutes' and a.last_try = 'vendor'
                               and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes')
       into tried, failing
-      from plants.logins a where a.status = 'ok' and a.brand = b.brand;
+      from plants.login_info a where a.status = 'ok' and a.brand = b.brand;
     t_all := t_all + tried; f_all := f_all + failing;
     down := failing >= least(3, tried) and failing > 0 and failing * 2 > tried;
 
     if down and not b.down then
       b.down := true; b.outage_id := nextval('plants.outage_id_seq'); b.clear_since := null;
       b.down_since := (select extract(epoch from min(coalesce(a.last_ok_at, a.linked_at)))::bigint
-                         from plants.logins a
+                         from plants.login_info a
                         where a.status = 'ok' and a.brand = b.brand and a.last_try = 'vendor'
                           and a.last_try_at > now() - interval '3 minutes'
                           and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes');
@@ -4854,7 +5876,7 @@ begin
       insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
       select distinct on (pu.user_id) pu.user_id, pu.plant_id, 'sunsynk_down', 'sunsynk_down:' || b.outage_id,
              jsonb_build_object('since', b.down_since), 0
-        from plants.logins a join plants.user_plants pu on pu.account_id = a.id
+        from plants.login_info a join plants.user_plants pu on pu.account_id = a.id
        where a.status = 'ok' and a.brand = b.brand and a.last_try = 'vendor' and a.last_try_at > now() - interval '3 minutes'
          and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes'
          and private.plant_live(pu.user_id, pu.plant_id)                          -- 0256
@@ -4877,7 +5899,7 @@ begin
        where not s.stale and s.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
          and exists (select 1 from plants.brand_state bs
                       where bs.brand = plants.brand_of(s.plant_id) and not bs.down and (bs.up_at is null or bs.up_at < now() - interval '15 minutes'))
-         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+         and exists (select 1 from plants.user_plants pu join plants.login_info a on a.id = pu.account_id
                       where pu.plant_id = s.plant_id and a.status = 'ok' and a.last_try in ('ok', 'vendor')
                         and a.last_try_at > now() - interval '3 minutes')
        for update of s skip locked
@@ -4895,13 +5917,13 @@ begin
       select i.plant_id, i.sn, i.last_dev, coalesce(nullif(m.alias, ''), 'Inverter ' || i.sn) as inverter
         from private.inverter_alert_state i
         join private.plant_alert_state s on s.plant_id = i.plant_id
-        left join private.meta m on m.sn = i.sn
+        left join plants.meta_info m on m.sn = i.sn
        where not i.stale and i.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
          and not s.stale and s.last_dev >= now_s - 900
-         and exists (select 1 from private.inverters v where v.sn = i.sn and v.plant_id = i.plant_id)
+         and exists (select 1 from plants.inverter_info v where v.sn = i.sn and v.plant_id = i.plant_id)
          and exists (select 1 from plants.brand_state bs
                       where bs.brand = plants.brand_of(i.plant_id) and not bs.down and (bs.up_at is null or bs.up_at < now() - interval '15 minutes'))
-         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+         and exists (select 1 from plants.user_plants pu join plants.login_info a on a.id = pu.account_id
                       where pu.plant_id = i.plant_id and a.status = 'ok' and a.last_try in ('ok', 'vendor')
                         and a.last_try_at > now() - interval '3 minutes')
        for update of i skip locked
@@ -4953,7 +5975,7 @@ begin
   -- The rows stay locked to the end, so a link kick polling the same account in the
   -- same minute waits here and then finds them stepped: strings are counted once.
   insert into private.plant_alert_state (plant_id)
-  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
+  select c.plant_id from plants.settings c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
   on conflict do nothing;
   select coalesce(array_agg(x.plant_id), '{}') into todo
     from (select s.plant_id from private.plant_alert_state s
@@ -4970,7 +5992,7 @@ begin
   insert into private.string_alert_state as st (plant_id, sn, no, last_alive, dead_n, made_power)
   with fresh as (
     select x.plant_id, x.sn
-      from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+      from public.readings x join plants.settings c on c.plant_id = x.plant_id
      where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
      group by x.plant_id, x.sn
     having max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) >= p_ts - 600
@@ -5015,7 +6037,7 @@ begin
     select d.plant_id, d.sn, d.no, d.since, w.first_no, w.nos,
            coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
       from due d left join whole w on w.plant_id = d.plant_id and w.sn = d.sn
-      left join private.meta m on m.sn = d.sn
+      left join plants.meta_info m on m.sn = d.sn
      order by d.plant_id, m.ord nulls last, d.sn, d.no
   loop
     if r.first_no is null or r.first_no = r.no then
@@ -5041,7 +6063,7 @@ begin
            (select array_agg(g.no order by g.no) from private.string_alert_state g
              where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no) as nos,
            coalesce(nullif(m.alias, ''), 'Inverter ' || a.sn) as inverter
-      from private.string_alert_state a left join private.meta m on m.sn = a.sn
+      from private.string_alert_state a left join plants.meta_info m on m.sn = a.sn
      where a.plant_id = any (todo) and a.dead and p_ts - a.clear_at >= 900 and a.last_alive = p_ts
        -- an email's holder waits until every string in it is back (0231)
        and not exists (select 1 from private.string_alert_state g
@@ -5075,7 +6097,7 @@ begin
     with d as (
       select x.plant_id, x.sn,
              max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) as dev
-        from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+        from public.readings x join plants.settings c on c.plant_id = x.plant_id
        where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
        group by x.plant_id, x.sn
     )
@@ -5090,7 +6112,7 @@ begin
       if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
         perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
           jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
-                             'inverter', coalesce((select nullif(m.alias, '') from private.meta m where m.sn = r.sn), 'Inverter ' || r.sn)),
+                             'inverter', coalesce((select nullif(m.alias, '') from plants.meta_info m where m.sn = r.sn), 'Inverter ' || r.sn)),
           r.stale_key);
         update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null
          where plant_id = r.plant_id and sn = r.sn;
@@ -5112,7 +6134,7 @@ begin
     )
     select c.plant_id, jsonb_build_object(
              'present', case when count(rd.grid_volt_v) = 0 then null
-                             else coalesce(bool_or(rd.grid_volt_v > 100) filter (
+                             else coalesce(bool_or(public.grid_live(rd.grid_volt_v)) filter (
                                     where rd.grid_volt_v is not null and rd.device_time is not distinct from n.dt), false) end,
              'dev', max(case when rd.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
                              then extract(epoch from (rd.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint end),
@@ -5122,7 +6144,7 @@ begin
                                - min(rd.batt_soc) filter (where rd.batt_soc between 1 and 100) end,
              'has_batt', coalesce(c.has_battery, true),
              'shared', coalesce(c.battery_banks = 'shared', false)) as f
-      from public.plant_config c
+      from plants.settings c
       join rd on rd.plant_id = c.plant_id
       left join newest n on n.plant_id = c.plant_id
      where c.plant_id = any (todo)
@@ -5287,7 +6309,7 @@ AS $function$
          'label', to_char(p_period, 'Dy'),
          'monthLabel', to_char(p_period, 'Mon'))
      else
-       -- SunSynk's year endpoint returns zero-padded month numbers ("05"), and the
+       -- the brand's year endpoint returns zero-padded month numbers ("05"), and the
        -- charts key off this string, so pad rather than emitting "5"
        jsonb_build_object(
          'time', to_char(p_period, 'MM'),
@@ -5307,9 +6329,9 @@ AS $function$
   with
   pz as (select public.plant_tz(p_plant) as tz),
   now_s as (select extract(epoch from now())::bigint as t),
-  cfg as (select coalesce((select has_grid from public.plant_config where plant_id = p_plant), true) as has_grid,
-                 coalesce((select has_battery from public.plant_config where plant_id = p_plant), true) as has_battery,
-                 (select battery_banks from public.plant_config where plant_id = p_plant) as banks),
+  cfg as (select coalesce((select has_grid from plants.settings where plant_id = p_plant), true) as has_grid,
+                 coalesce((select has_battery from plants.settings where plant_id = p_plant), true) as has_battery,
+                 (select battery_banks from plants.settings where plant_id = p_plant) as banks),
   loc as (select public.today_tz((select tz from pz)) as day,
                  extract(hour from timezone((select tz from pz), now()))::int as hour),
   day_lo as (select public.day_start_epoch_tz((select day from loc), (select tz from pz)) as lo),
@@ -5357,11 +6379,11 @@ AS $function$
   ),
   dead1 as (
     select d.sn, d.no, coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
-      from dead_held d left join private.meta m on m.sn = d.sn
+      from dead_held d left join plants.meta_info m on m.sn = d.sn
      order by m.ord nulls last, d.sn, d.no limit 1
   ),
 
-  -- SunSynk's own clock: the newest device_time across the plant, read only from
+  -- the brand's own clock: the newest device_time across the plant, read only from
   -- rows our polls wrote in the last 3 minutes. No such rows: our polls are failing,
   -- which is not the inverter going quiet, so no logger row at all.
   dev as (
@@ -5390,7 +6412,7 @@ AS $function$
          jsonb_build_object('banks', (
            select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn), 'chargePct', round(r.batt_soc)::int)
                             order by m.ord nulls last, r.sn)
-             from public.readings r left join private.meta m on m.sn = r.sn
+             from public.readings r left join plants.meta_info m on m.sn = r.sn
             where r.plant_id = p_plant and r.ts = drift.ts and r.batt_soc between 1 and 100))
     from drift, cfg where drift.drifting and cfg.has_battery and cfg.banks is distinct from 'shared'
   union all
@@ -5408,5 +6430,22 @@ AS $function$
   union all
   select 'logger_ok', 'logger_ok:' || p_plant, jsonb_build_object('at', dev.last_dev)
     from dev, now_s where now_s.t - dev.last_dev <= 900
+$function$;
+
+CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
+ RETURNS TABLE(shard integer, shards integer, delay_ms integer)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'pg_temp'
+AS $function$
+  with n as (
+    select greatest(1, ceil(count(*)::numeric / greatest(p_per_shard, 1)))::int as shards
+      from plants.login_info
+     where status = 'ok'
+  )
+  -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every
+  -- reading saved before its page asks at 12-42 s (it was 0/10/20 s)
+  select s.i, n.shards, (s.i % 3) * 2000
+    from n, generate_series(0, n.shards - 1) as s(i)
 $function$;
 

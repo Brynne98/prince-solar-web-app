@@ -19,7 +19,7 @@ AS $function$
     select max(device_time) as dt from voters
   )
   select case when not exists (select 1 from voters) then null
-              else (select bool_or(v.grid_volt_v > 100)
+              else (select bool_or(public.grid_live(v.grid_volt_v))
                       from voters v
                      where v.device_time
                            is not distinct from (select dt from newest)) end

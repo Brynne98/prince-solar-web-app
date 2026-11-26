@@ -21,7 +21,7 @@ begin
   end if;
   select count(*),
          bool_or((batt_soc between 1 and 100) or coalesce(batt_voltage_v, 0) > 10),
-         bool_or(coalesce(grid_volt_v, 0) > 100 or coalesce(grid_import_today_kwh, 0) > 0
+         bool_or(coalesce(public.grid_live(grid_volt_v), false) or coalesce(grid_import_today_kwh, 0) > 0
                  or coalesce(grid_export_today_kwh, 0) > 0 or abs(coalesce(grid_w, 0)) > 50)
     into n, hb, hg
     from public.readings

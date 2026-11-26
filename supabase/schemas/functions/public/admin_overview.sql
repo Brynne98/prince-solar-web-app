@@ -35,7 +35,7 @@ begin
     'logins', (
       select coalesce(jsonb_agg(jsonb_build_object(
                'email', u.email,
-               'sunsynkUser', s.username,
+               'sunsynkUser', s.username,   -- reuse-check: allow (the admin page reads this key)
                'status', s.status,
                'linkedAt', s.linked_at,
                'lastOkAt', s.last_ok_at,

@@ -1,7 +1,7 @@
-// `recover` — bank logger-offline minutes from SunSynk's cloud, per plant.
+// `recover` — bank logger-offline minutes from the brand's cloud, per plant.
 //
 // Ported from recoverDay()/recoverAllGaps() in server.js. The inverters report to
-// SunSynk independently of our logger, so minutes we slept through still exist in
+// the brand independently of our logger, so minutes we slept through still exist in
 // the cloud. Two sources, tried in order (0034):
 //
 //   1. per-inverter history (_shared/invhistory.ts): grid, load and SoC per inverter
@@ -413,7 +413,7 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
   let stoppedEarly: string | null = null;
 
   // The window's oldest day gets its last try here: tomorrow it is outside. Minutes
-  // still missing there because SunSynk did not answer are given up (SOLAR-525). Not
+  // still missing there because the brand did not answer are given up (SOLAR-525). Not
   // while a first load runs (every 2 min); the scheduled runs see the same day.
   const lastTry = addDays(tz, today, -(windowDays - 1));
   const giveUp = (day: string, why: string) => {

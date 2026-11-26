@@ -21,7 +21,7 @@ AS $function$
   ),
   v as (
     select ((r.ts - lo.t0) / 300)::int as b,
-           avg(r.grid_volt_v) filter (where r.grid_volt_v > 100) as volt
+           avg(r.grid_volt_v) filter (where public.grid_live(r.grid_volt_v)) as volt
       from lo join public.readings r on r.plant_id = lo.id and r.ts >= lo.t0 and r.ts < lo.t1
      group by 1
   ),

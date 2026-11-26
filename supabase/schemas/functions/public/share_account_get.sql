@@ -1,5 +1,5 @@
 CREATE OR REPLACE FUNCTION public.share_account_get()
- RETURNS TABLE(id uuid, user_id uuid, sunsynk_username text, access_token text, access_expires_at bigint, status text)
+ RETURNS TABLE(id uuid, user_id uuid, username text, access_token text, access_expires_at bigint, status text)
  LANGUAGE sql
  STABLE SECURITY DEFINER
  SET search_path TO 'private', 'pg_temp'

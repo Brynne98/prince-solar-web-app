@@ -1,6 +1,6 @@
 {
  "public/app.jsx": {
-  "sunsynk": 18,
+  "sunsynk": 16,
   "paystack": 2
  },
  "public/auth.jsx": {
@@ -24,11 +24,11 @@
   "sunsynk": 1
  },
  "public/link.jsx": {
-  "sunsynk": 40,
+  "sunsynk": 37,
   "paystack": 10
  },
  "public/tabs.jsx": {
-  "sunsynk": 20,
+  "sunsynk": 18,
   "paystack": 2
  },
  "public/unsubscribe.js": {
@@ -37,33 +37,19 @@
  "public/welcome-scene.js": {
   "sunsynk": 1
  },
- "supabase/functions/_shared/cors.ts": {
-  "sunsynk": 1
- },
  "supabase/functions/_shared/database.types.ts": {
-  "sunsynk": 10
- },
- "supabase/functions/_shared/db.ts": {
-  "sunsynk": 1
+  "sunsynk": 6
  },
  "supabase/functions/_shared/email.ts": {
   "sunsynk": 13,
   "paystack": 3
  },
  "supabase/functions/_shared/errors.ts": {
-  "sunsynk": 3,
   "paystack": 1,
   "resend": 2
  },
  "supabase/functions/_shared/gate.ts": {
-  "sunsynk": 6,
   "paystack": 2
- },
- "supabase/functions/_shared/links.ts": {
-  "sunsynk": 3
- },
- "supabase/functions/_shared/mock-fetch.mts": {
-  "sunsynk": 4
  },
  "supabase/functions/_shared/mock-sunsynk.mjs": {
   "Africa/Johannesburg": 11,
@@ -75,9 +61,6 @@
  "supabase/functions/_shared/pace.ts": {
   "resend": 2
  },
- "supabase/functions/_shared/poller.ts": {
-  "sunsynk": 13
- },
  "supabase/functions/_shared/text.ts": {
   "sunsynk": 46,
   "paystack": 3
@@ -88,18 +71,11 @@
  "supabase/functions/billing/index.ts": {
   "paystack": 47
  },
- "supabase/functions/claim-share/index.ts": {
-  "sunsynk": 4
- },
  "supabase/functions/error-alert/index.ts": {
   "resend": 11
  },
  "supabase/functions/job-check/index.ts": {
-  "sunsynk": 5,
   "infobip": 8
- },
- "supabase/functions/link-sunsynk/index.ts": {
-  "sunsynk": 19
  },
  "supabase/functions/notify-email/index.ts": {
   "resend": 5
@@ -110,24 +86,6 @@
  "supabase/functions/notify/index.ts": {
   "sunsynk": 14,
   "resend": 26
- },
- "supabase/functions/poll/hold.mts": {
-  "sunsynk": 2
- },
- "supabase/functions/poll/index.ts": {
-  "sunsynk": 6
- },
- "supabase/functions/poll/minutes.mts": {
-  "sunsynk": 1
- },
- "supabase/functions/poll/newday.mts": {
-  "sunsynk": 1
- },
- "supabase/functions/recover/index.ts": {
-  "sunsynk": 3
- },
- "supabase/functions/sync-plant-energy/index.ts": {
-  "sunsynk": 3
  },
  "supabase/schemas/functions/billing/apply_payment.sql": {
   "paystack": 11
@@ -175,56 +133,28 @@
  "supabase/schemas/functions/private/email_switch.sql": {
   "sunsynk": 3
  },
- "supabase/schemas/functions/private/grid_minutes.sql": {
-  "sunsynk": 1
- },
  "supabase/schemas/functions/private/is_alert.sql": {
   "sunsynk": 2
  },
- "supabase/schemas/functions/private/plant_start_fill.sql": {
-  "sunsynk": 1
- },
  "supabase/schemas/functions/private/push_wanted.sql": {
-  "sunsynk": 2
- },
- "supabase/schemas/functions/private/refresh_store.sql": {
   "sunsynk": 2
  },
  "supabase/schemas/functions/private/schedule_jobs.sql": {
   "sunsynk": 3
  },
- "supabase/schemas/functions/public/_energy_row.sql": {
-  "sunsynk": 1
- },
- "supabase/schemas/functions/public/admin_overview.sql": {
-  "sunsynk": 1
- },
  "supabase/schemas/functions/public/api_link_remove.sql": {
   "sunsynk": 2
- },
- "supabase/schemas/functions/public/api_logins.sql": {
-  "sunsynk": 1
  },
  "supabase/schemas/functions/public/day_start_epoch.sql": {
   "Africa/Johannesburg": 1
  },
- "supabase/schemas/functions/public/email_plant_events.sql": {
-  "sunsynk": 1
- },
- "supabase/schemas/functions/public/email_poll_step.sql": {
-  "sunsynk": 1
- },
  "supabase/schemas/functions/public/email_sweep.sql": {
-  "sunsynk": 24
+  "sunsynk": 5
  },
  "supabase/schemas/functions/public/email_unsubscribe.sql": {
   "sunsynk": 4
  },
  "supabase/schemas/functions/public/email_wanted.sql": {
-  "sunsynk": 3
- },
- "supabase/schemas/functions/public/job_check_inputs.sql": {
-  "Africa/Johannesburg": 1,
   "sunsynk": 3
  },
  "supabase/schemas/functions/public/local_day.sql": {
@@ -250,17 +180,6 @@
  },
  "supabase/schemas/functions/public/plant_config_seed.sql": {
   "ZAR": 1
- },
- "supabase/schemas/functions/public/share_account_get.sql": {
-  "sunsynk": 1
- },
- "supabase/schemas/functions/public/sunsynk_calls_report.sql": {
-  "Africa/Johannesburg": 1,
-  "sunsynk": 5
- },
- "supabase/schemas/functions/public/sunsynk_tally.sql": {
-  "Africa/Johannesburg": 1,
-  "sunsynk": 2
  },
  "public/sb.js": {
   "sunsynk": 3

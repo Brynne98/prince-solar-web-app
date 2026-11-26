@@ -319,7 +319,8 @@ for (const f of jsx) {
   // a vendor's own files: its adapter and its stand-in
   // a folder ends in '/': every file in it (SOLAR-681 R16: the SunSynk adapter is brands/sunsynk/)
   const OWN = { sunsynk: ['supabase/functions/_shared/brands/sunsynk/', 'supabase/functions/_shared/brands/index.ts',
-    'supabase/functions/_shared/mock-sunsynk.mjs', 'supabase/functions/mock-sunsynk/index.ts'],
+    'supabase/functions/_shared/mock-sunsynk.mjs', 'supabase/functions/_shared/mock-fetch.mts',
+    'supabase/functions/mock-sunsynk/index.ts', 'supabase/functions/link-sunsynk/index.ts'],
     resend: ['supabase/functions/resend-webhook/index.ts'] };
   const walk = (d) => fs.existsSync(path.join(ROOT, d)) ? fs.readdirSync(path.join(ROOT, d), { recursive: true }).map(f => path.join(d, String(f))) : [];
   const files = [

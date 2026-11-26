@@ -27,7 +27,7 @@ import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "../../errors.ts";
 import { slot } from "../../limit.mts";
-import { fakeSunsynk, MOCK_PLANT_OFFSET } from "../../gate.ts";
+import { fakeLogin, MOCK_PLANT_OFFSET } from "../../gate.ts";
 import { mockFetch } from "../../mock-fetch.mts";
 import { rpc } from "../../db.ts";
 import { type Account, LoginRejected, RelinkNeeded, SignInFailed, type VendorErrorKind, VendorError, type VendorPlant,
@@ -41,7 +41,7 @@ const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.ne
 // (link-sunsynk). Its tokens are "at:<login>" and "rt:<login>", unlike any SunSynk token.
 const MOCK_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? `${Deno.env.get("SUPABASE_URL")}/functions/v1/mock-sunsynk`;
 const baseFor = (loginOrToken: string) => (loginOrToken.endsWith("@mock") ? MOCK_BASE : API_BASE);
-const isFake = (loginOrToken: string) => fakeSunsynk(loginOrToken, API_BASE, MOCK_BASE);
+const isFake = (loginOrToken: string) => fakeLogin(loginOrToken, API_BASE, MOCK_BASE);
 // A fake login in production is answered in this function, not over the network (SOLAR-637).
 const sunsynkFetch = (who: string, url: string, init: RequestInit) =>
   isFake(who) ? mockFetch(MOCK_BASE, MOCK_PLANT_OFFSET, url, init) : fetch(url, init);

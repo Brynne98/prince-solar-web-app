@@ -24,12 +24,7 @@ begin
   perform 1 from plants.list_info lp join plants.login_info l on l.id = lp.login
    where l.user_id = uid order by lp.login, lp.plant for update of lp;
   -- the logins' secrets first: billing.delete_account's cascade takes the login rows with it
-  for acc in select id, refresh_secret_id from plants.login_info where user_id = uid order by id loop
-    if acc.refresh_secret_id is not null
-       and not exists (select 1 from plants.login_info o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
-      delete from vault.secrets s where s.id = acc.refresh_secret_id;
-    end if;
-  end loop;
+  perform plants.user_secrets_clear(uid);
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;

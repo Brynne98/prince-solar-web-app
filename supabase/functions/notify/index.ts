@@ -100,7 +100,8 @@ function best(rows: DayRow[], k: keyof DayRow, label: (d: string) => string) {
 }
 
 async function plantCfg(plant: number) {
-  const { data } = await db.from("plant_config").select("tariff_import, has_grid").eq("plant_id", plant).maybeSingle();
+  const { data: rows } = await db.rpc("plant_cfg", { p_plant: plant });
+  const data = (rows as any[] | null)?.[0];
   return { tariff: Number(data?.tariff_import) || 0, hasGrid: data?.has_grid !== false };
 }
 
@@ -196,11 +197,11 @@ async function historyPending(row: Row): Promise<boolean> {
   if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
   const [{ data: link }, { data: cfg }, open] = await Promise.all([
     db.rpc("plant_link", { p_user: row.user_id, p_plant: row.plant_id }),
-    db.from("plant_config").select("backfill_next").eq("plant_id", row.plant_id).maybeSingle(),
+    db.rpc("plant_history_loading", { p_plant: row.plant_id }),
     historyOpen(row.user_id, row.plant_id),
   ]);
   // Right after a link the import bookmark isn't set yet and reads as done.
-  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || open;
+  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg === true || open;
 }
 
 /** The plant's 60-days email is still on its way (0263). */

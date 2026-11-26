@@ -1,6 +1,6 @@
 // Each login's refresh minutes (SOLAR-650). The inverter list is re-read once in ten
 // minutes and the plant list once an hour; when every login did both on the same minute
-// (:00, :10, ...) those minutes carried all the extra SunSynk calls and detection writes.
+// (:00, :10, ...) those minutes carried all the extra the brand calls and detection writes.
 // The minute comes from the login's uuid: its last 12 hex digits, away from the first 8
 // the shard hash uses (0246), so the logins of one shard still spread. The hourly minute
 // never falls on a list minute, so no login does both refreshes in one minute.

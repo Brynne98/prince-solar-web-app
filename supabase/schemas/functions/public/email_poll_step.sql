@@ -175,7 +175,7 @@ begin
     )
     select c.plant_id, jsonb_build_object(
              'present', case when count(rd.grid_volt_v) = 0 then null
-                             else coalesce(bool_or(rd.grid_volt_v > 100) filter (
+                             else coalesce(bool_or(public.grid_live(rd.grid_volt_v)) filter (
                                     where rd.grid_volt_v is not null and rd.device_time is not distinct from n.dt), false) end,
              'dev', max(case when rd.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
                              then extract(epoch from (rd.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint end),

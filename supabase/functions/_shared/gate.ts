@@ -1,5 +1,5 @@
 // The tester accounts: auth user ids, comma-separated. Billing reads PAYSTACK_TEST_USERS (SOLAR-267),
-// link-sunsynk reads TESTER_USERS (SOLAR-477). Plain TypeScript so node can test it: scripts/billing-sim/gate.test.mjs.
+// link reads TESTER_USERS (SOLAR-477). Plain TypeScript so node can test it: scripts/billing-sim/gate.test.mjs.
 export const isTestUser = (testUsers: string, userId: string) =>
   testUsers.split(",").map((s) => s.trim()).includes(userId);
 
@@ -18,7 +18,7 @@ export function payClosed(
 export const isTestEmail = (pattern: string, confirmedEmail: string) =>
   !!pattern && !!confirmedEmail && new RegExp(pattern, "i").test(confirmedEmail);
 
-// Fake SunSynk logins (name@mock, SOLAR-270): only a tester may link one on the hosted
+// Fake brand logins (name@mock, SOLAR-270): only a tester may link one on the hosted
 // project. Local runs link them freely, as the local tests do.
 export const mockClosed = (
   username: string, supabaseUrl: string, testUsers: string, userId: string, emailPattern = "", confirmedEmail = "",
@@ -26,13 +26,13 @@ export const mockClosed = (
   username.endsWith("@mock") && supabaseUrl.endsWith(".supabase.co") &&
   !isTestUser(testUsers, userId) && !isTestEmail(emailPattern, confirmedEmail);
 
-// A call to the fake SunSynk (a name@mock login or its "at:"/"rt:" token) when it is not
-// also the real address: in production, where the fake plants must not count in SunSynk's
+// A call to the fake brand (a name@mock login or its "at:"/"rt:" token) when it is not
+// also the real address: in production, where the fake plants must not count in the brand's
 // call totals or failures (SOLAR-477). Locally every call goes to the mock and counts.
-export const fakeSunsynk = (loginOrToken: string, apiBase: string, mockBase: string) =>
+export const fakeLogin = (loginOrToken: string, apiBase: string, mockBase: string) =>
   loginOrToken.endsWith("@mock") && mockBase !== apiBase;
 
 // Fake plants (SOLAR-270): the mock moves its plant ids up by MOCK_PLANT_OFFSET, so they sit in
-// 900000000 to 900999999 and never share an id with a real SunSynk plant (go-live-tester-cleanup.sql).
+// 900000000 to 900999999 and never share an id with a real brand plant (go-live-tester-cleanup.sql).
 export const MOCK_PLANT_OFFSET = 900_000_000;
 export const isFakePlant = (plantId: number) => plantId >= MOCK_PLANT_OFFSET && plantId < MOCK_PLANT_OFFSET + 1_000_000;

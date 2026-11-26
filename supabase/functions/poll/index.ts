@@ -3,7 +3,7 @@
 // pg_cron fires this every minute — once per SHARD (migration 0030). The request
 // body carries {shard, shards, delay_ms}; this invocation keeps the accounts whose
 // id hashes into its shard, waits delay_ms so the fleet is spread over the minute
-// instead of hitting SunSynk at second zero, then polls its accounts in parallel.
+// instead of hitting the brand at second zero, then polls its accounts in parallel.
 // No body (local dev, manual invoke) means "every account, no delay".
 //
 // The set of plants to log comes from pollJobs() (0100, 0246), which returns only this
@@ -65,7 +65,7 @@ function shardSpec(body: Record<string, unknown>): ShardSpec {
   return { shard, shards, delayMs, account };
 }
 
-// SOLAR-468: this run's SunSynk calls into the daily tally, one write. A shard run also
+// SOLAR-468: this run's the brand calls into the daily tally, one write. A shard run also
 // logs itself as a poll_run row (an empty shard too); a one-account run (Check) saves the
 // calls only. At 00:05, 00:10 and 00:15 SA time shard 0 also sends yesterday's totals to
 // PostHog. Every send of a day has the same uuid and time, so PostHog keeps one; the

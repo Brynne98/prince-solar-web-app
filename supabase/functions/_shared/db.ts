@@ -1,10 +1,10 @@
-// The database handle the SunSynk and reading code writes through (SOLAR-656).
+// The database handle the brand and reading code writes through (SOLAR-656).
 //
 // Today every edge function uses PostgREST (supabase-js, service role): `postgrest` below.
 // A host with a direct Postgres connection (poller v3: lanes, the worker) gives its own
 // handle to useDb() once at start; plants.ts and poller.ts then call through it. Only
-// what those two need is here: database functions by name, and the two plant_config
-// reads and writes syncPlants makes.
+// what those two need is here: database functions by name, and the two plant settings
+// calls syncPlants makes (through the plants part's functions, SOLAR-681 R2).
 import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 
 export const db = createClient(
@@ -41,12 +41,12 @@ export const postgrest: Db = {
     return data;
   },
   async configuredPlants(ids) {
-    const { data, error } = await db.from("plant_config").select("plant_id").in("plant_id", ids);
-    if (error) throw new Error(`plant_config: ${error.message}`);
-    return (data ?? []).map((r: any) => Number(r.plant_id));
+    const { data, error } = await db.rpc("plants_configured", { p_plants: ids });
+    if (error) throw new Error(`plants_configured: ${error.message}`);
+    return (data ?? []).map((r: any) => Number(r));
   },
   async clearBookmarks(ids) {
-    const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", ids);
+    const { error } = await db.rpc("plant_bookmarks_clear", { p_plants: ids });
     if (error) throw new Error(String(error.message));
   },
 };

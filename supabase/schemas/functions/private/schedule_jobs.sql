@@ -28,10 +28,12 @@ begin
     ('notify-push',          '* * * * *',          $c$select private.call_fn('notify-push', '{}', 55000)$c$),
     ('purge-cron-log',       '45 4 * * *',         $c$delete from cron.job_run_details where end_time < now() - make_interval(days => 7)$c$),
     ('rollup-old-days',      '*/5 5-7 * * *',      $c$call private.rollup_old_days(31)$c$),
-    ('sunsynk-plant-energy', '15 2 * * *',         $c$select private.call_fn('sync-plant-energy', '{}', 150000)$c$),
-    ('sunsynk-poll',         '* * * * *',          $c$select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from private.poll_shards() s$c$),
-    ('sunsynk-recover',      '5 4,10,16,22 * * *', $c$select private.call_fn('recover', '{}', 150000)$c$)
+    ('plant-energy',         '15 2 * * *',         $c$select private.call_fn('sync-plant-energy', '{}', 150000)$c$),
+    ('reader',               '* * * * *',          $c$select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from private.poll_shards() s$c$),
+    ('recover',              '5 4,10,16,22 * * *', $c$select private.call_fn('recover', '{}', 150000)$c$)
   ) t(name, sched, cmd) loop
     perform cron.schedule(j.name, j.sched, j.cmd);   -- by name: an existing job is updated in place
   end loop;
+  -- the names before SOLAR-681 R16: gone, so no job runs twice
+  perform cron.unschedule(jobname) from cron.job where jobname in ('sunsynk-poll', 'sunsynk-recover', 'sunsynk-plant-energy');
 end $function$;

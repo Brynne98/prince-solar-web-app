@@ -477,7 +477,7 @@ export type Database = {
                            },
 "api_logins":
 { Args: Record<PropertyKey, never>; Returns: {
-              "account_id": string,"kind": string,"last_ok_at": string,"linked_at": string,"plants": Json,"status": string,"sunsynk_username": string
+              "account_id": string,"kind": string,"last_ok_at": string,"linked_at": string,"plants": Json,"status": string,"username": string
             }[]
                            },
 "api_me":
@@ -618,6 +618,9 @@ export type Database = {
               "from_ts": number,"plant_id": number,"to_ts": number
             }[]
                            },
+"grid_live":
+{ Args: { "p_volts": number }; Returns: boolean
+                           },
 "independence_pct":
 { Args: { "p_home": number,"p_import": number }; Returns: number
                            },
@@ -730,6 +733,9 @@ export type Database = {
 "panel_kwp":
 { Args: { "p_groups": Json }; Returns: number
                            },
+"plant_bookmarks_clear":
+{ Args: { "p_plants": (number)[] }; Returns: undefined
+                           },
 "plant_bootstrap_kick":
 { Args: { "p_plant": number }; Returns: undefined
                            },
@@ -744,6 +750,9 @@ export type Database = {
 "plant_features_detect":
 { Args: { "p_plant": number }; Returns: Json
                            },
+"plant_history_loading":
+{ Args: { "p_plant": number }; Returns: boolean
+                           },
 "plant_inverters":
 { Args: { "p_plant": number }; Returns: {
               "sn": string
@@ -757,6 +766,9 @@ export type Database = {
                            },
 "plant_vendor":
 { Args: { "p_plant": number }; Returns: string
+                           },
+"plants_configured":
+{ Args: { "p_plants": (number)[] }; Returns: number[]
                            },
 "plants_list_seen":
 { Args: { "p_login": string,"p_mode"?: string,"p_plants": Json }; Returns: Json
@@ -851,7 +863,7 @@ export type Database = {
                            },
 "share_account_get":
 { Args: Record<PropertyKey, never>; Returns: {
-              "access_expires_at": number,"access_token": string,"id": string,"status": string,"sunsynk_username": string,"user_id": string
+              "access_expires_at": number,"access_token": string,"id": string,"status": string,"user_id": string,"username": string
             }[]
                            },
 "share_account_set":
