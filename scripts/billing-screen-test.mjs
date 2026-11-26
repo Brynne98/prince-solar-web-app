@@ -1,19 +1,15 @@
 // Billing screen tests (SOLAR-641): the pick, plans and confirm rules the SQL state test cannot
-// reach, run on the built app code (public/build/, `npm run build` first) with made-up account
+// reach, run on the app's modules (scripts/app-modules.mjs) with made-up account
 // states in api_account_state's shape.
 //   node scripts/billing-screen-test.mjs        exit 1 on any failure
 import { readFileSync } from 'node:fs';
-import { createContext, runInContext } from 'node:vm';
+import { browser, loadApp } from './app-modules.mjs';
 
 const root = new URL('..', import.meta.url);
-const stub = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : stub()), apply: () => stub(), construct: () => stub() });
-const ctx = { console, setTimeout, clearTimeout, setInterval, clearInterval, URL, URLSearchParams, Intl };
-Object.assign(ctx, { window: ctx, React: stub(), ReactDOM: stub(), document: stub(), localStorage: stub(), sessionStorage: stub(),
-  navigator: stub(), supabase: stub(), sb: stub(), posthog: stub(), fetch: () => new Promise(() => {}), addEventListener() {}, removeEventListener() {},
-  location: { search: '', hostname: 'localhost', href: 'http://localhost/' }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) });
-createContext(ctx);
-for (const f of ['config.js', 'build/text.js', 'build/link.js', 'build/data.js', 'build/components.js', 'build/app.js', 'build/flow.js', 'build/chart.js', 'build/tabs.js'])
-  runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), ctx, { filename: f });
+browser();
+let accountAnswer = () => null; // what api_account_state returns
+globalThis.sbStub = { rpc: async (fn) => ({ data: fn === 'api_account_state' ? await accountAnswer() : null, error: null }) };
+const ctx = await loadApp();
 
 const plant = (id, o = {}) => ({ plant: id, name: 'Plant ' + id, chosen: false, purged: false, logins: ['L1'], claimed: false, kept_elsewhere: false, ...o });
 const prices = [
@@ -143,33 +139,30 @@ test('a running plan with no saved card: Add card (final fix 16)', () => {
   eq(ctx.cardAction(acct({ card: { last4: '4242' } })), 'Change card');
   eq(ctx.cardAction(acct({ state: 'ended', plan: null, card: null })), null);
 });
-test('signed in: the account read again on every ps-account (final fix 14)', () => {
-  // the app files again, with hooks that run: useEffect at once, setState recorded
+test('signed in: the account read again on every ps-account (final fix 14)', async () => {
+  // fresh modules, with hooks that run: useEffect at once, setState recorded
   const on = {}, sets = [];
-  const R = new Proxy({ useState: (v) => [v, (x) => sets.push(x)], useEffect: (f) => { f(); } }, { get: (t, k) => t[k] ?? stub() });
-  const c = { ...ctx, React: R, addEventListener: (k, f) => (on[k] ??= []).push(f), removeEventListener() {} };
-  c.window = c;
-  createContext(c);
-  for (const f of ['config.js', 'build/text.js', 'build/link.js', 'build/data.js', 'build/components.js', 'build/app.js'])
-    runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), c, { filename: f });
-  c.checkReturn = c.loadPages = () => new Promise(() => {});
+  browser({ addEventListener: (k, f) => (on[k] ??= []).push(f) });
+  globalThis.reactStub = { useState: (v) => [v, (x) => sets.push(x)], useEffect: (f) => { f(); } };
+  const c = await loadApp({ fresh: true });
   c.SignedIn();
   const ended = { state: 'ended' };
-  c.accountNow = () => ended;
+  accountAnswer = () => ended;
+  await c.reloadAccount();
   (on['ps-account'] || []).forEach(f => f());
+  delete globalThis.reactStub;
   eq(sets.includes(ended), true);
 });
 
 // ---- verify review fixes -------------------------------------------------------------------
 test('pay with another card while past due: the card page, never the saved card (verify fix 2)', async () => {
   const sent = [];
-  const c = { ...ctx, AbortSignal, fetch: async (url, o) => { sent.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ status: 'pending' }) }; } };
-  c.window = c;
-  createContext(c);
-  for (const f of ['config.js', 'build/text.js', 'build/link.js']) runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), c, { filename: f });
-  c.sb = { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } };
-  c.toast = () => {};
+  browser({ AbortSignal, fetch: async (url, o) => { sent.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ status: 'pending' }) }; } });
+  const was = globalThis.sbStub;
+  globalThis.sbStub = { ...was, auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } };
+  const c = await loadApp({ fresh: true });
   await c.settlePayment();
+  globalThis.sbStub = was;
   eq(sent, [{ settle: true, newCard: true }]);
 });
 test('pay screen: each plant with its own date, a date passed left out (verify fix 14)', () => {
@@ -217,13 +210,13 @@ test('remove: a plant gone from its login, then claimed, goes with the share onl
   eq(ctx.acctLogins(a).map(g => g.kind), ['share']);
 });
 test('delete refused on a stale screen: the account is read again and its fresh reason shown (verify 4 fix 7)', async () => {
-  const fresh = acct({ may_delete: false, plan_name: 'Home' }), was = ctx.reloadAccount;
-  ctx.reloadAccount = () => Promise.resolve(fresh);
+  const fresh = acct({ may_delete: false, plan_name: 'Home' });
+  accountAnswer = () => fresh;
   eq(await ctx.deleteRefusal('cancel your plan first'), { blocked: true });
-  ctx.reloadAccount = () => Promise.resolve(acct({ may_delete: true }));
+  accountAnswer = () => acct({ may_delete: true });
   eq(await ctx.deleteRefusal('a payment is open'), { text: 'A payment is still going through. Try again tomorrow.', cancel: false });
-  ctx.reloadAccount = was;
-  eq(readFileSync(new URL('public/build/tabs.js', root), 'utf8').includes('ps-billing'), false);
+  accountAnswer = () => null;
+  eq(readFileSync(new URL('public/tabs.jsx', root), 'utf8').includes('ps-billing'), false);
 });
 test('one delete date, another chosen plant already deleted: names the plant (verify 4 fix 6)', () => {
   const s = { ...acct(), ...tz, state: 'ended', plan: null, had_plan: true, last_plan_name: 'Home', at: '2026-12-10T08:00:00Z',
@@ -252,13 +245,13 @@ test('remove login with a payment pending: history kept while it is pending (ver
 });
 test('delete refused while a read is on its way: waits for it, then reads again (verify 5 fix 7)', async () => {
   const stale = acct({ may_delete: true }), fresh = acct({ may_delete: false, plan_name: 'Home' });
-  const was = [ctx.reloadAccount, ctx.accountLoading];
-  let landed = false;
-  const pending = new Promise((r) => setTimeout(() => { landed = true; r(stale); }, 5));
-  ctx.accountLoading = () => (landed ? null : pending);
-  ctx.reloadAccount = () => (landed ? Promise.resolve(fresh) : pending);
+  // a read on its way that lands the stale state, then the fresh one
+  accountAnswer = () => new Promise((r) => setTimeout(() => r(stale), 5));
+  const onItsWay = ctx.reloadAccount();
+  accountAnswer = () => fresh;
   eq(await ctx.deleteRefusal('cancel your plan first'), { blocked: true });
-  [ctx.reloadAccount, ctx.accountLoading] = was;
+  eq(await onItsWay, stale);
+  accountAnswer = () => null;
 });
 test('an interval switch booked with a plan change names the next plan (verify 5 fix 8)', () => {
   const s = { ...acct(), ...tz, plan_name: 'Family', next_plan_name: 'Home', next_interval: 'year', period_end: '2026-12-31T08:00:00Z',

@@ -3,6 +3,8 @@
 // ============================================================================
 
 // CSS variables, so charts and the flow follow Dark or Light (SOLAR-318). Values live on :root.
+import React from 'react';
+import { plantNow } from './data.jsx';
 const COLORS = {
   pv: 'var(--pv)', // solar green
   batt: 'var(--batt)', // battery purple
@@ -65,6 +67,7 @@ function shiftDate(s, days) {
 }
 // A YYYY-MM-DD as words, "Fri 2 Oct" by default; opts for others ("2 October 2026").
 // Read as UTC so the day never shifts with the device's zone.
+/** @param {string} s @param {Intl.DateTimeFormatOptions} [opts] */
 function dayText(s, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
   const [y, m, d] = s.split('-').map(Number);
   // en-GB says "Sept"; every other short month has three letters
@@ -101,7 +104,7 @@ const _moneyFmt = {};
 // than as "ZAR 12" in a browser set to another language.
 const CURRENCY_LOCALE = { ZAR: 'en-ZA', GBP: 'en-GB', EUR: 'en-IE', AUD: 'en-AU', NZD: 'en-NZ', USD: 'en-US', KES: 'en-KE', NGN: 'en-NG', ZMW: 'en-ZM', BWP: 'en-BW', NAD: 'en-NA', MZN: 'pt-MZ', INR: 'en-IN', PKR: 'en-PK', BRL: 'pt-BR' };
 function moneyFormatter(dp) {
-  const cur = window.PLANT_CURRENCY || 'ZAR';
+  const cur = plantNow.currency || 'ZAR';
   const key = cur + ':' + dp;
   if (!_moneyFmt[key]) {
     try {
@@ -133,12 +136,12 @@ function fmtMoneySmart(v) {
 }
 // the symbol alone, for labels like "R/kWh"
 function moneySymbol() {
-  try { return moneyFormatter(0).formatToParts(0).find(p => p.type === 'currency')?.value || window.PLANT_CURRENCY; }
-  catch (e) { return window.PLANT_CURRENCY || ''; }
+  try { return moneyFormatter(0).formatToParts(0).find(p => p.type === 'currency')?.value || plantNow.currency; }
+  catch (e) { return plantNow.currency || ''; }
 }
 const fmtRand = fmtMoney, fmtRandSmart = fmtMoneySmart;
 // A clock time at the plant shown (SOLAR-445), not on the viewer's device.
-function fmtTime(d, tz = window.PLANT_TZ) {
+function fmtTime(d, tz = plantNow.tz) {
   return fmtPlantTime(d, tz);
 }
 // bad-sensor guard (e.g. battery temp -100°C per API caveat)
@@ -334,10 +337,4 @@ const LockIcon = () => (
     <path d="M5.25 7V5.1a2.75 2.75 0 0 1 5.5 0V7" />
   </svg>
 );
-Object.assign(window, {
-  LockIcon,
-  COLORS, COLORS_TEXT, fmtPower, fmtPowerParts, battShown, localDateStr, plantDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
-  Card, StatTile, Segmented, Switch, Toggle, LegendChip, SectionTitle, InfoDot, Tip,
-  Skeleton, SkelLine, BusyButton, TipRow, Meter,
-  fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
-});
+export { LockIcon, COLORS, COLORS_TEXT, fmtPower, fmtPowerParts, battShown, localDateStr, plantDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime, Card, StatTile, Segmented, Switch, Toggle, LegendChip, SectionTitle, InfoDot, Tip, Skeleton, SkelLine, BusyButton, TipRow, Meter, fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol };

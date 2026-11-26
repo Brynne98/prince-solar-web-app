@@ -8,7 +8,8 @@
 #   SUPABASE_DB_PASSWORD    the production database password
 #   CLOUDFLARE_API_TOKEN    Cloudflare token with Pages edit on this account
 #   CLOUDFLARE_ACCOUNT_ID
-# and the variable SUPABASE_PROJECT_REF. Take a backup before running it (DEPLOY.md).
+#   POSTHOG_CLI_TOKEN       PostHog personal API key, scope error tracking write (source maps, F19)
+# and the variables SUPABASE_PROJECT_REF and POSTHOG_CLI_PROJECT_ID (PostHog project id, 321817). Take a backup before running it (DEPLOY.md).
 name: Release
 
 on:
@@ -97,6 +98,20 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci && npm run build
+        env:
+          SOURCEMAPS: '1'
+      # Source maps go to PostHog only, so its error stacks show the source; the site serves none (F19).
+      - name: Source maps to PostHog, then out of public/
+        env:
+          POSTHOG_CLI_API_KEY: ${{ secrets.POSTHOG_CLI_TOKEN }}
+          POSTHOG_CLI_PROJECT_ID: ${{ vars.POSTHOG_CLI_PROJECT_ID }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          ph="npx -y @posthog/cli@0.19.4 --host https://eu.posthog.com sourcemap"
+          $ph inject -d public/build --release-name prince-solar-hub --release-version "$VERSION"
+          $ph upload -d public/build --release-name prince-solar-hub --release-version "$VERSION" --delete-after
+          find public -name '*.map' -delete
+          if [ -n "$(find public -name '*.map')" ]; then echo "::error::source maps left in public/"; exit 1; fi
       - name: Upload public/ to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -111,3 +126,9 @@ jobs:
             sleep 10
           done
           echo "::error::app.princesolarhub.co.za does not serve $VERSION"; exit 1
+      - name: No source map is public
+        run: |
+          for f in $(grep -o 'build/[A-Za-z0-9._-]*\.js' public/index.html); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://app.princesolarhub.co.za/$f.map")
+            [ "$code" = 404 ] || { echo "::error::$f.map answers $code"; exit 1; }
+          done

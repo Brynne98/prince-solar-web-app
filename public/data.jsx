@@ -7,6 +7,11 @@
 // (Field names mirror API.md; the old mock generators were removed.)
 // ============================================================================
 
+import { AccountText } from '../supabase/functions/_shared/text.ts';
+import { checkSession } from './auth.jsx';
+import { localDateStr } from './components.jsx';
+import { reloadAccount } from './link.jsx';
+import { sb } from './sb.js';
 const TYPICAL_DAYS = 7; // Live "usually N%" and Battery's "if the grid goes off".
 const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 
@@ -21,20 +26,22 @@ const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 // per request. Same shapes; the browser just never touches the vendor API.
 //
 // Multi-plant: every RPC takes p_plant. null means "my only/first plant" server-side;
-// the header's plant selector sets window.CURRENT_PLANT and everything follows.
+// the header's plant selector sets window.CURRENT_PLANT and everything follows. It stays on
+// window because config.js's track() reads it.
 window.CURRENT_PLANT = window.CURRENT_PLANT ?? null;
-window.PLANT_CURRENCY = window.PLANT_CURRENCY || 'ZAR';
-// The plant's timezone: every clock time on screen is the plant's, as alerts and emails are (SOLAR-445).
-window.PLANT_TZ = window.PLANT_TZ || null;
+// The plant on screen, for every module. tz: the plant's timezone: every clock time on screen
+// is the plant's, as alerts and emails are (SOLAR-445). lastReadDay: the newest reading's day.
+// sync: the 60-day fetch's progress, from the snapshot. days: the plant's days with data.
+export const plantNow = { currency: 'ZAR', tz: null, lastReadDay: null, sync: null, days: null };
 // plantTurn counts plant changes. An answer asked for in an earlier turn is refused, even when
 // the plant is the same again (A, B, A): a late reply would overwrite the newer one (SOLAR-646).
 let plantTurn = 0;
-window.setCurrentPlant = (id, currency, tz) => {
+export const setCurrentPlant = (id, currency, tz) => {
   const next = id == null ? null : Number(id);
   if (next !== window.CURRENT_PLANT) plantTurn += 1;
   window.CURRENT_PLANT = next;
-  if (currency) window.PLANT_CURRENCY = currency;
-  window.PLANT_TZ = tz || null;
+  if (currency) plantNow.currency = currency;
+  plantNow.tz = tz || null;
 };
 
 const ROUTES = {
@@ -62,15 +69,15 @@ async function getJSON(url) {
 
   const [fn, params] = route(q);
   const turn = plantTurn;
-  const stale = () => { const e = new Error('plant changed'); e.stale = true; return e; };
+  const stale = () => Object.assign(new Error('plant changed'), { stale: true });
   try {
-    const data = await must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
+    const data = await must(sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
     if (turn !== plantTurn) throw stale();
     return data;
   } catch (e) { throw turn !== plantTurn ? stale() : e; }
 }
 // An answer for a plant no longer on screen: drop it without a word.
-window.isStale = (e) => !!e?.stale;
+export const isStale = (e) => !!e?.stale;
 // A Supabase call's data, or its error thrown. fallback stands in for no data.
 // A server or database error also goes to PostHog with the RPC or table name and code,
 // since many callers fall back to empty data without a word (SOLAR-243, SOLAR-472).
@@ -81,7 +88,7 @@ async function must(call, fallback, failed = 'failed') {
   if (error) {
     window.reportServerError?.(name, error, status);
     // the cause may be a session ended elsewhere or a deleted account (SOLAR-520)
-    window.checkSession();
+    checkSession();
     throw new Error(error.message || failed);
   }
   return fallback !== undefined && !data ? fallback : data;
@@ -101,9 +108,9 @@ function sharedAsk(name, ms, rk, ask) {
 }
 // The plant and the shared answers belong to who was signed in. Without a reload the next
 // user's first loads asked for the last user's plant and got 403s (SOLAR-442).
-window.sb.auth.onAuthStateChange((event) => {
+sb.auth.onAuthStateChange((event) => {
   if (event !== 'SIGNED_OUT') return;
-  window.CURRENT_PLANT = null; window.PLANT_CURRENCY = 'ZAR'; window.PLANT_TZ = null; plantTurn += 1;
+  window.CURRENT_PLANT = null; plantNow.currency = 'ZAR'; plantNow.tz = null; plantTurn += 1;
   for (const k in shared) delete shared[k];
 });
 const MIN5 = 5 * 60000;
@@ -113,7 +120,7 @@ const isOnline = (s) => s === 1 || s === '1' || s === 'online' || s === true;
 // SunSynk's flag can read 0 for hours while the inverter still uploads (SOLAR-226), so
 // a reading newer than this counts as online. A slave uploads every 5 min; 15 allows
 // two missed uploads. The flag decides only when there is no reading time.
-const READ_FRESH_MS = 15 * 60000;
+export const READ_FRESH_MS = 15 * 60000;
 
 // ---- /api/overview -> snapshot ---------------------------------------------
 function mapInverter(s, asOf) {
@@ -224,14 +231,14 @@ async function fetchSnapshot() {
   // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
   // they come from app_config via api_overview, which is also what the phone alerts
   // read. Pass them straight through; null until the first snapshot lands.
-  if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
+  if (api.config && api.config.currency) plantNow.currency = api.config.currency;
   const cfg = api.config || {};
   const agg = aggregate(inverters, api.totals || {});
   // Today's counters are the last reading's. A plant silent since before the plant's
   // midnight has none for today, not yesterday's (SOLAR-348).
   const day = (d) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone || undefined }).format(d); } catch (e) { return null; } };
   // the newest reading's plant date, for the date bar's list of days (SOLAR-648)
-  window.LAST_READ_DAY = api.lastTs ? day(new Date(api.lastTs * 1000)) : null;
+  plantNow.lastReadDay = api.lastTs ? day(new Date(api.lastTs * 1000)) : null;
   // No reading yet: no today at all, a dash and not 0.0 kWh (SOLAR-623)
   // Each inverter's too: Equipment showed yesterday's per inverter (SOLAR-648).
   if (!api.lastTs || day(new Date(api.lastTs * 1000)) !== day(new Date())) {
@@ -335,11 +342,11 @@ const dataDaysCache = {}, dataDaysGood = {};
 function fetchDataDays(fresh) {
   // No plant yet (the empty outlines in Setup): no days to ask about, and the ask would fail.
   if (window.CURRENT_PLANT == null) return Promise.resolve(null);
-  const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = window.SYNC;
+  const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = plantNow.sync;
   const old = c && s && (s.pending || s.spinePending) && Date.now() - c.at > 60000;
   // A reading came in on a day the list lacks (the day turned since it was asked): that day
   // has data, so it joins the list here rather than every page asking again at midnight (SOLAR-648)
-  const day = window.LAST_READ_DAY, had = dataDaysGood[k];
+  const day = plantNow.lastReadDay, had = dataDaysGood[k];
   if (c && !fresh && !old && day && had && !had.has(day)) {
     dataDaysGood[k] = new Set([...had, day]);
     dataDaysCache[k] = { p: Promise.resolve(dataDaysGood[k]), at: c.at };
@@ -388,7 +395,7 @@ async function fetchHourly(days, rk) {
 // Each of the caller's plants: last reading, inverters online, first-load progress (0101).
 // For the plant menu; no p_plant, so not through getJSON.
 async function fetchPlantStates() {
-  return must(window.sb.rpc('api_plant_states'), [], 'RPC api_plant_states failed');
+  return must(sb.rpc('api_plant_states'), [], 'RPC api_plant_states failed');
 }
 // How many days this plant has logged; drives the "collecting your first day" copy.
 async function fetchPlantDays() {
@@ -424,35 +431,35 @@ async function fetchGridToday(rk, date) {
 // battery, roof). `prefs` is the per-user display state that used to live in
 // localStorage and therefore vanished on a new device.
 async function fetchMe() {
-  return must(window.sb.rpc('api_me'), { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] });
+  return must(sb.rpc('api_me'), { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] });
 }
 // ---- the account (SOLAR-641) ------------------------------------------------
 // Its state, plans, prices, plants chosen and bills, all worked out on the server
 // (api_account_state, 0247). Screens read it through useAccount (link.jsx).
-const fetchAccountState = () => must(window.sb.rpc('api_account_state'), null, 'RPC api_account_state failed');
+const fetchAccountState = () => must(sb.rpc('api_account_state'), null, 'RPC api_account_state failed');
 // The whole list of chosen plants; the server checks the places, the free week and the plan.
-const saveChosenPlants = (ids) => must(window.sb.rpc('api_choose_plants', { p_plants: ids }), null, 'RPC api_choose_plants failed')
-  .then(a => { if (a) window.reloadAccount(); return a; });
-const saveLinkRemove = (account) => must(window.sb.rpc('api_link_remove', { p_account: account }), null, 'RPC api_link_remove failed');
+const saveChosenPlants = (ids) => must(sb.rpc('api_choose_plants', { p_plants: ids }), null, 'RPC api_choose_plants failed')
+  .then(a => { if (a) reloadAccount(); return a; });
+const saveLinkRemove = (account) => must(sb.rpc('api_link_remove', { p_account: account }), null, 'RPC api_link_remove failed');
 // What a plan would charge now and next (a first plan, an upgrade, a booked change).
-const fetchPlanQuote = (plan, interval) => must(window.sb.rpc('api_plan_quote', { p_plan: plan, p_interval: interval }), null, 'RPC api_plan_quote failed');
+const fetchPlanQuote = (plan, interval) => must(sb.rpc('api_plan_quote', { p_plan: plan, p_interval: interval }), null, 'RPC api_plan_quote failed');
 // SOLAR-428: image is a JPEG as base64, or null. Refusals come back as 22023 (see 0179).
 const sendFeedback = (message, page, image) =>
-  must(window.sb.rpc('api_send_feedback', { p_message: message, p_page: page, p_version: window.APP_VERSION, p_image: image }));
+  must(sb.rpc('api_send_feedback', { p_message: message, p_page: page, p_version: window.APP_VERSION, p_image: image }));
 async function savePrefs(patch) {
-  return must(window.sb.rpc('api_prefs_set', { p_prefs: patch }), {});
+  return must(sb.rpc('api_prefs_set', { p_prefs: patch }), {});
 }
 async function savePlantConfig(plantId, patch) {
-  const data = await must(window.sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single());
+  const data = await must(sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single());
   window.track('plant_settings_save_done', { fields: Object.keys(patch) });
   return data;
 }
 // A user's on/off switches in table, one column per kind. No row yet means all on.
-const fetchFlags = (table, kinds, userId) => must(window.sb.from(table).select(kinds.join(',')).eq('user_id', userId).maybeSingle(),
+const fetchFlags = (table, kinds, userId) => must(sb.from(table).select(kinds.join(',')).eq('user_id', userId).maybeSingle(),
   Object.fromEntries(kinds.map(k => [k, true])));
 // One kind per call, so two quick taps on different rows can't undo each other.
 async function saveFlag(table, event, userId, kind, on) {
-  await must(window.sb.from(table).upsert({ user_id: userId, [kind]: on }));
+  await must(sb.from(table).upsert({ user_id: userId, [kind]: on }));
   window.track(event, { kind, on });
 }
 // Which report and alert emails the user wants (0091, SOLAR-158), and the emails that offer
@@ -464,11 +471,11 @@ const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_
 // The bell: the billing notices, and the last 30 days of alerts (api_alerts, SOLAR-411): a start and its "back" are two rows (0166, SOLAR-431). unread counts rows,
 // and the notices not yet seen (0173, SOLAR-465).
 async function fetchNotifications() {
-  const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
-    must(window.sb.rpc('api_alerts', { p_from: new Date(Date.now() - 30 * 86400000).toISOString() }))]);
+  const [n, a] = await Promise.all([must(sb.rpc('api_notifications')),
+    must(sb.rpc('api_alerts', { p_from: new Date(Date.now() - 30 * 86400000).toISOString() }))]);
   // api_alerts sends each alert's facts; the words come from the text catalog, as the pop-up's
   // and the email's do (SOLAR-645, 0264).
-  const worded = a.items.map(it => ({ ...it, ...window.AccountText.alertLine({ kind: it.kind, data: it.data, created: it.created, tz: it.tz }) }));
+  const worded = a.items.map(it => ({ ...it, ...AccountText.alertLine({ kind: it.kind, data: it.data, created: it.created, tz: it.tz }) }));
   // api_alerts sends rows newest-written first; a row shows when it happened (at), which can
   // be earlier (a grid cut found after a gap), so the list sorts by that (SOLAR-617).
   const items = worded.sort((x, y) => (y.at - x.at) || (y.id - x.id));
@@ -480,8 +487,8 @@ async function readNotifications(ids) {
   const keys = ids && ids.filter(id => typeof id === 'string');
   const alerts = ids && ids.filter(id => typeof id !== 'string');
   await Promise.all([
-    (!ids || alerts.length) && must(window.sb.rpc('api_notifications_read', { p_ids: alerts })),
-    keys?.length && must(window.sb.rpc('api_notices_read', { p_keys: keys })),
+    (!ids || alerts.length) && must(sb.rpc('api_notifications_read', { p_ids: alerts })),
+    keys?.length && must(sb.rpc('api_notices_read', { p_keys: keys })),
   ]);
 }
 // Which alerts pop up (push_prefs, 0124).
@@ -516,7 +523,7 @@ async function pushTurnOn() {
   const key = Uint8Array.from(atob(window.VAPID_PUBLIC.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
   const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
   const j = sub.toJSON();
-  const { error } = await window.sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  const { error } = await sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
   if (error) { await sub.unsubscribe().catch(() => {}); throw new Error(error.message); }
   window.track('push_enabled_done');
   return 'on';
@@ -528,7 +535,7 @@ async function pushResync() {
   const sub = await pushSub();
   if (!sub) return;
   const j = sub.toJSON();
-  await window.sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  await sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
 }
 // Off here, and on sign-out, so a shared computer stops showing the last account's alerts.
 // The browser's own subscription goes even if the server call fails: the push service
@@ -538,13 +545,13 @@ async function pushTurnOff(reason = 'switch') {
   const sub = await pushSub();
   if (!sub) return 'off';
   // a supabase query has then but no catch
-  try { await window.sb.rpc('api_push_unsub', { p_endpoint: sub.endpoint }); } catch (e) { /* see above */ }
+  try { await sb.rpc('api_push_unsub', { p_endpoint: sub.endpoint }); } catch (e) { /* see above */ }
   await sub.unsubscribe();
   window.track('push_disabled_done', { reason });
   return 'off';
 }
 async function deleteAccount() {
-  const data = await must(window.sb.rpc('api_account_delete'));
+  const data = await must(sb.rpc('api_account_delete'));
   window.track('account_delete_done');
   return data;
 }
@@ -566,17 +573,17 @@ function syncProgress(sync) {
   const win = sync.window || 60;
   const days = Math.min(win, sync.days || 0);
   const behind = sync.invPending && sync.tempNext
-    ? Math.round((Date.parse(window.localDateStr()) - Date.parse(sync.tempNext)) / 86400000) : 0;
+    ? Math.round((Date.parse(localDateStr()) - Date.parse(sync.tempNext)) / 86400000) : 0;
   const tempDays = behind > 1 ? Math.max(0, win - behind) : win;
   return days < win || tempDays < win ? (days + tempDays) / (2 * win) : null;
 }
 
 // What an empty chart should say. A plant with under a day of history is new, and
 // "collecting your first day" is the honest message; anything older is a real gap.
-// While the last 60 days are still being fetched (window.SYNC, from the snapshot)
+// While the last 60 days are still being fetched (plantNow.sync, from the snapshot)
 // a thin log is not a gap either, and says so.
 function emptyText(days, fallback) {
-  const sync = window.SYNC;
+  const sync = plantNow.sync;
   const fetching = !!(sync && sync.pending && sync.days < sync.window);
   if (days != null && days < 1) return fetching
     ? 'Loading the last 60 days.'
@@ -587,8 +594,4 @@ function emptyText(days, fallback) {
   return fallback || 'No data for this range yet.';
 }
 
-Object.assign(window, {
-  fetchSnapshot, fetchDay, dayFor, dayPeak, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
-  fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
-  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
-});
+export { fetchSnapshot, fetchDay, dayFor, dayPeak, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday, fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS };

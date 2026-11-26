@@ -6,14 +6,16 @@ If something here is close, use it or give it a prop; don't make a second one.
 `node scripts/reuse-check.mjs` (part of `npm test`) catches the common repeats: native
 `<select>`, date inputs and checkboxes, `title=` tooltips, raw `.skel`, `confirm()` and
 `alert()`, hand-drawn copies of icons, hand-made tooltip rows, meters, sign-in cards,
-timeouts and saved-tab reads, CSS classes nothing uses, two files declaring the same
-top-level name, a hidden or recoloured focus ring, an icon off the icon line or sizes, a transition or animation not timed with `--dur-*` and `--ease-*`, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
+timeouts and saved-tab reads, CSS classes nothing uses, a hidden or recoloured focus ring, an icon off the icon line or sizes, a transition or animation not timed with `--dur-*` and `--ease-*`, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
 next to it.
 
-How it is wired: every `public/*.jsx` shares one global scope. `auth`, `link`, `data`,
-`components` and `app` load first; `flow`, `chart` and `tabs` load later, on demand.
-So anything an early file needs lives in an early file. An early file reaching for
-something in a late file calls it as `window.X` at run time, never at load.
+How it is wired: every `public/*.jsx` is an ES module; a file imports what it uses from the
+file that exports it (SOLAR-679 F15). `npm run build` (Vite) bundles them from `app.jsx`. `auth`,
+`link`, `data`, `components` and `app` load first; `tabs` (with `flow` and `chart`) is a chunk of
+its own that `app.jsx` imports once someone is signed in. So an early file never imports a late
+one. Only `config.js` and `theme.js` (plain scripts, also on the static pages) share through
+`window`: settings, `window.track`, `window.CURRENT_PLANT`, `window.setTheme`. The plant on
+screen is `plantNow` (data.jsx). `npm test` type-checks the files (`jsconfig.json`).
 
 Look and feel (sizes, colours, radii) is in `DESIGN.md`. This file is about code.
 
@@ -47,7 +49,7 @@ Formatting and dates (also `components.jsx`):
 | `fmtTime`, `fmtPlantTime`, `plantHour` | Times, in the plant's time zone where it matters. |
 | `fmtDuration(mins)` | "2h 5m", "12 min". |
 | `localDateStr(d)` | Today, or `d`, as `YYYY-MM-DD` in local time. |
-| `plantDateStr(tz, d)` | Today, or `d`, as `YYYY-MM-DD` at the plant (`tz`, e.g. `window.PLANT_TZ`); local time when `tz` is unknown. Every day picker opens on it. |
+| `plantDateStr(tz, d)` | Today, or `d`, as `YYYY-MM-DD` at the plant (`tz`, e.g. `plantNow.tz`); local time when `tz` is unknown. Every day picker opens on it. |
 | `shiftDate(s, days)` | A `YYYY-MM-DD` moved by whole days. |
 | `dayText(s, opts)` | A `YYYY-MM-DD` as "Mon 3 Nov", or with your own `Intl` options. |
 | `plantLabel(p)` | A plant's name, or "Plant 123". |
@@ -64,7 +66,7 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 
 | Name | Use it for |
 |---|---|
-| `AccountText` (`AT`) | The catalog: `_shared/text.ts`, typed, with zero/one/many forms. `npm run build` makes `public/build/text.js` (`window.AccountText`); notify imports the file itself. `money`, `day`, `forms`, `names` are its only formatters. A new line goes here. |
+| `AccountText` (`AT`) | The catalog: `_shared/text.ts`, typed, with zero/one/many forms. The screens import it as a module; so does notify. `money`, `day`, `forms`, `names` are its only formatters. A new line goes here. |
 | `useAccount()`, `reloadAccount()` | The signed-in account's state (`api_account_state`, 0247), read once and shared; `reloadAccount` reads it again and tells every screen. |
 | `ChooseDialog` | The one plant pick (link.jsx): `mode` `choose` (Plants, after a link, after a payment), `checkout` (the final choice before paying), `keep` (a smaller plan's plants). Which changes are confirmed in `SwitchConfirm`: `pickNext`. |
 | `acctLogins(acct, keep)` | The account's plants under their logins, in `KeepPicker`'s shape. |
@@ -124,7 +126,7 @@ The per-minute reading of a login, for any host that runs the poller (SOLAR-656)
 ## Data (`data.jsx`)
 
 Every Supabase read and write goes through a `fetch*` or `save*` here; don't call
-`window.sb` from a screen. New ones use `must(call, fallback, failed)`, which throws on
+`sb` (sb.js, the one client) from a screen. New ones use `must(call, fallback, failed)`, which throws on
 an error and returns `fallback` when there is no row. `fetchFlags` and `saveFlag` cover
 a row of on/off settings (email and push preferences); `saveFlag` sends its own event. `emptyText` is the message for a plant with no data yet.
 `dayFor(day, date)` is a `fetchDay` series only when it is that day's (just past midnight today's can
@@ -152,7 +154,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `stepNum`, `wholeNum`, `cfgFields`, `sumPatch` | Reading, checking and saving system config (size, panels, reserve, rate). |
 | `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. `writeTab` adds a history entry for a new page; pass `replace` for a change the app made itself. |
 | `usePageHistory(tab, plant, onBack)`, `usePageTitle(tab)` | The address follows the page and Back/Forward show the entry's page; the browser tab reads "Solar · Prince Solar Hub" (SOLAR-515). |
-| `window.toast(text)` | A short message in the bottom-right corner (bottom middle on phones). Use instead of `alert()`. The first sentence shows bold; any sentences after it go on the line below (SOLAR-638). `{ error: true }` for a failure (red), `{ info: true }` for a note that is neither (no tick). One sent just before sign-out shows on the sign-in screen. A red one sends `error_toast_shown` (SOLAR-588). Goes after 5 s; one with a link stays until closed (×, Esc). A click on any toast closes it. |
+| `toast(text)` | A short message in the bottom-right corner (bottom middle on phones). Use instead of `alert()`. The first sentence shows bold; any sentences after it go on the line below (SOLAR-638). `{ error: true }` for a failure (red), `{ info: true }` for a note that is neither (no tick). One sent just before sign-out shows on the sign-in screen. A red one sends `error_toast_shown` (SOLAR-588). Goes after 5 s; one with a link stays until closed (×, Esc). A click on any toast closes it. |
 | `PageBoundary` | Wraps each page in `Frame`: a crash shows a card with Reload, not a blank screen, and goes to PostHog. |
 | `openFeedback(report)` | The feedback box; `report` = { text, id } makes it "Report a problem" with the error attached. |
 | `NotifRows` | Alert cards under day headings in the bell list, laid out as the phone pop-up: kind icon, the plant's name on its own top line (2+ plants), title and time, then the numbers; a tap opens the alert's page (SOLAR-598). Billing notices (`NoticeRows`) lead the Today group, same card with a button (SOLAR-353). The full Notifications page went in SOLAR-598. |

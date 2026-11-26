@@ -171,9 +171,9 @@ Then, once, in the dashboard:
 `pg_cron` isn't enabled, which is how it stays harmless on the local stack.
 
 The frontend deploys itself: Cloudflare Pages publishes `public/` from `main`: the app at
-app.princesolarhub.com, the showcase at princesolarhub.com. Cloudflare runs `npm ci && npm run build`, which compiles the `.jsx` into
-`public/build/*.js`; the browser no longer runs Babel (SOLAR-131). Locally the `dashboard`
-preview builds first and rebuilds on save. GitHub Pages is off; the old github.io address no longer works.
+app.princesolarhub.com, the showcase at princesolarhub.com. Cloudflare runs `npm ci && npm run build`, which bundles the `.jsx` modules with Vite into
+`public/build/` (SOLAR-679 F15). Locally `npm run dev` (the `dashboard` preview) builds,
+rebuilds on save and serves `public/`. GitHub Pages is off; the old github.io address no longer works.
 
 ---
 

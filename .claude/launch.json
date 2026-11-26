@@ -4,13 +4,13 @@
     {
       "name": "dashboard",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["scripts/build-jsx.js", "--serve", "3003"],
+      "runtimeArgs": ["scripts/dev.mjs", "3003"],
       "port": 3003
     },
     {
       "name": "dashboard-3004",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["scripts/build-jsx.js", "--serve", "3004"],
+      "runtimeArgs": ["scripts/dev.mjs", "3004"],
       "port": 3004
     }
   ]
