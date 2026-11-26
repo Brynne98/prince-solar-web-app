@@ -313,7 +313,6 @@ async function fetchDay(date) {
 // A day series only when it is the day asked for: just past midnight the series on hand can
 // still be yesterday's (SOLAR-648). null otherwise.
 const dayFor = (day, date) => (day && (!day.date || day.date === date) ? day : null);
-// How many buckets of a day series hold a reading; a line needs two.
 // The day's top `key` reading ('pv', 'load' or 'grid') as { t, [key] }, or null: the top minute
 // from the server (SOLAR-676); the top 5-minute point for an answer sent without one.
 const dayPeak = (day, key) => {
@@ -323,6 +322,7 @@ const dayPeak = (day, key) => {
   ((day && day.points) || []).forEach(p => { if (p[key] != null && (!pk || p[key] > pk[key])) pk = p; });
   return pk;
 };
+// How many buckets of a day series hold a reading; a line needs two.
 const realPoints = (day) => ((day && day.points) || []).filter(p => p.pv != null).length;
 
 // Earliest date with data (≈ commission date). Bounds the day picker; null if
