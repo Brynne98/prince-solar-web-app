@@ -1,5 +1,5 @@
 // Fake SunSynk for the tester account in production (SOLAR-270): the local mock behind a
-// function. Only logins ending in @mock reach it (_shared/sunsynk.ts), and link-sunsynk
+// function. Only logins ending in @mock reach it (_shared/brands/sunsynk/api.ts), and link-sunsynk
 // lets only TESTER_USERS link one (SOLAR-477). Plant ids move up by MOCK_PLANT_OFFSET so a fake plant
 // never shares an id with a real SunSynk plant. Fake data only; no secrets, no database.
 import { handle } from "../_shared/mock-sunsynk.mjs";

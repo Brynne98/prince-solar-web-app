@@ -12,7 +12,8 @@
 // Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1, the run
 // writes nothing. ?render=all&plant=<id> returns every template built from that plant's data,
 // for checking by eye.
-import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
 import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, historySynced, type Period, plantEvent, type PlantEvent, loginEvent,

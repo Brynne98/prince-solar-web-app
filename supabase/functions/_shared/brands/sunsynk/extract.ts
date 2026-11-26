@@ -49,6 +49,8 @@ export function powerField(obj: any, ...keys: string[]): number {
 // per-plant setting (plant_config.batt_positive_means, migration 0041) and every
 // consumer stores "+ = charging". The env var is only the fleet default used until a
 // plant's own sign has been detected or set.
+import type { InverterInfo } from "../types.ts";
+
 export const DEFAULT_BATT_POSITIVE_MEANS = Deno.env.get("BATTERY_POSITIVE_MEANS") ?? "discharging";
 
 export type ExtractOpts = { battPositiveMeans?: string | null };
@@ -61,24 +63,7 @@ export interface RawBundle {
   output: any;
 }
 
-export interface InverterInfo {
-  sn: string;
-  alias?: string;
-  plantId?: number | null;
-  plantName?: string | null;
-  model?: string;
-  status?: number | string;
-  gsn?: string;
-  soft?: string;
-  hmi?: string;
-  commType?: string;
-  /** the inverter's last stored readings row, whole (from inverters_cached, 0032) */
-  lastReading?: Record<string, unknown> | null;
-  /** how many carried rows sit on top of the last fetched one (0032) */
-  carriedRun?: number;
-  /** seconds between the logger's last uploads; null until three are known (0230, SOLAR-612) */
-  uploadS?: number | null;
-}
+export type { InverterInfo };
 
 /** The 5 realtime endpoints every acquisition path reads (per inverter SN). */
 export const realtimePaths = (sn: string) => ({

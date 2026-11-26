@@ -8,7 +8,9 @@
 //
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
-import { db, linkAccount, LoginRejected, saveCallTally } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { LoginRejected, saveAllCalls } from "../_shared/brands/index.ts";
+import { linkAccount } from "../_shared/plants.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
@@ -120,6 +122,6 @@ serve("link-sunsynk", async (req) => {
     if (status === 502) noteError("link_failed", e, { user: userId });
     return json({ error: status === 401 ? "SunSynk rejected those credentials" : "could not reach SunSynk" }, status, cors);
   } finally {
-    await saveCallTally();
+    await saveAllCalls();
   }
 });

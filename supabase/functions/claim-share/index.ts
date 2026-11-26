@@ -7,7 +7,9 @@
 // Answers: 200 {result: "claimed" | "claimed_paused" | "yours", plantId, plantName},
 // 404 {error: "not_shared"}, 409 {error: "taken" | "no plan"}, 429 too many tries. A taken plant's id
 // is not sent back: a serial typed from someone else's inverter would reveal it.
-import { claimShared, db, saveCallTally } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { saveAllCalls } from "../_shared/brands/index.ts";
+import { claimShared } from "../_shared/plants.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { claimAny, Refused, type Rpc } from "../_shared/links.ts";
@@ -67,6 +69,6 @@ serve("claim-share", async (req) => {
     noteError("claim_failed", e, { user: userId });
     return json({ error: "could not reach SunSynk" }, 502, cors);
   } finally {
-    await saveCallTally();
+    await saveAllCalls();
   }
 });

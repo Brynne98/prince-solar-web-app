@@ -3,7 +3,8 @@
 // Two consumers: `recover` (per-day 5-min feed, to backfill logger-offline minutes)
 // and `sync-plant-energy` (daily/monthly kWh totals, which reach back to the plant's
 // commission date and so cannot be derived from our own history).
-import { type Account, apiGet } from "./sunsynk.ts";
+import { type Account, apiGet } from "./api.ts";
+import type { VendorPlantId } from "../types.ts";
 import { num } from "./extract.ts";
 
 /** Map a SunSynk plant-feed series label to our key. */
@@ -40,7 +41,7 @@ export type Bucketed = (Record<string, number> | null)[];
  *
  * The feed's Battery sign is already chart-convention (- = charging).
  */
-export async function plantFeedForDay(acc: Account, plantId: number, day: string): Promise<Bucketed | null> {
+export async function plantFeedForDay(acc: Account, plantId: VendorPlantId, day: string): Promise<Bucketed | null> {
   const data = await apiGet(`/plant/energy/${plantId}/day?lan=en&date=${day}&id=${plantId}`, acc);
   const byBucket: Bucketed = new Array(288).fill(null);
   for (const info of (data && data.infos) || []) {
@@ -71,7 +72,8 @@ const chartValOfAgg: Record<string, (r: any) => number> = {
 };
 const clampScale = (v: number) => Math.min(2.5, Math.max(0.4, v));
 
-export type FeedScale = { pv: number; batt: number; grid: number; load: number };
+export type { FeedScale } from "../types.ts";
+import type { FeedScale } from "../types.ts";
 
 export function calibrateFeedScale(feed: Bucketed | null, realByBucket: any[]): FeedScale {
   const scale: Record<string, number> = {};
@@ -154,13 +156,13 @@ export function rowsFromEnergy(infos: any[], granularity: "day" | "month", gridM
   }));
 }
 
-export async function fetchMonthRows(acc: Account, plantId: number, year: number, month1: number, gridMul = 1) {
+export async function fetchMonthRows(acc: Account, plantId: VendorPlantId, year: number, month1: number, gridMul = 1) {
   const date = `${year}-${String(month1).padStart(2, "0")}`;
   const data = await apiGet(`/plant/energy/${plantId}/month?lan=en&date=${date}&id=${plantId}`, acc);
   return rowsFromEnergy(data && data.infos, "day", gridMul);
 }
 
-export async function fetchYearRows(acc: Account, plantId: number, year: number, gridMul = 1) {
+export async function fetchYearRows(acc: Account, plantId: VendorPlantId, year: number, gridMul = 1) {
   const data = await apiGet(`/plant/energy/${plantId}/year?lan=en&date=${year}&id=${plantId}`, acc);
   return rowsFromEnergy(data && data.infos, "month", gridMul);
 }

@@ -12,8 +12,10 @@
 //   * monthly rows for every year with data (drives Lifetime / Monthly / Year)
 //   * daily rows for the last N months, default 6 (drives Week, Month, Daily trends
 //     and the Overview comparison arrows)
-import { db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
-import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
+import { db } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
+import { brandOf, saveAllCalls } from "../_shared/brands/index.ts";
+import { markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/plants.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
 
 const DEFAULT_DAILY_MONTHS = 6;
@@ -70,7 +72,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number, fu
     const mAbs = now.y * 12 + (now.m - 1) - k;
     const yr = Math.floor(mAbs / 12);
     const mo = (mAbs % 12) + 1;
-    const rows = await fetchMonthRows(account, plantId, yr, mo, gridMul);
+    const rows = await brandOf(account.brand).history.monthRows(account, job.vendorPlantId, yr, mo, gridMul);
     const nonEmpty = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(String(r.time)));
     if (!nonEmpty.length) continue;
     synced.months.push(`${yr}-${String(mo).padStart(2, "0")}`);
@@ -93,7 +95,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number, fu
   const lastYear = full ? now.y - MAX_YEARS_BACK : now.m === 1 ? now.y - 1 : now.y;
   for (let yr = now.y; yr >= lastYear; yr--) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
-    const rows = await fetchYearRows(account, plantId, yr, gridMul);
+    const rows = await brandOf(account.brand).history.yearRows(account, job.vendorPlantId, yr, gridMul);
     // A series the vendor did not send is now null rather than 0. Reading it as 0
     // here keeps the original meaning of this test — "did anything positive come
     // back for this year" — since an absent series is not evidence the year exists.
@@ -175,6 +177,6 @@ if (import.meta.main) serve("sync-plant-energy", async (req) => {
     console.error("sync-plant-energy failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   } finally {
-    await saveCallTally();
+    await saveAllCalls();
   }
 });

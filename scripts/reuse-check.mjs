@@ -286,7 +286,7 @@ for (const f of jsx) {
     for (const m of shared.matchAll(/^export (?:async )?(?:function|const|type) ([A-Za-z_$][\w$]*)/gm))
       if (new RegExp(`^(?:export )?(?:async )?(?:function|const|let|type) ${m[1]}\\b`, 'm').test(code)) problems.push(`${host} declares ${m[1]} again: import it from _shared/poller.ts`);
   }
-  for (const f of ['_shared/poller.ts', '_shared/sunsynk.ts'])
+  for (const f of ['_shared/poller.ts', '_shared/plants.ts', '_shared/brands/sunsynk/api.ts'])
     if (/\bdb\s*\.\s*rpc\s*(?:<[^>]*>)?\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
 }
 
@@ -317,8 +317,9 @@ for (const f of jsx) {
   const NAMES = { 'Africa/Johannesburg': /Africa\/Johannesburg/g, ZAR: /\bZAR\b/g, sunsynk: /sunsynk/gi,
     paystack: /paystack/gi, resend: /\bresend/gi, infobip: /infobip/gi };
   // a vendor's own files: its adapter and its stand-in
-  const OWN = { sunsynk: ['supabase/functions/_shared/sunsynk.ts', 'supabase/functions/_shared/mock-sunsynk.mjs',
-    'supabase/functions/mock-sunsynk/index.ts'],
+  // a folder ends in '/': every file in it (SOLAR-681 R16: the SunSynk adapter is brands/sunsynk/)
+  const OWN = { sunsynk: ['supabase/functions/_shared/brands/sunsynk/', 'supabase/functions/_shared/brands/index.ts',
+    'supabase/functions/_shared/mock-sunsynk.mjs', 'supabase/functions/mock-sunsynk/index.ts'],
     resend: ['supabase/functions/resend-webhook/index.ts'] };
   const walk = (d) => fs.existsSync(path.join(ROOT, d)) ? fs.readdirSync(path.join(ROOT, d), { recursive: true }).map(f => path.join(d, String(f))) : [];
   const files = [
@@ -330,7 +331,7 @@ for (const f of jsx) {
   for (const f of files) {
     const text = fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n').filter(l => !/reuse-check: allow/.test(l)).join('\n');
     for (const [name, re] of Object.entries(NAMES)) {
-      if (OWN[name]?.includes(f)) continue;
+      if (OWN[name]?.some((o) => (o.endsWith('/') ? f.startsWith(o) : f === o))) continue;
       const n = (text.match(re) || []).length;
       if (n) (now[f] ||= {})[name] = n;
     }

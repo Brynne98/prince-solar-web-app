@@ -474,7 +474,7 @@
   "public.app_config": {
    "part": "system",
    "writers": [
-    "supabase/functions/_shared/sunsynk.ts",
+    "supabase/functions/_shared/plants.ts",
     "supabase/schemas/functions/private/plants_tombstone.sql",
     "supabase/schemas/functions/public/plant_users_upsert.sql"
    ]

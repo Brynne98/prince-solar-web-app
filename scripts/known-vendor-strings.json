@@ -24,7 +24,7 @@
   "sunsynk": 1
  },
  "public/link.jsx": {
-  "sunsynk": 41,
+  "sunsynk": 40,
   "paystack": 10
  },
  "public/tabs.jsx": {
@@ -44,7 +44,7 @@
   "sunsynk": 11
  },
  "supabase/functions/_shared/db.ts": {
-  "sunsynk": 2
+  "sunsynk": 1
  },
  "supabase/functions/_shared/email.ts": {
   "sunsynk": 13,
@@ -55,15 +55,9 @@
   "paystack": 1,
   "resend": 2
  },
- "supabase/functions/_shared/extract.ts": {
-  "sunsynk": 3
- },
  "supabase/functions/_shared/gate.ts": {
   "sunsynk": 6,
   "paystack": 2
- },
- "supabase/functions/_shared/invhistory.ts": {
-  "sunsynk": 5
  },
  "supabase/functions/_shared/links.ts": {
   "sunsynk": 3
@@ -81,12 +75,8 @@
  "supabase/functions/_shared/pace.ts": {
   "resend": 2
  },
- "supabase/functions/_shared/plantfeed.ts": {
-  "sunsynk": 7
- },
  "supabase/functions/_shared/poller.ts": {
-  "Africa/Johannesburg": 2,
-  "sunsynk": 16
+  "sunsynk": 13
  },
  "supabase/functions/_shared/text.ts": {
   "sunsynk": 46,
@@ -96,39 +86,36 @@
   "paystack": 2
  },
  "supabase/functions/billing/index.ts": {
-  "sunsynk": 1,
   "paystack": 47
  },
  "supabase/functions/claim-share/index.ts": {
-  "sunsynk": 5
+  "sunsynk": 4
  },
  "supabase/functions/error-alert/index.ts": {
   "resend": 11
  },
  "supabase/functions/job-check/index.ts": {
-  "sunsynk": 6,
+  "sunsynk": 5,
   "infobip": 8
  },
  "supabase/functions/link-sunsynk/index.ts": {
-  "sunsynk": 20
+  "sunsynk": 19
  },
  "supabase/functions/notify-email/index.ts": {
-  "sunsynk": 1,
   "resend": 5
  },
  "supabase/functions/notify-push/index.ts": {
-  "sunsynk": 1,
   "resend": 1
  },
  "supabase/functions/notify/index.ts": {
-  "sunsynk": 15,
-  "resend": 27
+  "sunsynk": 14,
+  "resend": 26
  },
  "supabase/functions/poll/hold.mts": {
   "sunsynk": 2
  },
  "supabase/functions/poll/index.ts": {
-  "sunsynk": 7
+  "sunsynk": 6
  },
  "supabase/functions/poll/minutes.mts": {
   "sunsynk": 1
@@ -140,7 +127,7 @@
   "sunsynk": 5
  },
  "supabase/functions/sync-plant-energy/index.ts": {
-  "sunsynk": 4
+  "sunsynk": 3
  },
  "supabase/schemas/functions/billing/apply_payment.sql": {
   "paystack": 11

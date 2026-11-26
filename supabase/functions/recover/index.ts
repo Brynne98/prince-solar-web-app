@@ -59,15 +59,13 @@
 // day to billing.history_step, which says when the next day may start (slowed
 // fetches wait longer between days, never at the start) and drops a fetch whose
 // plant was switched out. A 429 that outlasts apiGet's retries backs the login off.
-import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally, throttledCounts } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
+import { type Account, brandOf, DEFAULT_BRAND, type FeedScale, saveAllCalls, type SpineRow } from "../_shared/brands/index.ts";
+import { markCursor, type PlantJob, plantsToPoll, rotateJobs, vendorIdOf } from "../_shared/plants.ts";
+import { dayStartEpoch, localDate } from "../_shared/localtime.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
-import {
-  bucketizeAgg,
-  calibrateFeedScale,
-  type FeedScale,
-  plantFeedForDay,
-} from "../_shared/plantfeed.ts";
-import { dayStartEpoch, fetchInverterDay, fetchInverterExtras, historyRows, localDate, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
+const H = (acc: Account) => brandOf(acc.brand).history;
 
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
@@ -106,8 +104,8 @@ async function currentFeedScale(acc: Account, plantId: number, tz: string): Prom
     const today = localDate(tz);
     const agg = await rpc("q_day_agg", { p_plant: plantId, p_day: today, p_source: null });
     if ((agg?.length ?? 0) > 5) {
-      const feed = await plantFeedForDay(acc, plantId, today);
-      if (feed) scale = calibrateFeedScale(feed, bucketizeAgg(agg));
+      const feed = await H(acc).plantDay(acc, vendorIdOf(acc.brand, plantId), today);
+      if (feed) scale = H(acc).feedScale(feed, H(acc).bucketsOf(agg));
     }
   } catch { /* keep the default */ }
   scaleCache.set(plantId, scale);
@@ -123,23 +121,23 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
   const bank = g != null;
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
-  // One inverter at a time: 4 calls in flight, not 4 × inverters, for SunSynk's sake.
+  // One inverter at a time: 4 calls in flight, not 4 × inverters, for the brand's sake.
   const days = [];
   const lo = dayStartEpoch(tz, day);
   for (const sn of sns) {
-    const d = await fetchInverterDay(acc, sn, day, web);
+    const d = await H(acc).inverterDay(acc, sn, day, web);
     days.push(d);
-    if (bank) await bankHistory(plantId, sn, historyRows(d, lo), g!).catch((e) => {
+    if (bank) await bankHistory(plantId, sn, H(acc).historyRows(d, lo), g!).catch((e) => {
       console.error(`inverter_history ${sn}:`, e);
       noteError("inverter_history_failed", e, { plant: plantId, hourly: true });
     });
   }
-  const spine = plantSpine(days, lo);
+  const spine = H(acc).plantSpine(days, lo);
   return spine.size ? { spine, days } : null;
 }
 
 /** Sample rows into inverter_history. Throws on a database error; callers decide. */
-async function bankHistory(plantId: number, sn: string, rows: ReturnType<typeof historyRows>, g: Guard): Promise<number> {
+async function bankHistory(plantId: number, sn: string, rows: Record<string, unknown>[], g: Guard): Promise<number> {
   if (!rows.length) return 0;
   return Number(await guarded("q_insert_inverter_history_v2", plantId, g, { p_sn: sn, p_rows: rows }) ?? 0);
 }
@@ -158,8 +156,8 @@ async function fetchTempDay(job: PlantJob, g: Guard, sns: string[], day: string,
   let banked = 0;
   for (const sn of sns) {
     if (Date.now() - started > TIME_BUDGET_MS) throw new BudgetReached(day);
-    const x = await fetchInverterExtras(job.account, sn, day, gridOnly);
-    banked += await bankHistory(job.plantId, sn, historyRows(x, lo), g);
+    const x = await H(job.account).inverterExtras(job.account, sn, day, gridOnly);
+    banked += await bankHistory(job.plantId, sn, H(job.account).historyRows(x, lo), g);
     if (x.failed.length) throw new Error(`${sn} ${x.failed.join("; ")}`);
   }
   return banked;
@@ -289,14 +287,14 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   if (historyOnly) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "plant feed skipped (day older than the feed keeps)" };
 
   // 2. the plant feed for what is left
-  const feed = await plantFeedForDay(acc, plantId, day);
+  const feed = await H(acc).plantDay(acc, vendorIdOf(acc.brand, plantId), day);
   if (!feed) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "cloud no longer has this day" };
 
   // Calibrate against this day's own poller rows when there are enough of them
   // (>= 3 h); otherwise borrow the current scale.
   const pollerAgg = await rpc("q_day_agg", { p_plant: plantId, p_day: day, p_source: "poller" });
   const scale = (pollerAgg?.length ?? 0) >= 36
-    ? calibrateFeedScale(feed, bucketizeAgg(pollerAgg))
+    ? H(acc).feedScale(feed, H(acc).bucketsOf(pollerAgg))
     : await currentFeedScale(acc, plantId, tz);
 
   const dayStart = dayStartEpoch(tz, day);
@@ -515,7 +513,7 @@ async function dryRun(job: PlantJob, day: string, web = true) {
 // ---------------------------------------------------------------------------
 type Fetch = {
   id: number; claim: string; plant: number; account: string; day: string; floor: string; target_s: number;
-  version: number; timezone: string; login: Account;
+  version: number; timezone: string; login: Account & { sunsynk_username: string };
 };
 // Every minute from pg_cron: stop well inside the minute so runs do not pile up.
 const QUEUE_BUDGET_MS = 45_000;
@@ -527,7 +525,7 @@ const step = (args: Record<string, unknown>) =>
 // out and another run took the fetch): this run stops writing for it.
 const RENEW_MS = 30_000;
 async function runFetch(f: Fetch, started: number) {
-  const acc: Account = { ...f.login };
+  const acc: Account = { ...f.login, username: f.login.sunsynk_username, brand: f.login.brand ?? DEFAULT_BRAND };
   const g = newGuard(f.version);
   const claim = { id: f.id, claim: f.claim };
   let day = f.day, days = 0, banked = 0, lost = false;
@@ -537,7 +535,7 @@ async function runFetch(f: Fetch, started: number) {
   }, RENEW_MS);
   try {
     for (;;) {
-      const before = throttledCounts.get(acc.id) ?? 0;
+      const before = H(acc).throttled(acc);
       let r: { banked: number; failed?: boolean };
       try { r = await recoverDay(acc, f.plant, f.timezone, day, g, true, true); }
       catch (e) { r = { banked: 0, failed: true }; noteError("history_fetch_day_failed", e, { plant: f.plant, hourly: true }); }
@@ -548,7 +546,7 @@ async function runFetch(f: Fetch, started: number) {
         return { id: f.id, plant: f.plant, days, banked, stopped: "write refused" };
       }
       banked += r.banked; days++;
-      const throttled = (throttledCounts.get(acc.id) ?? 0) > before;
+      const throttled = H(acc).throttled(acc) > before;
       const s = await step({ ...claim, day, failed: !!r.failed, throttled });
       if (!s.go) return { id: f.id, plant: f.plant, days, banked, status: s.status ?? null, throttled };
       const wait = Math.max(0, Date.parse(s.next_step_at!) - Date.now());
@@ -633,6 +631,6 @@ serve("recover", async (req) => {
     console.error("recover failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   } finally {
-    await saveCallTally();
+    await saveAllCalls();
   }
 });

@@ -4,7 +4,7 @@
 // (notify's outboxPushPass, ../notify/index.ts).
 //
 // Off when VAPID_KEYS is unset, NOTIFY_LIVE isn't "1", or ?dry=1: then it sends and marks nothing.
-import { denyUnlessServer } from "../_shared/sunsynk.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
 import { json, LIVE, outboxPushPass, VAPID_KEYS } from "../notify/index.ts";
 

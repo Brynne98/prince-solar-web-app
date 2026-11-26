@@ -2,7 +2,7 @@
 //
 // Today every edge function uses PostgREST (supabase-js, service role): `postgrest` below.
 // A host with a direct Postgres connection (poller v3: lanes, the worker) gives its own
-// handle to useDb() once at start; sunsynk.ts and poller.ts then call through it. Only
+// handle to useDb() once at start; plants.ts and poller.ts then call through it. Only
 // what those two need is here: database functions by name, and the two plant_config
 // reads and writes syncPlants makes.
 import { createClient } from "jsr:@supabase/supabase-js@2.118.0";

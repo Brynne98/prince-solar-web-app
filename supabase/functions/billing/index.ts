@@ -26,7 +26,8 @@
 // verify_jwt is off: Paystack has no Supabase session. Each route checks its caller.
 // Secret: PAYSTACK_SECRET_KEY.
 import { heartbeat } from "../_shared/heartbeat.ts";
-import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";

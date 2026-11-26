@@ -7,7 +7,7 @@
 //
 // Nothing is sent unless NOTIFY_LIVE is "1" and RESEND_API_KEY is set. Otherwise, and with
 // ?dry=1, nothing is written.
-import { denyUnlessServer } from "../_shared/sunsynk.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
 import { json, LIVE, msgBulkPass, msgEmailPass, outboxPass, RESEND_KEY, sweep } from "../notify/index.ts";
 

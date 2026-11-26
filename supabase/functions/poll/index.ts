@@ -30,18 +30,10 @@
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
 import { heartbeat } from "../_shared/heartbeat.ts";
-import { rpc } from "../_shared/db.ts";
-import {
-  type Account,
-  db,
-  denyUnlessServer,
-  ensureBootstrapAccount,
-  type PlantJob,
-  plantsToPoll,
-  pollJobs,
-  shareAccount,
-  saveCallTally,
-} from "../_shared/sunsynk.ts";
+import { db, rpc } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
+import { type Account, saveAllCalls } from "../_shared/brands/index.ts";
+import { ensureBootstrapAccount, type PlantJob, plantsToPoll, pollJobs, shareAccount } from "../_shared/plants.ts";
 import { accountFailed, type AccountResult, emailOutcome, pollAccount } from "../_shared/poller.ts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
@@ -79,8 +71,8 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
 // PostHog. Every send of a day has the same uuid and time, so PostHog keeps one; the
 // repeats cover a send that failed.
 async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: number): Promise<void> {
-  if (spec.account) return saveCallTally();
-  await saveCallTally({ shard: spec.shard, ms: runMs, plants });
+  if (spec.account) return saveAllCalls();
+  await saveAllCalls({ shard: spec.shard, ms: runMs, plants });
   const saMinute = Math.floor((ts + 2 * 3600) / 60) % 1440;
   if (spec.shard !== 0 || ![5, 10, 15].includes(saMinute)) return;
   try {
@@ -136,7 +128,7 @@ async function retryShareLogin() {
     console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
     noteError("share_login_retry_skipped", e, { hourly: true });
   } finally {
-    await saveCallTally();
+    await saveAllCalls();
     // Runs past the response, so serve() may have sent its notes already.
     await flushErrors();
   }

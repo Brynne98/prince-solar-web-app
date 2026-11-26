@@ -3,7 +3,8 @@
 // job_check_failed / job_check_recovered for them, distinct id edge:<job>. Each run also
 // sends job_check_ran, so a PostHog alert hears when the check itself stops.
 import { heartbeat } from "../_shared/heartbeat.ts";
-import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
+import { db } from "../_shared/db.ts";
+import { denyUnlessServer } from "../_shared/server.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 
 type Job = { job: string; schedule: string; active: boolean; last_start: string | null; last_status: string | null; last_end: string | null; message: string };
