@@ -34,7 +34,7 @@ begin
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;
   orphans := array(select (x)::bigint from jsonb_array_elements_text(gone->'unprotected') x);
-  delete from plants.logins where user_id = uid;   -- its lists and events go with it; claims went with the account
+  perform plants.user_logins_delete(uid);   -- its lists and events go with it; claims went with the account
   insert into public.email_queue (to_email, kind, key, priority)
   select email, 'account_deleted', 'account_deleted:' || uid, 1 from auth.users where id = uid and email is not null
   on conflict do nothing;

@@ -5,13 +5,11 @@
 import { noteError } from "./errors.ts";
 import { rpc } from "./db.ts";
 import { type Account, brandOf, faultOf, type Fetched, type InverterInfo } from "./brands/index.ts";
-import { getInvertersCached, liveInverters, type PlantJob, shareSync, syncPlants } from "./plants.ts";
+import { getInvertersCached, liveInverters, type PlantJob } from "./plants.ts";
 import { holdLastGood } from "../poll/hold.mts";
-// The inverter and plant lists change rarely, so they are re-read from SunSynk only on
-// the login's own minutes (SOLAR-650) and served from private.inverters/meta (0031)
-// otherwise. The inverter list every 10 minutes (fleet composition, the online badge);
-// the plant list hourly (a plant added at SunSynk after linking).
-import { isListMinute, isPlantsMinute } from "../poll/minutes.mts";
+// The inverter and plant lists change rarely: the plant-sync job re-reads them on each
+// login's own minutes (sidejobs.ts, R18) and the reader serves them from
+// private.inverters/meta (0031).
 
 export type AccountResult = {
   account: string;
@@ -129,11 +127,6 @@ export type ReadMinute = { result: AccountResult; row: CommitRow | null; finish:
 export type ReadOptions = {
   /** the login's cached inverters, read beforehand for many logins at once (inverters_cached_many) */
   cached?: InverterInfo[];
-  /**
-   * false: another read of the same login this minute does the plant sync (a login read
-   * plant by plant on several seconds, 0268's read_second). Default true.
-   */
-  lead?: boolean;
   /** the login's live inverter list, shared by its reads this minute (default getInverters) */
   liveList?: () => Promise<InverterInfo[]>;
 };
@@ -157,7 +150,6 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
 export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, opts: ReadOptions = {}): Promise<ReadMinute> {
   const result = emptyResult(acc);
   const done = (): ReadMinute => ({ result, row: null, finish: async () => result });
-  const lead = opts.lead ?? true;
   const brand = brandOf(acc.brand);
   const callsAtStart = brand.callCount(acc);
   const wanted = new Set(jobs.map((j) => j.plantId));
@@ -165,44 +157,22 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
   // Inverter list: from the cache, unless it is this account's refresh minute or
   // the cache is empty (first minute after linking). On a refresh minute the live
   // list is merged with the cache so each inverter keeps its last row and carry
-  // run: the freshness gate and tiering then apply on refresh minutes too.
-  // The plant list is re-read hourly so a plant added at SunSynk starts logging.
-  // A cached inverter with no status (linking seeds private.inverters without meta)
+  // run. A cached inverter with no status (linking seeds private.inverters without meta)
   // also takes the live list: meta is written only on a fresh minute, and a slave
   // that uploads off the refresh minute would otherwise read status 0 for good
   // (SOLAR-168).
-  const refreshMinute = isListMinute(acc.id, ts);
-  const plantsMinute = lead && isPlantsMinute(acc.id, ts);
+  // The list itself is re-read by the plant-sync job (R18); the reader reads it only when it
+  // has nothing cached (the first minute after a link) or an inverter has no status yet.
   const cached = opts.cached ?? await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
-  if (refreshMinute || noStatus || !cached.length) {
+  if (noStatus || !cached.length) {
     result.listRefreshed = true;
     const bySn = new Map(cached.map((c) => [c.sn, c]));
     all = (await (opts.liveList ?? (() => liveInverters(acc)))()).map((inv) => {
       const c = bySn.get(inv.sn);
       return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun, uploadS: c.uploadS } : inv;
     });
-  }
-  if (brand.isShare(acc)) {
-    // The share login sees every shared plant, claimed or not: only claimed ones poll,
-    // and nothing is linked to the login's own user (SOLAR-310).
-    if (plantsMinute) {
-      try { console.log(`share sync:`, JSON.stringify(await shareSync(acc))); }
-      catch (e) {
-        console.warn(`share sync failed:`, e instanceof Error ? e.message : e);
-        noteError("share_sync_failed", e, { hourly: true });
-      }
-    }
-  } else if (plantsMinute || (lead && !cached.length)) {
-    // Since the billing switch-over (0246) only chosen plants are read: a plant new on the
-    // login waits to be chosen. Before it (no versions), it is read from this minute on.
-    try {
-      await syncPlants(acc);
-    } catch (e) {
-      console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
-      noteError("plant_refresh_failed", e, { user: acc.user_id, hourly: true });
-    }
   }
   result.listCalls = callsSince(acc, callsAtStart);
   const inverters = all.filter((inv) => inv.plantId != null && wanted.has(Number(inv.plantId)));
@@ -221,15 +191,7 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
   const offGrid = new Set(jobs.filter((j) => j.hasGrid !== true).map((j) => j.plantId));
   const perInv = await Promise.all(inverters.map((inv) =>
     brand.readNow(inv, acc, ts, { sign: signOf.get(Number(inv.plantId)) ?? null, offGrid: offGrid.has(Number(inv.plantId)) })));
-  // Today's temperatures for the inverters whose minute this is and whose logger has sent
-  // something new: started now, awaited at the end so the readings commit first. A
-  // failure costs only this round.
   const tzOf = new Map(jobs.map((j) => [j.plantId, j.timezone]));
-  const versionOf = new Map(jobs.map((j) => [j.plantId, j.version]));
-  const due = perInv.filter((f) => !f.carried && brand.anchored(f)
-    && Math.floor(ts / 60) % TEMP_EVERY_MIN === tempMinute(f.inv.sn)).map((f) => f.inv);
-  const tempsDone = Promise.allSettled(due.map((inv) => bankTodayTemps(inv, acc, tzOf.get(Number(inv.plantId))!,
-    versionOf.get(Number(inv.plantId)) ?? null)));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
   // Endpoints whose value on this row came from the previous one — whether they were
@@ -311,39 +273,6 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
     result.plants = committed.plants;
     result.gapRecorded = committed.gaps;
 
-    // Plants still on the fleet default: let the database try to settle the battery
-    // sign from what has been stored so far. Cheap, and only on refresh minutes.
-    if (refreshMinute) {
-      for (const pid of plantIds) {
-        // Battery present? Grid present? Decided from the first day of readings (0042).
-        try {
-          const f = await rpc("plant_features_detect", { p_plant: pid }) as Record<string, unknown>;
-          if (f?.decided) console.log(`features for plant ${pid}:`, JSON.stringify(f));
-        } catch (e) {
-          console.warn(`plant_features_detect ${pid}:`, e instanceof Error ? e.message : e);
-        }
-        // One battery pack or one per inverter? Decided from matching charge and voltage (0065).
-        try {
-          const b = await rpc("battery_banks_detect", { p_plant: pid }) as Record<string, unknown>;
-          if (b?.decided && b.detected !== b.was) console.log(`battery banks for plant ${pid}:`, JSON.stringify(b));
-        } catch (e) {
-          console.warn(`battery_banks_detect ${pid}:`, e instanceof Error ? e.message : e);
-        }
-        if (signOf.get(pid) != null) continue;
-        try {
-          const d = await rpc("batt_sign_detect", { p_plant: pid, p_default: brand.defaultBatterySign }) as Record<string, unknown>;
-          if (d?.decided) console.log(`batt sign for plant ${pid}:`, JSON.stringify(d));
-        } catch (e) {
-          console.warn(`batt_sign_detect ${pid}:`, e instanceof Error ? e.message : e);
-        }
-      }
-    }
-
-    if (due.length) {
-      const got = await tempsDone;
-      result.temps = Object.fromEntries(due.map((inv, i) => [inv.sn, got[i].status === "fulfilled"
-        ? (got[i] as PromiseFulfilledResult<number>).value : String((got[i] as PromiseRejectedResult).reason)]));
-    }
     result.apiCalls = callsSince(acc, callsAtStart);
     return result;
   }

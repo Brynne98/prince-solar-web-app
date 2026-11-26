@@ -21,5 +21,5 @@ AS $function$
   select se.plant, se.account, sa.id, true, c.claimed_at, least(lv.ends_at, se.closed_at)
     from seat se join live lv on lv.account = se.account
     join plants.claims c on c.plant = se.plant and c.account = se.account
-    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok'
+    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
 $function$;

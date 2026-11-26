@@ -15,9 +15,13 @@ begin
   select * into l from plants.logins x
    where x.account = p_account and x.brand = p_brand and lower(x.username) = lower(p_username)
    order by x.username = p_username desc, x.id limit 1;
-  is_new := l.id is null;
-  if not is_new then perform pg_advisory_xact_lock(1, hashtext(l.id::text)); end if;
+  if l.id is not null then perform pg_advisory_xact_lock(1, hashtext(l.id::text)); end if;
   perform billing.lock_account(p_account);
+  -- read again under the locks: a remove or another link may have finished while this waited
+  select * into l from plants.logins x
+   where x.account = p_account and x.brand = p_brand and lower(x.username) = lower(p_username)
+   order by x.username = p_username desc, x.id limit 1;
+  is_new := l.id is null;
   st := billing.account_status(p_account, p_at);
   if is_new then
     if st.state = 'ended' then

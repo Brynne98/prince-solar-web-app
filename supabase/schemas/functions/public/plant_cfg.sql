@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION public.plant_cfg(p_plant bigint)
  RETURNS TABLE(timezone text, currency text, lat double precision, lon double precision, system_kwp double precision, tariff_import double precision, battery_kwh double precision, battery_reserve_pct double precision, panel_tilt double precision, panel_azimuth double precision, geometry_source text, tariff_export double precision, battery_banks text, has_battery boolean, has_grid boolean, features_source text, batt_positive_means text, batt_sign_source text)
  LANGUAGE sql
- STABLE
+ STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   select plants.tz(p_plant),

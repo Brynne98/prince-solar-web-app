@@ -82,18 +82,9 @@ begin
   perform public.inverters_seed(coalesce(p_inverters, '[]'::jsonb));
   -- the newer token wins: a shard that started on an older token (it slept up to 20 s)
   -- must not overwrite one renewed since (SOLAR-649)
-  update plants.logins
-     set access_token = case when p_expires >= coalesce(access_expires_at, 0) then p_access else access_token end,
-         access_expires_at = greatest(p_expires, coalesce(access_expires_at, 0)),
-         last_ok_at = now(), last_error = null
-   where id = p_account;
+  perform plants.tokens_saved(jsonb_build_array(jsonb_build_object('account', p_account, 'access', p_access, 'expires', p_expires)));
   -- The other logins that can see these plant_list were served this minute too.
-  update plants.logins s
-     set last_ok_at = now()
-   where s.id in (select o.id from plants.logins o
-                   where o.status = 'ok' and o.id <> p_account
-                     and exists (select 1 from plants.user_plants pu where pu.account_id = o.id and pu.plant_id = any(plant_list))
-                   order by o.id for no key update skip locked);
+  perform plants.logins_served(plant_list, array[p_account]);
 
   return jsonb_build_object(
     'readings', n_readings,

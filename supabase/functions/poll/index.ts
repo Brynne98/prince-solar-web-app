@@ -28,12 +28,13 @@
 //
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
-import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
+import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import { heartbeat } from "../_shared/heartbeat.ts";
 import { db, rpc } from "../_shared/db.ts";
 import { denyUnlessServer } from "../_shared/server.ts";
 import { type Account, saveAllCalls } from "../_shared/brands/index.ts";
-import { ensureBootstrapAccount, type PlantJob, plantsToPoll, pollJobs, shareAccount } from "../_shared/plants.ts";
+import { ensureBootstrapAccount, type PlantJob, plantsToPoll, pollJobs } from "../_shared/plants.ts";
+import { runSync, runTemps } from "../_shared/sidejobs.ts";
 import { accountFailed, type AccountResult, emailOutcome, pollAccount } from "../_shared/poller.ts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
@@ -56,8 +57,7 @@ type ShardSpec = { shard: number; shards: number; delayMs: number; account?: str
 
 const MAX_DELAY_MS = 30_000; // never eat more of the minute than the cron job planned for
 
-async function shardSpec(req: Request): Promise<ShardSpec> {
-  const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+function shardSpec(body: Record<string, unknown>): ShardSpec {
   const shards = Math.max(1, Math.floor(Number(body.shards) || 1));
   const shard = Math.min(shards - 1, Math.max(0, Math.floor(Number(body.shard) || 0)));
   const delayMs = Math.min(MAX_DELAY_MS, Math.max(0, Math.floor(Number(body.delay_ms) || 0)));
@@ -107,33 +107,6 @@ async function logRun(spec: ShardSpec, ts: number, t: RunTimes, results: Account
   }
 }
 
-// Work that may finish after the response; the runtime keeps the isolate for it.
-const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
-
-async function retryShareLogin() {
-  try {
-    const { data: id, error } = await db.rpc("share_retry_due");   // 0177
-    if (error) throw new Error(error.message);
-    if (!id) return;
-    try {
-      if (await shareAccount()) console.log("share login: signed in again");
-    } catch (e) {
-      // Logged as another stop, which the next try is timed from. Already stopped, so no email.
-      const msg = e instanceof Error ? e.message : String(e);
-      await db.rpc("account_mark", { p_account: id, p_status: "needs_reconnect", p_error: msg });
-      console.warn("share login retry failed:", msg);
-      noteError("share_login_retry_failed", e, { hourly: true });
-    }
-  } catch (e) {
-    console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
-    noteError("share_login_retry_skipped", e, { hourly: true });
-  } finally {
-    await saveAllCalls();
-    // Runs past the response, so serve() may have sent its notes already.
-    await flushErrors();
-  }
-}
-
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -142,18 +115,14 @@ serve("poll", async (req) => {
   let times: RunTimes | undefined;
   let logged = false;
   try {
-    spec = await shardSpec(req);
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    // the side jobs, each its own cron call (R18): the read below does nothing else
+    if (body.task === "sync") return json({ ok: true, task: "sync", ...(await runSync(nowMinuteEpoch())) });
+    if (body.task === "temps") return json({ ok: true, task: "temps", ...(await runTemps(nowMinuteEpoch())) });
+    spec = shardSpec(body);
     // The minute this invocation is logging — fixed before the stagger delay so
     // a shard that waits 20 s still stamps the minute the cron tick was for.
     ts = nowMinuteEpoch();
-
-    // Only this shard's plants; the shard hash (first 8 hex digits of the account
-    // uuid, mod shards) runs in SQL.
-    // SunSynk refused the share login: try the secret again an hour after the last try, so
-    // shared plants restart without an owner pressing Check (SOLAR-451). Checked every
-    // minute on one shard, so a missed minute only delays it a minute. Runs beside the
-    // poll, not before it.
-    if (spec.shard === 0 && !spec.account) background(retryShareLogin());
 
     // Wait first, then read the jobs, so tokens and plant versions are as they are when
     // the shard starts, not 20 s old (SOLAR-650).
@@ -198,20 +167,16 @@ serve("poll", async (req) => {
     const results = await Promise.all(mine.map(({ acc, jobs }) =>
       pollAccount(acc, jobs, ts).catch((e) => accountFailed(acc, jobs, e))));
 
-    // Email state (0102): how each login went, then step the plants just written.
+    // How each login went, saved or not (R18): the alerts job (private.alerts_minute) reads
+    // these and steps the minute once the reads are in.
     const outcomes = results.map(emailOutcome).filter((o) => o !== null);
     logged = true;
-    const [stepped] = await Promise.all([
-      rpc("email_poll_step", {
-        p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
-      }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
+    const [marked] = await Promise.all([
+      rpc("login_outcomes", { p_outcomes: outcomes }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
       tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
       logRun(spec, ts, times, results),
     ]);
-    if ((stepped as any)?.error || (stepped as any)?.failed?.length) {
-      console.warn("email_poll_step:", JSON.stringify(stepped));
-      noteError("email_step_failed", new Error(`email_poll_step: ${(stepped as any).error ?? `${(stepped as any).failed.length} failed`}`), { hourly: true });
-    }
+    if ((marked as any)?.error) noteError("login_outcomes_failed", new Error(`login_outcomes: ${(marked as any).error}`), { hourly: true });
 
     const ok = results.filter((r) => !r.error);
     // F12: the reader's heartbeat, once a minute from shard 0 when a login was read

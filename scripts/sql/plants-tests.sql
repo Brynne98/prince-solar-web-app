@@ -69,6 +69,19 @@ begin
   perform pg_temp.ok('R17 sunsynk not down with it', not (select down from plants.brand_state where brand = 'sunsynk'));
 end $$;
 
+-- R26: a signed-in call reaches the plant's zone (plants is not the browser's schema)
+do $$
+declare z text; err text;
+begin
+  begin
+    set local role authenticated;
+    z := public.plant_tz(1);
+  exception when others then err := sqlerrm;
+  end;
+  reset role;
+  perform pg_temp.ok('R26 plant_tz as authenticated', err is null and z is not null, err);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; bad int := 0;

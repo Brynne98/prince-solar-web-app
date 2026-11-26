@@ -245,16 +245,16 @@
    "part": "plants",
    "writers": [
     "supabase/schemas/functions/plants/link_login.sql",
+    "supabase/schemas/functions/plants/logins_served.sql",
     "supabase/schemas/functions/plants/remove_login.sql",
+    "supabase/schemas/functions/plants/tokens_saved.sql",
+    "supabase/schemas/functions/plants/user_logins_delete.sql",
     "supabase/schemas/functions/private/refresh_store.sql",
     "supabase/schemas/functions/public/account_access_set.sql",
     "supabase/schemas/functions/public/account_disable.sql",
     "supabase/schemas/functions/public/account_mark.sql",
-    "supabase/schemas/functions/public/api_account_delete.sql",
-    "supabase/schemas/functions/public/email_poll_step.sql",
     "supabase/schemas/functions/public/link_login_live.sql",
-    "supabase/schemas/functions/public/poll_commit.sql",
-    "supabase/schemas/functions/public/poll_commit_batch.sql",
+    "supabase/schemas/functions/public/login_outcomes.sql",
     "supabase/schemas/functions/public/share_account_set.sql"
    ]
   },
@@ -465,7 +465,8 @@
   "public.app_config": {
    "part": "system",
    "writers": [
-    "supabase/functions/_shared/plants.ts"
+    "supabase/functions/_shared/plants.ts",
+    "supabase/schemas/functions/private/alerts_minute.sql"
    ]
   },
   "public.client_errors": {
@@ -645,7 +646,9 @@
     "supabase/schemas/functions/private/login_copies.sql",
     "supabase/schemas/functions/private/login_lock.sql",
     "supabase/schemas/functions/public/brand_tally.sql",
-    "supabase/schemas/functions/public/brand_calls_report.sql"
+    "supabase/schemas/functions/public/brand_calls_report.sql",
+    "supabase/schemas/functions/public/login_outcomes.sql",
+    "supabase/schemas/functions/private/plant_checks.sql"
    ],
    "readers": {
     "plants.logins": [

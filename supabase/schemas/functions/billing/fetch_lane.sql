@@ -11,6 +11,6 @@ AS $function$
       where l.account = p_account and l.status = 'ok'
       order by l.linked_at, l.id limit 1),
     (select sa.id from plants.claims c
-       join plants.logins sa on sa.kind = 'share' and sa.status = 'ok'
+       join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
       where c.account = p_account and c.plant = p_plant limit 1))
 $function$;

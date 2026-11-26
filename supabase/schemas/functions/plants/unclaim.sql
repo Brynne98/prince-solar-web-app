@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION plants.unclaim(p_account uuid, p_plants bigint[], p_a
 AS $function$
 declare closed bigint[];
 begin
+  perform pg_advisory_xact_lock_shared(3, 0);   -- waits for a billing run (SOLAR-438)
   perform billing.lock_account(p_account);
   perform billing.lock_plants(p_plants);
   delete from plants.claims where account = p_account and plant = any (p_plants);

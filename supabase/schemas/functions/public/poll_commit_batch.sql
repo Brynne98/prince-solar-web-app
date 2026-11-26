@@ -39,13 +39,9 @@ begin
   end loop;
   perform 1 from plants.logins sa where sa.id = any (accts) order by sa.id for update;
   -- the newer token wins (0250): the last object with the latest expiry, when not older than the stored one
-  update plants.logins sa
-     set access_token = case when t.expires >= coalesce(sa.access_expires_at, 0) then t.access else sa.access_token end,
-         access_expires_at = greatest(t.expires, coalesce(sa.access_expires_at, 0)),
-         last_ok_at = now(), last_error = null
-    from (select distinct on (b.account) b.account, b.access, b.expires from _bin b
-           order by b.account, b.expires desc nulls last, b.i desc) t
-   where sa.id = t.account;
+  perform plants.tokens_saved((select coalesce(jsonb_agg(jsonb_build_object('account', t.account, 'access', t.access, 'expires', t.expires)), '[]'::jsonb)
+                                 from (select distinct on (b.account) b.account, b.access, b.expires from _bin b
+                                        order by b.account, b.expires desc nulls last, b.i desc) t));
 
   -- 2. plants in id order, for share; a plant whose history was deleted for no key update,
   -- since step 8 updates it (two batches holding it for share would deadlock there). Then
@@ -64,7 +60,7 @@ begin
     with v as (select distinct b.i, k::bigint as plant, b.versions->>(k::bigint::text) as version
                  from _bin b cross join jsonb_object_keys(b.versions) k)
     select v.i, v.plant from v
-     where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), p_at) pr)
+     where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), greatest(p_at, clock_timestamp())) pr)   -- R20: the database's clock, after the locks
        and exists (select 1 from plants.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
   -- one object sending an inverter twice fails in poll_commit_v2 (on conflict cannot update a
   -- row twice); here too, so the caller's login-by-login save fails that login alone
@@ -200,12 +196,7 @@ begin
              order by e.v->>'sn', b.i desc, e.n desc) m), '[]'));
 
   -- 7. the other logins that see these plants were served this minute too
-  update plants.logins s set last_ok_at = now()
-   where s.id in (select o.id from plants.logins o
-                   where o.status = 'ok' and o.id <> all (accts)
-                     and exists (select 1 from plants.user_plants pu
-                                  where pu.account_id = o.id and pu.plant_id in (select g.plant from _bag g))
-                   order by o.id for update skip locked);
+  perform plants.logins_served(array(select g.plant from _bag g), accts);
   perform set_config('billing.guarded', 'off', true);
 
   -- 8. new readings on a deleted plant: it has history again (0246)

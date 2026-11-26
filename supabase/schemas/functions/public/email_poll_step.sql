@@ -10,9 +10,7 @@ declare
   clr bigint;
   failed jsonb := '[]'::jsonb;
 begin
-  update plants.logins a set last_try_at = now(), last_try = o.outcome
-    from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
-   where a.id = o.account and o.outcome in ('ok', 'vendor', 'ours');
+  perform public.login_outcomes(p_outcomes);   -- the reader records outcomes itself now (R18)
 
   -- Plants with config (purged ones have none) not already stepped for this minute.
   -- The rows stay locked to the end, so a link kick polling the same account in the

@@ -22,7 +22,14 @@ begin
   select * into l from plants.logins where id = p_login;
   if not found or l.status = 'disabled' then return null; end if;
   if l.account is not null then perform billing.lock_account(l.account); end if;
-  listed := plants.list_ids(l.brand, p_plants);
+  if l.kind = 'share' then
+    -- only plants already ours (claimed ones have rows): no plant is made for an unclaimed share
+    listed := coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'vendor_id', p.vendor_id, 'name', e->>'name'))
+                          from jsonb_array_elements(coalesce(p_plants, '[]'::jsonb)) e
+                          join plants.plants p on p.brand = l.brand and p.vendor_id = coalesce(e->>'vendor_id', e->>'id')), '[]'::jsonb);
+  else
+    listed := plants.list_ids(l.brand, p_plants);
+  end if;
   ids := array(select (x->>'id')::bigint from jsonb_array_elements(listed) x order by 1);
   old_live := array(select lp.plant from plants.login_plants lp where lp.login = l.id and lp.gone_at is null order by 1);
   -- the share login: every account holding a claim on its plants, in id order, before the plants
@@ -46,7 +53,7 @@ begin
      where lp.login = l.id and lp.gone_at is null and lp.plant = any (ids);
   end if;
   back := array(select x from unnest(ids) x where x <> all (old_live)
-                  and exists (select 1 from plants.login_plants lp where lp.login = l.id and lp.plant = x));
+                  and exists (select 1 from plants.login_plants lp where lp.login = l.id and lp.plant = x and lp.gone_at is null));
 
   if p_mode = 'relink' then
     with x as (update plants.login_plants lp set gone_at = p_at

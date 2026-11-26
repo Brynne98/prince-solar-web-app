@@ -22,7 +22,7 @@ begin
       perform 1 from plants.plants where id = pl.id for share;
     end if;
   end loop;
-  ok := billing.write_allowed(p_versions, p_at);
+  ok := billing.write_allowed(p_versions, greatest(p_at, clock_timestamp()));   -- R20: the database's clock, after the locks
   -- the token is saved whatever happens to the readings: the fetch may have refreshed it
   perform set_config('billing.guarded', 'on', true);
   out := public.poll_commit(p_account, p_ts, billing.only_plants(p_readings, ok), billing.only_plants(p_strings, ok),

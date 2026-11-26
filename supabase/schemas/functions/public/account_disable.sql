@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION public.account_disable(p_account uuid)
 AS $function$
 declare sid uuid;
 begin
+  perform pg_advisory_xact_lock(1, hashtext(p_account::text));
   select refresh_secret_id into sid from plants.logins where id = p_account;
   update plants.logins
      set status = 'disabled', access_token = null, access_expires_at = null, refresh_secret_id = null

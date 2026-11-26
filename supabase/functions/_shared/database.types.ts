@@ -690,6 +690,9 @@ export type Database = {
 "local_ts_tz":
 { Args: { "ts": number,"tz": string }; Returns: string
                            },
+"login_outcomes":
+{ Args: { "p_outcomes": Json }; Returns: undefined
+                           },
 "mail_block":
 { Args: { "p_detail"?: string,"p_emails": (string)[],"p_reason": string }; Returns: number
                            },
