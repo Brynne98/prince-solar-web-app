@@ -719,7 +719,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
   const going = chosen.filter(id => !picked.includes(id)), coming = picked.filter(id => !chosen.includes(id));
   const tag = (p) => {
     const s = acct.plants.find(x => x.plant === p.plant_id);
-    if (deleting(p.plant_id)) return t.deleting;
+    if (deleting(p.plant_id)) return AT.deletingWord;
     return s && trial && mode === 'choose' && s.trial_used_elsewhere ? t.usedElsewhere : null;
   };
   const save = async () => {

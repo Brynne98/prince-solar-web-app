@@ -76,7 +76,13 @@ insert into private.history_delete_queue (plant_id) values (990659004);
 select pg_temp.ok('D3 inverter prune skips it', public.q_prune_inverter_history(990659004, 0) = 0
                   and (select count(*) from public.inverter_history where plant_id = 990659004) = 10);
 select pg_temp.ok('D3 grid-off update skips it', private.grid_off_update(990659004) = 0);
-select private.agg_minute_rollup(0);
+-- the rollup takes every plant's minutes older than its cutoff: test rows 3 years back, so
+-- nothing a local preview loaded is touched
+select set_config('billing.guarded', 'on', false);
+insert into public.agg_minute (plant_id, ts) select 990659004, extract(epoch from now())::bigint - 1100 * 86400 + i * 60
+  from generate_series(1, 10) i;
+select set_config('billing.guarded', 'off', false);
+select private.agg_minute_rollup(1000);
 select pg_temp.ok('D3 minute rollup writes no 5-minute rows for it',
   (select count(*) from public.agg_5m where plant_id = 990659004) = 2);
 call private.history_delete_run(interval '45 seconds', 5000);

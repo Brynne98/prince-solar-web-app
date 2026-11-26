@@ -519,6 +519,7 @@ declare
   pass_rows bigint;
   t0 timestamptz;
   got boolean;
+  no_fence boolean := false;
 begin
   -- one run at a time; a session lock, as each commit lets transaction locks go
   if not pg_try_advisory_lock(8, 6590) then return; end if;
@@ -526,7 +527,9 @@ begin
   <<plants>>
   loop
     exit when clock_timestamp() - started > p_cap;
-    select * into q from private.history_delete_queue order by queued_at, plant_id limit 1;
+    -- without the fence this run, only plants already fenced
+    select * into q from private.history_delete_queue where not no_fence or fenced_at is not null
+     order by queued_at, plant_id limit 1;
     exit when not found;
 
     -- the writers with no version check that began before the plant was listed end first;
@@ -538,7 +541,7 @@ begin
         if pg_try_advisory_xact_lock(8, 659) then got := true; exit; end if;
         perform pg_sleep(0.1);
       end loop;
-      exit plants when not got;
+      if not got then no_fence := true; continue; end if;
       update private.history_delete_queue
          set fenced_at = clock_timestamp(), wait_ms = wait_ms + round(extract(epoch from clock_timestamp() - t0) * 1000)
        where plant_id = q.plant_id;
@@ -572,9 +575,15 @@ begin
     end loop;
 
     -- a rollup slice that read the raw rows before they went ends first, so its 5-minute
-    -- rows are there to delete below (it holds (8, 651) exclusive; nothing is locked here)
+    -- rows are there to delete below (it holds (8, 651) exclusive; nothing is locked here).
+    -- Tried, not waited for: the run keeps to its cap; the next run carries on.
     t0 := clock_timestamp();
-    perform pg_advisory_xact_lock_shared(8, 651);
+    got := false;
+    for i in 1..50 loop
+      if pg_try_advisory_xact_lock_shared(8, 651) then got := true; exit; end if;
+      perform pg_sleep(0.1);
+    end loop;
+    exit plants when not got;
     update private.history_delete_queue set wait_ms = wait_ms + round(extract(epoch from clock_timestamp() - t0) * 1000)
      where plant_id = q.plant_id;
     commit;

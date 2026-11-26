@@ -352,7 +352,6 @@ export const choosePlants = (s: AccountState) => ({
     : `${planTitle(s)} reads ${forms(s.places, { one: "1 plant", many: "{n} plants" })}.`,
   tooMany: `That is more than ${forms(s.state === "trialing" || s.state === "none" ? s.trial_places : s.places, { one: "1 plant", many: "{n} plants" })}. Untick one.`,
   usedElsewhere: "Free week used",
-  deleting: deletingWord,
   button: "Save",
   more: "Need more plants? See plans.",
 });
