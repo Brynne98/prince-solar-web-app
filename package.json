@@ -9,6 +9,7 @@
     "check": "node scripts/integrity-check.js",
     "build": "node scripts/build-jsx.js",
     "test": "node scripts/build-jsx.js && node scripts/warning-tests.mjs && node scripts/plant-switch-test.mjs && node scripts/report-scrub-test.mjs && node scripts/power-hold-test.mjs && node scripts/newday-test.mjs && node scripts/poll-minutes-test.mjs && node scripts/limit-test.mjs && node scripts/mock-fetch-test.mjs && node scripts/billing-screen-test.mjs && node scripts/reuse-check.mjs",
+    "test:deno": "cd supabase/functions && SUPABASE_URL=http://127.0.0.1:9 SUPABASE_SERVICE_ROLE_KEY=test npx -y deno@2.5.6 test -A --node-modules-dir=none",
     "test:state": "node scripts/billing-state-test.mjs && node scripts/msg-state-test.mjs && node scripts/billing-lock-test.mjs && node scripts/billing-lock-order-test.mjs && node scripts/history-delete-run-test.mjs"
   },
   "engines": {

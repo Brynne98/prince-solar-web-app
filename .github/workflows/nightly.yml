@@ -1,0 +1,27 @@
+# Long tests, once a night, not on every push (SOLAR-679 F4). A red run emails the repo owner.
+# Today: the poller v3 equivalence test (random accounts over 50 days, about 2.5 minutes).
+# The billing simulator, abuse and scale runs join once they are rebuilt on today's billing
+# (SOLAR-680).
+name: Nightly long tests
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # 02:30 in South Africa
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  long:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Fresh local database from every migration
+        run: supabase start -x studio,imgproxy,vector,logflare,supavisor,storage-api,realtime,postgres-meta,edge-runtime
+      - name: Poller v3 equivalence (0268)
+        run: psql -X -v ON_ERROR_STOP=1 postgresql://postgres:postgres@127.0.0.1:55322/postgres -f scripts/sql/poller-v3-tests.sql

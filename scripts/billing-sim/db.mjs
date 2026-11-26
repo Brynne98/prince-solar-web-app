@@ -1,7 +1,7 @@
 // One long-lived psql session. Statements go in on stdin, answers come back as one JSON line each.
 import { spawn } from 'node:child_process';
 
-export const PSQL = '/opt/homebrew/opt/libpq/bin/psql';
+export const PSQL = process.env.PSQL || '/opt/homebrew/opt/libpq/bin/psql';
 export const DB_URL = process.env.SIM_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:55322/postgres';
 
 export class Db {

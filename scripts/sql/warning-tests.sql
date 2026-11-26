@@ -354,6 +354,9 @@ select pg_temp.eq('no readings: Readings back says when the readings came back',
 -- for readings, the same as a new link, before No readings (billing.readings_start, 0256).
 select billing.set_chosen_plants((select id from billing.accounts where user_id = '00000000-0000-0000-0000-000000009006'),
                                  '{}', now() - interval '2 hours') \g /dev/null
+-- Since 0277 stopping queues its history for deletion and refuses a re-choose until it is done:
+-- the delete run has finished.
+delete from private.history_delete_queue where plant_id = 9006;
 update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = false where plant_id = 9006;
 insert into private.inverter_alert_state (plant_id, sn, last_dev) values (9006, '9006M', pg_temp.now_k(120)), (9006, '9006S', pg_temp.now_k(120))
   on conflict (plant_id, sn) do update set last_dev = excluded.last_dev, stale = false;
