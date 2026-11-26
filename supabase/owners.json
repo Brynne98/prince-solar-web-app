@@ -664,7 +664,8 @@
     "supabase/schemas/functions/public/batt_sign_detect.sql",
     "supabase/schemas/functions/public/plants_configured.sql",
     "supabase/schemas/functions/public/plant_bookmarks_clear.sql",
-    "supabase/schemas/functions/public/plant_history_loading.sql"
+    "supabase/schemas/functions/public/plant_history_loading.sql",
+    "supabase/schemas/functions/public/sync_logins.sql"
    ],
    "readers": {}
   },

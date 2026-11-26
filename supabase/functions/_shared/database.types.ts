@@ -881,6 +881,11 @@ export type Database = {
 "span_figures":
 { Args: { "p_from": string,"p_plant": number,"p_to": string }; Returns: Json
                            },
+"sync_logins":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "access_expires_at": number,"access_token": string,"brand": string,"id": string,"user_id": string,"username": string
+            }[]
+                           },
 "today_tz":
 { Args: { "tz": string }; Returns: string
                            },

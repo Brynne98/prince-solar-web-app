@@ -27,7 +27,11 @@ const loginsOf = (jobs: PlantJob[]) => [...new Map(jobs.map((j) => [j.account.id
 export async function runSync(ts: number) {
   const out = { lists: 0, plantLists: 0, failed: 0 };
   try {
-    await pool(IN_FLIGHT, loginsOf(await pollJobs(0, 1)), async (acc: Account) => {
+    // every working login, read now or not: a paused login still finds a plant added at the brand
+    const logins = ((await rpc<any[]>("sync_logins", {})) ?? []).map((r): Account => ({
+      id: r.id, user_id: r.user_id, username: r.username, brand: r.brand, access_token: r.access_token, access_expires_at: r.access_expires_at,
+    }));
+    await pool(IN_FLIGHT, logins, async (acc: Account) => {
       try {
         if (isListMinute(acc.id, ts)) {
           const invs = (await liveInverters(acc)).filter((i) => i.plantId != null);
@@ -79,9 +83,13 @@ export async function runTemps(ts: number) {
     const jobOf = new Map(jobs.map((j) => [j.plantId, j]));
     const accs = new Map(loginsOf(jobs).map((a) => [a.id, a]));
     const rows = (await rpc<any[]>("inverters_cached_many", { p_accounts: [...accs.keys()] })) ?? [];
-    // a logger that sent something new last minute: its day so far is worth one call
+    // a logger that sent something new in the last two minutes: its day so far is worth one call,
+    // once, through the login that reads the plant now
+    const seen = new Set<string>();
     const due = rows.filter((r) => tempMinute(r.sn) === minute && jobOf.has(Number(r.plant_id))
-      && r.last_reading && r.last_reading.carried === false);
+      && jobOf.get(Number(r.plant_id))!.account.id === r.account_id
+      && r.last_reading && r.last_reading.carried === false && Number(r.last_reading.ts) >= ts - 120
+      && !seen.has(r.sn) && seen.add(r.sn));
     await pool(IN_FLIGHT, due, async (r) => {
       const job = jobOf.get(Number(r.plant_id))!;
       const inv: InverterInfo = { sn: r.sn, plantId: Number(r.plant_id) };

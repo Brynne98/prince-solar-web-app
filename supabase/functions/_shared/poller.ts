@@ -165,8 +165,9 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
   // has nothing cached (the first minute after a link) or an inverter has no status yet.
   const cached = opts.cached ?? await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
+  const uncached = [...wanted].some((p) => !cached.some((c) => Number(c.plantId) === p));
   let all = cached;
-  if (noStatus || !cached.length) {
+  if (noStatus || uncached || !cached.length) {
     result.listRefreshed = true;
     const bySn = new Map(cached.map((c) => [c.sn, c]));
     all = (await (opts.liveList ?? (() => liveInverters(acc)))()).map((inv) => {

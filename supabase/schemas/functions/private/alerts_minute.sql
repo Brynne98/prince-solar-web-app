@@ -6,7 +6,8 @@ CREATE OR REPLACE FUNCTION private.alerts_minute()
 AS $function$
 declare
   last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
-  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 60;   -- the minute just over
+  -- two minutes back: every read of that minute has saved or given up by then (50 s deadline)
+  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 120;
   m bigint;
   n int := 0;
 begin

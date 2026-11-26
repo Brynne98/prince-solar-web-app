@@ -38,6 +38,7 @@ insert into plants.brands (code, display_name) values ('sunsynk', 'SunSynk'), ('
 create function plants.tz_valid(p text) returns boolean
   language plpgsql immutable set search_path to '' as $$
 begin
+  if p is null or btrim(p) = '' then return false; end if;
   perform timestamp '2000-01-01' at time zone p;
   return true;
 exception when others then return false;
@@ -1968,7 +1969,8 @@ CREATE OR REPLACE FUNCTION private.alerts_minute()
 AS $function$
 declare
   last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
-  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 60;   -- the minute just over
+  -- two minutes back: every read of that minute has saved or given up by then (50 s deadline)
+  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 120;
   m bigint;
   n int := 0;
 begin
@@ -1982,6 +1984,27 @@ begin
     m := m + 60;
   end loop;
   return jsonb_build_object('minutes', n, 'upto', upto);
+end $function$;
+
+CREATE OR REPLACE FUNCTION private.call_fn(p_path text, p_body jsonb DEFAULT '{}'::jsonb, p_timeout_ms integer DEFAULT 55000)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare rid bigint;
+begin
+  rid := net.http_post(
+    url := private.functions_url() || '/' || p_path,
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+      'Content-Type', 'application/json'),
+    body := p_body,
+    timeout_milliseconds := p_timeout_ms);
+  insert into private.fn_calls (id, fn, shard, timeout_ms)
+  values (rid, split_part(split_part(p_path, '?', 1), '/', 1) || coalesce(':' || (p_body ->> 'task'), ''), (p_body ->> 'shard')::int, p_timeout_ms)
+  on conflict (id) do nothing;
+  return rid;
 end $function$;
 
 CREATE OR REPLACE FUNCTION private.email_enqueue_plant(p_plant bigint, p_kind text, p_key text, p_data jsonb, p_pair_key text DEFAULT NULL::text, p_priority smallint DEFAULT 0)
@@ -3736,6 +3759,13 @@ AS $function$
    order by i.sn
 $function$;
 
+CREATE OR REPLACE FUNCTION public.grid_live(p_volts double precision)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO ''
+AS $function$ select p_volts > 100 $function$;
+
 CREATE OR REPLACE FUNCTION public.independence_pct(p_home double precision, p_import double precision)
  RETURNS double precision
  LANGUAGE sql
@@ -4057,6 +4087,16 @@ AS $function$
           or not billing.kept_elsewhere(a.id, se.plant, now()))
 $function$;
 
+CREATE OR REPLACE FUNCTION public.plant_bookmarks_clear(p_plants bigint[])
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
+   where plant_id = any (coalesce(p_plants, '{}'))
+$function$;
+
 CREATE OR REPLACE FUNCTION public.plant_bootstrap_kick(p_plant bigint)
  RETURNS void
  LANGUAGE plpgsql
@@ -4195,6 +4235,15 @@ begin
   return jsonb_build_object('plant', p_plant, 'decided', true, 'hasBattery', hb, 'hasGrid', hg, 'rows', n);
 end $function$;
 
+CREATE OR REPLACE FUNCTION public.plant_history_loading(p_plant bigint)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select exists (select 1 from public.plant_config c where c.plant_id = p_plant and c.backfill_next is not null)
+$function$;
+
 CREATE OR REPLACE FUNCTION public.plant_link(p_user uuid, p_plant bigint)
  RETURNS jsonb
  LANGUAGE sql
@@ -4221,6 +4270,15 @@ CREATE OR REPLACE FUNCTION public.plant_vendor(p_plant bigint)
  SET search_path TO ''
 AS $function$
   select p.vendor_id from plants.plants p where p.id = p_plant
+$function$;
+
+CREATE OR REPLACE FUNCTION public.plants_configured(p_plants bigint[])
+ RETURNS SETOF bigint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}'))
 $function$;
 
 CREATE OR REPLACE FUNCTION public.plants_list_seen(p_login uuid, p_plants jsonb, p_mode text DEFAULT 'sync'::text)
@@ -4823,41 +4881,6 @@ AS $function$
     from public._plant_day_energy(p_plant, p_from, p_to) e
    -- a day of zeros is the brand's filler for a day with no readings (notify hasData)
    where coalesce(e.load_kwh, 0) > 0 or coalesce(e.pv_kwh, 0) > 0
-$function$;
-
-CREATE OR REPLACE FUNCTION public.grid_live(p_volts double precision)
- RETURNS boolean
- LANGUAGE sql
- IMMUTABLE
- SET search_path TO ''
-AS $function$ select p_volts > 100 $function$;
-
-CREATE OR REPLACE FUNCTION public.plant_bookmarks_clear(p_plants bigint[])
- RETURNS void
- LANGUAGE sql
- SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
-   where plant_id = any (coalesce(p_plants, '{}'))
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plant_history_loading(p_plant bigint)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select exists (select 1 from public.plant_config c where c.plant_id = p_plant and c.backfill_next is not null)
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plants_configured(p_plants bigint[])
- RETURNS SETOF bigint
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}'))
 $function$;
 
 -- ---------------------------------------------------------------------------
@@ -5464,7 +5487,8 @@ create or replace function private.alerts_minute() returns jsonb
   language plpgsql security definer set search_path to '' as $$
 declare
   last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
-  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 60;   -- the minute just over
+  -- two minutes back: every read of that minute has saved or given up by then (50 s deadline)
+  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 120;
   m bigint;
   n int := 0;
 begin
@@ -5665,6 +5689,10 @@ begin
     n := nextval('plants.plant_id_seq');
     insert into plants.plants (id, brand, vendor_id, time_zone, version, legacy, created_at)
     values (n, 'mock', p.vendor_id, p.time_zone, p.version + 1, false, p.created_at);
+    -- plant_config is a parent too (alert state, refill queue): a copy under the new id first
+    insert into public.plant_config
+    select (jsonb_populate_record(null::public.plant_config, to_jsonb(c) || jsonb_build_object('plant_id', n))).*
+      from public.plant_config c where c.plant_id = p.id;
     -- every table that keys on a plant: its rows move to the new id (partitioned tables by their parent)
     for tc in
       select cl.relnamespace::regnamespace::text as sch, cl.relname as tab, a.attname as col
@@ -5673,26 +5701,43 @@ begin
          and cl.relkind in ('r', 'p') and not cl.relispartition
          and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
          and not (cl.relnamespace::regnamespace::text = 'plants' and cl.relname = 'plants')
+         and not (cl.relnamespace::regnamespace::text = 'public' and cl.relname = 'plant_config')
     loop
       execute format('update %I.%I set %I = $1 where %I = $2', tc.sch, tc.tab, tc.col, tc.col) using n, p.id;
     end loop;
     update public.app_config set value = n where key = 'CALIBRATION_PLANT' and value = p.id;
+    update billing.invoices set plants = array_replace(plants, p.id, n) where p.id = any (plants);
+    update billing.outbox set ref = n::text where ref = p.id::text;
+    delete from public.plant_config where plant_id = p.id;
     delete from plants.plants where id = p.id;
     moved := moved + 1;
   end loop;
 
-  -- their inverters: mock:<serial>, in every table that keys on a serial
-  serials := array(select i.sn from private.inverters i join plants.plants pl on pl.id = i.plant_id
-                    where pl.brand = 'mock' and i.sn not like 'mock:%');
+  -- their inverters: mock:<serial>, wherever a mock plant's row holds one (by plant where the table
+  -- has a plant, else by the serials those plants ever had)
+  serials := array(select distinct x.sn from (
+      select i.sn from private.inverters i join plants.plants pl on pl.id = i.plant_id where pl.brand = 'mock'
+      union select m.sn from private.meta m join plants.plants pl on pl.id = m.plant_id where pl.brand = 'mock'
+      union select r.sn from public.readings r join plants.plants pl on pl.id = r.plant_id where pl.brand = 'mock') x
+     where x.sn not like 'mock:%');
   if cardinality(serials) > 0 then
+    if exists (select 1 from private.inverters i join plants.plants pl on pl.id = i.plant_id
+                where pl.brand <> 'mock' and i.sn = any (serials)) then
+      raise exception 'R14: a real inverter has a fake plant''s serial';
+    end if;
     for tc in
-      select cl.relnamespace::regnamespace::text as sch, cl.relname as tab
+      select cl.relnamespace::regnamespace::text as sch, cl.relname as tab,
+             exists (select 1 from pg_attribute b where b.attrelid = cl.oid and b.attname = 'plant_id' and not b.attisdropped) as by_plant
         from pg_attribute a join pg_class cl on cl.oid = a.attrelid
        where a.attname = 'sn' and a.atttypid = 'text'::regtype and not a.attisdropped
          and cl.relkind in ('r', 'p') and not cl.relispartition
          and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
     loop
-      execute format('update %I.%I set sn = ''mock:'' || sn where sn = any ($1)', tc.sch, tc.tab) using serials;
+      if tc.by_plant then
+        execute format('update %I.%I set sn = ''mock:'' || sn where sn = any ($1) and plant_id in (select id from plants.plants where brand = ''mock'')', tc.sch, tc.tab) using serials;
+      else
+        execute format('update %I.%I set sn = ''mock:'' || sn where sn = any ($1)', tc.sch, tc.tab) using serials;
+      end if;
     end loop;
   end if;
   raise notice 'R14: % fake plants moved to brand mock, % serials prefixed', moved, coalesce(cardinality(serials), 0);
@@ -5812,6 +5857,39 @@ do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then perform private.schedule_jobs(); end if;
 end $$;
+
+-- every working login, for the plant-sync job (R18): a login whose plants are all paused or read
+-- through another login still finds a plant added at the brand
+create or replace function public.sync_logins() returns table (id uuid, user_id uuid, username text, brand text,
+    access_token text, access_expires_at bigint)
+  language sql stable security definer set search_path to '' as $$
+  select l.id, l.user_id, l.username, l.brand, l.access_token, l.access_expires_at
+    from plants.logins l where l.status = 'ok' order by l.id
+$$;
+revoke all on function public.sync_logins() from public, anon, authenticated;
+grant execute on function public.sync_logins() to service_role;
+
+CREATE OR REPLACE FUNCTION private.call_fn(p_path text, p_body jsonb DEFAULT '{}'::jsonb, p_timeout_ms integer DEFAULT 55000)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare rid bigint;
+begin
+  rid := net.http_post(
+    url := private.functions_url() || '/' || p_path,
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+      'Content-Type', 'application/json'),
+    body := p_body,
+    timeout_milliseconds := p_timeout_ms);
+  insert into private.fn_calls (id, fn, shard, timeout_ms)
+  values (rid, split_part(split_part(p_path, '?', 1), '/', 1) || coalesce(':' || (p_body ->> 'task'), ''), (p_body ->> 'shard')::int, p_timeout_ms)
+  on conflict (id) do nothing;
+  return rid;
+end $function$;
+
 
 -- ---------------------------------------------------------------------------
 -- the latest bodies of the functions the parts above made again
@@ -6111,7 +6189,7 @@ begin
       clr := case when r.stale then case when r.clear_at is null or r.dev - r.prev > 600 then r.dev else r.clear_at end end;
       if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
         perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
-          jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
+          jsonb_build_object('since', regexp_replace(r.stale_key, '^.*:', '')::bigint, 'at', clr,
                              'inverter', coalesce((select nullif(m.alias, '') from plants.meta_info m where m.sn = r.sn), 'Inverter ' || r.sn)),
           r.stale_key);
         update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null
@@ -6448,4 +6526,29 @@ AS $function$
   select s.i, n.shards, (s.i % 3) * 2000
     from n, generate_series(0, n.shards - 1) as s(i)
 $function$;
+
+CREATE OR REPLACE FUNCTION private.alerts_minute()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
+  -- two minutes back: every read of that minute has saved or given up by then (50 s deadline)
+  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 120;
+  m bigint;
+  n int := 0;
+begin
+  if not pg_try_advisory_xact_lock(hashtext('private.alerts_minute')) then return jsonb_build_object('busy', true); end if;
+  m := greatest(coalesce(last_done, upto - 60), upto - 600) + 60;
+  while m <= upto loop
+    perform public.email_poll_step(m, '[]'::jsonb, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1));
+    insert into public.app_config (key, value, note) values ('ALERTS_DONE_TS', m, 'the last minute the alert step ran for (private.alerts_minute)')
+    on conflict (key) do update set value = excluded.value;
+    n := n + 1;
+    m := m + 60;
+  end loop;
+  return jsonb_build_object('minutes', n, 'upto', upto);
+end $function$;
 

@@ -152,7 +152,7 @@ begin
       clr := case when r.stale then case when r.clear_at is null or r.dev - r.prev > 600 then r.dev else r.clear_at end end;
       if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
         perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
-          jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
+          jsonb_build_object('since', regexp_replace(r.stale_key, '^.*:', '')::bigint, 'at', clr,
                              'inverter', coalesce((select nullif(m.alias, '') from plants.meta_info m where m.sn = r.sn), 'Inverter ' || r.sn)),
           r.stale_key);
         update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null

@@ -54,5 +54,7 @@ export const allBrands = (): Brand[] => Object.values(BRANDS);
 
 /** Saves every adapter's call counts; a poll run passes its shard, run time and plants. */
 export async function saveAllCalls(run?: { shard: number; ms: number; plants: number }) {
-  await Promise.all(allBrands().map((b) => b.saveCalls(run)));
+  // brands that share one counter (mock is the SunSynk adapter) save it once, and the run log once
+  const savers = [...new Set(allBrands().map((b) => b.saveCalls))];
+  await Promise.all(savers.map((save, i) => save(i === 0 ? run : undefined)));
 }

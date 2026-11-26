@@ -14,7 +14,7 @@ begin
     body := p_body,
     timeout_milliseconds := p_timeout_ms);
   insert into private.fn_calls (id, fn, shard, timeout_ms)
-  values (rid, split_part(split_part(p_path, '?', 1), '/', 1), (p_body ->> 'shard')::int, p_timeout_ms)
+  values (rid, split_part(split_part(p_path, '?', 1), '/', 1) || coalesce(':' || (p_body ->> 'task'), ''), (p_body ->> 'shard')::int, p_timeout_ms)
   on conflict (id) do nothing;
   return rid;
 end $function$;

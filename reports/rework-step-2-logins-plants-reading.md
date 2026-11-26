@@ -337,3 +337,56 @@ Large, and owners see nothing new. Keeping the old plant ids means two kinds of 
 and a missed vendor-id lookup works on every live plant; R12 and R14 are the only guard. The
 same holds for inverter serials (R13). Today's reader is proven only to 500 logins; at
 the trigger, the worker must be built before more customers come.
+
+## Built (2026-11-27)
+
+Branch `solar-681-logins-plants-reading`. One migration, `0283_plants_schema.sql`, with the
+moves, the compares and every rewritten function. Nothing released yet.
+
+| Rule | Done | Proof |
+|---|---|---|
+| R1 | Owner per table in `supabase/owners.json`; only listed writers | `npm test` (owners-check); `test:state` (db-files: every table has an owner) |
+| R2 | 0 reads of this part's tables outside it; other parts read `plants.*` views without tokens, or functions | owners-check, `parts.plants.readers` empty |
+| R3-R6 | `plants.logins` one row per login; status words ok / needs_reconnect / disabled; one link check; no browser read | plants-tests R3, R4, R6; 931 billing checks |
+| R7-R9 | `plants.login_plants` + `plants.claims`; `plants.list_seen` the one gone rule (sync, relink); whole list or a throw | billing checks SH1-SH3, V13, W3, W4; plants-tests |
+| R10-R12 | Old 23 ids kept; new ids from 1e12; `plants.plant_for`; jobs carry the brand's id | plants-tests R10-R12 |
+| R13, R14 | Brand `mock` for the fake tester plants, serials `mock:<serial>`; the move is in 0283 | plants-tests; rehearsal below |
+| R15 | Brand interface, SunSynk adapter, `mock` adapter; contract tests for both | `brands/contract_test.ts` (deno) |
+| R16 | No brand name in shared code outside the adapter, mock and mail text (step 4) | reuse-check (F20) |
+| R17 | Outage state and call counts per brand | plants-tests R17 |
+| R18 | Reader reads and saves; alerts, plant checks (SQL), plant sync, temperatures (poll tasks) on their own | 2-hour soak: each job every minute |
+| R19 | One lock order | lock-order races 5 and 6, 20 runs each, 46 races in all, no deadlock |
+| R20 | Save checks routes on the database clock | plants-tests R20 |
+| R21-R22 | Today's reader, groups at 0/2/4 s, one retry on a brand 5xx and on a gateway 502-504 | load tests below |
+| R23 | One function each: independence, span totals, battery %, grid on/off (`public.grid_live`); outage length one formatter (`text.ts minutesText`) | plants-tests R23; contract test (threshold) |
+| R24 | `api_link_disconnect` gone | plants-tests R24 |
+| R25 | New, copy, compare, switch, drop in one transaction; rehearsed | below |
+| R26 | Plant zone on `plants.plants`; brand's zone, else the market's | plants-tests R26 |
+
+**Load tests, 500 logins, fake SunSynk with production timings (local):**
+
+| Run | Plant-minutes | Missed | Saved after the page asked | Save p95 |
+|---|---|---|---|---|
+| Baseline, groups at 0/10/20 s | 4,500 | 0 | 774 (17%) | 24.5 s |
+| 30 min, groups at 0/2/4 s | 14,500 | 4 (a local gateway 502; read retry added) | 37 (0.26%) | 8.6 s |
+| 2-hour soak, side jobs on | 57,502 | 0 | 141 (0.25%) | 8.6 s |
+
+The soak's late saves are reads the fake held 10 s or more (its 504 tail); with the page asking
+at 20-50 s past the minute none were late in a clean 5-minute sample. Decision for Brynne.
+
+**Rehearsal on a production copy** (read-only copy of the login, plant and billing tables,
+emails masked, no tokens): 24 accounts, `account_state` the same before and after (0
+differences once the fake plants' new ids are mapped); plant lists the same both ways; 21
+fake plants moved to brand `mock` with ids from 1e12, 24 serials prefixed, 22 logins brand
+`mock`, no login listing another brand's plant.
+
+**Left open, on purpose:**
+- `plant_config` still has writers outside this part: History's bookmarks (`recover`,
+  `plant_start_fill`, `purge_now`, step 3) and the browser's own settings (`public/data.jsx`,
+  column grants). Listed in `owners.json`.
+- The save checks a plant's route, not each (plant, login) pair: a sample from a login whose
+  route ended passes while another route to the plant is live (Sol, final review). As before
+  this step.
+- Message kinds and mail words that name SunSynk (`sunsynk_down`, `text.ts`): step 4.
+- Kept names: the admin page's `sunsynkUser` key and the PostHog event `sunsynk_calls_counted`;
+  the `link-sunsynk` alias goes one release after the frontend calls `link`.
