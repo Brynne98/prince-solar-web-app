@@ -137,7 +137,10 @@ jobs:
           echo "::error::app.princesolarhub.co.za does not serve $VERSION"; exit 1
       - name: No source map is public
         run: |
-          for f in $(grep -o 'build/[A-Za-z0-9._-]*\.js' public/index.html); do
+          # every script built, the lazy pages too; none built is itself a failure
+          files=$(cd public && ls build/*.js 2>/dev/null)
+          [ -n "$files" ] || { echo "::error::no build/*.js to check"; exit 1; }
+          for f in $files; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "https://app.princesolarhub.co.za/$f.map")
             [ "$code" = 404 ] || { echo "::error::$f.map answers $code"; exit 1; }
           done

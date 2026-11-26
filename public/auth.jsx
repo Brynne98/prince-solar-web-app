@@ -34,7 +34,7 @@ import React from 'react';
 import { SaveToast, toast } from './app.jsx';
 import { BusyButton } from './components.jsx';
 import { pushTurnOff } from './data.jsx';
-import { sb } from './sb.js';
+import { sb, SESSION_KEY } from './sb.js';
 // Where emailed links (confirmation, password reset) bring the user back to.
 const SITE_URL = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
 // Reset links come back tagged, so an expired one can be told from a confirmation (SOLAR-198).
@@ -695,15 +695,21 @@ export function AuthGate({ children, fallback = null }) {
 };
 
 // Signs out this device only: the wall tablet stays signed in when a phone signs out.
-// supabase-js clears the session here even when the call fails (offline, a 5xx): storage,
-// then SIGNED_OUT to every tab. SIGNED_OUT is what turns
+// supabase-js clears the session here even when the server call fails (offline, a 5xx):
+// storage, then SIGNED_OUT to every tab. Not when the sign-in has expired and can't be renewed
+// (offline, a 5xx, the 5 s renewal cut-off): it gives up before clearing anything. Then the
+// stored session is dropped and it is asked again; with nothing stored it ends the session. SIGNED_OUT is what turns
 // AuthGate to the sign-in screen, so nothing after this should reload the page: a reload
 // blanks it and draws sign-in a second time (SOLAR-98).
 async function signOutHere() {
   // pop-ups stop on this browser with the session (SOLAR-244)
   await pushTurnOff?.('sign_out').catch(() => {});
   window.track('sign_out_done');
-  await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+  const { error } = await sb.auth.signOut({ scope: 'local' }).catch((e) => ({ error: e }));
+  if (error) {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* storage blocked: nothing stored */ }
+    await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+  }
 }
 
 // A tab moves to sign-in only when SIGNED_OUT reaches it. A tab asleep when another tab

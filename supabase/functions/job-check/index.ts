@@ -222,7 +222,11 @@ if (import.meta.main) serve("job-check", async (req) => {
       $process_person_profile: false }),
   ]);
   // F12: a check failing now pages through job-check's heartbeat; no beat at all pages too
-  await heartbeat("job_check", !verdicts.some((v) => v.failing ?? i.checks[v.name]?.failing));
+  // a check not judged this run (its input failed to read) keeps its stored state
+  const judged = new Set(verdicts.map((v) => v.name));
+  const failing = verdicts.some((v) => v.failing ?? i.checks[v.name]?.failing)
+    || Object.entries(i.checks).some(([n, c]) => !judged.has(n) && c?.failing);
+  await heartbeat("job_check", !failing);
   return new Response(JSON.stringify({ changes: changes.map((v) => ({ name: v.name, failing: v.failing })) }),
                       { headers: { "Content-Type": "application/json" } });
 });

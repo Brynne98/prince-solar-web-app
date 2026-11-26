@@ -69,4 +69,5 @@ for _ in $(seq 1 60); do
   case "$code" in 2*|4*) break ;; esac
   sleep 2
 done
+case "$code" in 2*|4*) ;; *) echo "functions did not start (see $OUT/functions.log)" >&2; exit 1 ;; esac
 echo "staging up: $API_URL (logs in $OUT)"

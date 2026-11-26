@@ -42,7 +42,9 @@ export class Pacer {
    *  failure): the constructor's gap. */
   learn(r: Rate | null | undefined) {
     if (!r) return;
-    this.next = r.remaining > 0 ? this.now() : Math.max(this.next, this.now() + Math.max(r.resetS * 1000, 1000));
+    // capped like Retry-After: a long window (an hourly or daily quota) goes to a later run,
+    // not a wait that outlives this one in a warm worker
+    this.next = r.remaining > 0 ? this.now() : Math.max(this.next, this.now() + Math.min(Math.max(r.resetS * 1000, 1000), 60_000));
   }
 
   /** A 429: no call before Retry-After has passed. */

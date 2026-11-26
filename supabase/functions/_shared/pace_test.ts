@@ -98,3 +98,12 @@ Deno.test("a 429 after the headers: Retry-After still wins", async () => {
   await p.slot();
   assertEquals(c.slept, [5000]);
 });
+
+Deno.test("a long reset (an hourly quota) waits at most a minute, like Retry-After", async () => {
+  const { c, now, sleep } = clock();
+  const p = new Pacer(550, now, sleep);
+  await p.slot();
+  p.learn({ remaining: 0, resetS: 3600 });
+  await p.slot();
+  assertEquals(c.slept, [60_000]);
+});

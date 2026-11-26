@@ -2,11 +2,14 @@
 // from config.js, which loads first as a plain script.
 import { createClient } from '@supabase/supabase-js';
 
+// where supabase-js keeps the session in localStorage
+export const SESSION_KEY = 'synsynk.auth';
+
 /** @type {import('@supabase/supabase-js').SupabaseClient<import('../supabase/functions/_shared/database.types.ts').Database>} */
 export const sb = createClient(
   window.SUNSYNK_CONFIG.url,
   window.SUNSYNK_CONFIG.key,
-  { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'synsynk.auth' },
+  { auth: { persistSession: true, autoRefreshToken: true, storageKey: SESSION_KEY },
     global: { fetch: fetchWithRefreshCutoff } }
 );
 
