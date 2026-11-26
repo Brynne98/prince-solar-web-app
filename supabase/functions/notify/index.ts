@@ -193,7 +193,7 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
 async function historyPending(row: Row): Promise<boolean> {
   if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
   const [{ data: link }, { data: cfg }, open] = await Promise.all([
-    db.from("plant_users").select("linked_at").eq("user_id", row.user_id).eq("plant_id", row.plant_id).maybeSingle(),
+    db.rpc("plant_link", { p_user: row.user_id, p_plant: row.plant_id }),
     db.from("plant_config").select("backfill_next").eq("plant_id", row.plant_id).maybeSingle(),
     historyOpen(row.user_id, row.plant_id),
   ]);
@@ -284,7 +284,7 @@ async function build(r: Row): Promise<Email | null> {
     case "welcome": return welcome();
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
-      const { data: pu } = await db.from("plant_users").select("linked_at").eq("user_id", r.user_id).eq("plant_id", r.plant_id).maybeSingle();
+      const { data: pu } = await db.rpc("plant_link", { p_user: r.user_id, p_plant: r.plant_id });
       const linkedOn = pu?.linked_at ? new Date(pu.linked_at).toLocaleDateString("en-CA", { timeZone: tz }) : undefined;
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn);
       return rep && report(rep);
@@ -710,7 +710,7 @@ async function run(dry: boolean, push: boolean) {
 
 // Every template from one plant's real numbers; event values are samples.
 async function renderAll(plantId: number, today?: string) {
-  const { data: pu } = await db.from("plant_users").select("plant_name").eq("plant_id", plantId).limit(1).maybeSingle();
+  const { data: pu } = await db.rpc("plant_link", { p_user: null, p_plant: plantId });
   if (!pu) throw new Error(`no users on plant ${plantId}`);
   const p: Plant = { id: plantId, name: pu.plant_name || "your plant", tz: await rpc<string>("plant_tz", { p_plant: plantId }) };
   const now = Math.floor(Date.now() / 1000);

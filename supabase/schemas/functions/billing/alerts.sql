@@ -26,15 +26,17 @@ AS $function$
     having count(*) > 0
     union all
     select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'delete_at', ps->'delete_at')
-      from billing.plants p cross join lateral billing.plant_state(p.id, p_at) ps
-     where p.history_purged_at is null and ps->>'delete_at' is not null
+      from plants.plants p cross join lateral billing.plant_state(p.id, p_at) ps
+      left join billing.plant_facts f on f.plant = p.id
+     where f.history_purged_at is null and ps->>'delete_at' is not null
        and (ps->>'delete_at')::timestamptz <= p_at - interval '1 hour'
        and not billing.payment_hold(p.id, p_at) and billing.has_history(p.id)
     union all
     -- history no seat holds, the last seat closed over an hour ago: the delete job missed it
     select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'closed_at', max(se.closed_at))
-      from billing.plants p join billing.seats se on se.plant = p.id
-     where p.history_purged_at is null
+      from plants.plants p join billing.seats se on se.plant = p.id
+      left join billing.plant_facts f on f.plant = p.id
+     where f.history_purged_at is null
        and not exists (select 1 from billing.seats o where o.plant = p.id and o.closed_at is null)
      group by p.id
     having max(se.closed_at) <= p_at - interval '1 hour'

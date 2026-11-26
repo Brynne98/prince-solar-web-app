@@ -4,8 +4,8 @@ CREATE OR REPLACE FUNCTION public.share_retry_due()
  STABLE SECURITY DEFINER
  SET search_path TO ''
 AS $function$
-  select a.id from private.sunsynk_accounts a
-   where a.kind = 'share' and a.status = 'needs_relink'
-     and coalesce((select max(e.at) from private.sunsynk_login_events e
+  select a.id from plants.logins a
+   where a.kind = 'share' and a.status = 'needs_reconnect'
+     and coalesce((select max(e.at) from plants.login_events e
                     where e.account_id = a.id and e.event = 'died'), '-infinity') < now() - interval '55 minutes'
 $function$;

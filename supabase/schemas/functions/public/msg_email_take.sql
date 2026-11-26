@@ -74,13 +74,13 @@ begin
   return query
   select o.id, v_claim, o.tries, o.batch_key, q.id, q.user_id,
          coalesce(q.to_email, u.email::text, o.to_email), q.plant_id,
-         coalesce(pu.plant_name, (select pu2.plant_name from public.plant_users pu2
+         coalesce(pu.plant_name, (select pu2.plant_name from plants.user_plants pu2
                                    where pu2.user_id = q.user_id order by pu2.linked_at limit 1)),
          case when q.plant_id is not null then public.plant_tz(q.plant_id) else 'Africa/Johannesburg' end,
          q.kind, q.key,
          -- email_claim's per-kind data (0247): need a hand with a login names choosing plants;
          -- a report has no free-week wording since billing went live
-         case when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
+         case when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
                 then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
               when q.kind like 'report\_%' then q.data - 'freeWeekEnds'
               else q.data end,
@@ -90,7 +90,7 @@ begin
     from msg.outbox o
     join public.email_queue q on q.id = o.event_id
     left join auth.users u on u.id = q.user_id
-    left join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
+    left join plants.user_plants pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
    where o.claim = v_claim and o.status = 'queued'
    order by o.batch_key nulls last, o.id;
 end $function$;

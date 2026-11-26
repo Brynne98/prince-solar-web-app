@@ -6,8 +6,8 @@ CREATE OR REPLACE FUNCTION public.account_disable(p_account uuid)
 AS $function$
 declare sid uuid;
 begin
-  select refresh_secret_id into sid from private.sunsynk_accounts where id = p_account;
-  update private.sunsynk_accounts
+  select refresh_secret_id into sid from plants.logins where id = p_account;
+  update plants.logins
      set status = 'disabled', access_token = null, access_expires_at = null, refresh_secret_id = null
    where id = p_account;
   if sid is not null then delete from vault.secrets where id = sid; end if;

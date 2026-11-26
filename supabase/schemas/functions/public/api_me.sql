@@ -10,9 +10,9 @@ AS $function$
     'plants', coalesce((
       select jsonb_agg(jsonb_build_object(
                'id', pu.plant_id, 'name', pu.plant_name, 'linkedAt', pu.linked_at,
-               'config', to_jsonb(c) - 'plant_id' - 'updated_by')
+               'config', (to_jsonb(c) - 'plant_id' - 'updated_by') || jsonb_build_object('timezone', plants.tz(pu.plant_id)))
              order by pu.linked_at, pu.plant_id)
-        from public.plant_users pu
+        from plants.user_plants pu
         left join public.plant_config c on c.plant_id = pu.plant_id
        where pu.user_id = auth.uid() and pu.plant_id in (select public.my_plant_ids())), '[]'::jsonb))
 $function$;

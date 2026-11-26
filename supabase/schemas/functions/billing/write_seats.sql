@@ -11,17 +11,18 @@ begin
    where account = p_account and closed_at is null and plant <> all (p_want);
   insert into billing.seats (account, plant, chosen_at)
   select p_account, x, p_at from unnest(p_want) x where x <> all (had);
-  update billing.plants set trial_used_at = coalesce(trial_used_at, p_at),
-                            trial_used_by = coalesce(trial_used_by, p_account)
-   where id = any (p_want) and id <> all (had) and (trial_used_at is null or trial_used_by is null);
-  update billing.plants set version = version + 1
-   where id = any (p_want || had) and not (id = any (p_want) and id = any (had));
+  insert into billing.plant_facts as f (plant, trial_used_at, trial_used_by)
+  select x, p_at, p_account from unnest(p_want) x where x <> all (had)
+  on conflict (plant) do update set trial_used_at = coalesce(f.trial_used_at, excluded.trial_used_at),
+                                    trial_used_by = coalesce(f.trial_used_by, excluded.trial_used_by)
+   where f.trial_used_at is null or f.trial_used_by is null;
+  perform plants.bump(array(select x from unnest(p_want || had) x where not (x = any (p_want) and x = any (had))));
   update billing.history_fetches set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
    where account = p_account and status in ('queued', 'running') and plant = any (had) and plant <> all (p_want);
   -- a seat opening (or a plan restarting) on a deleted plant: it gathers history again. The
   -- caller holds the plant locks, so no write path has to touch the row.
-  update billing.plants set history_purged_at = null
-   where id = any (p_want) and history_purged_at is not null;
+  update billing.plant_facts set history_purged_at = null
+   where plant = any (p_want) and history_purged_at is not null;
   -- a plant switched out that no account keeps is deleted now, under its lock, so the
   -- pop-up's "deleted now" holds even if the owner switches straight back
   perform billing.purge_now(x, p_at) from unnest(had) x where x <> all (p_want);

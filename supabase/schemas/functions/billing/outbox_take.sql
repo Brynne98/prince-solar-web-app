@@ -89,10 +89,10 @@ begin
       'ended', case when o.key = 'plan_ended' then billing.plan_ended_facts(o) end,
       'event', (select jsonb_build_object('kind', e.kind, 'before', e.before, 'after', e.after)
                   from billing.account_events e where o.key in ('change_booked', 'change_undone') and e.id = o.ref::bigint),
-      'plant', (select jsonb_build_object('id', p.id, 'name', coalesce((select lp.plant_name from billing.login_plants lp
-                         join billing.logins l on l.id = lp.login where l.account = o.account and lp.plant = p.id limit 1),
-                         (select pu.plant_name from public.plant_users pu where pu.plant_id = p.id and pu.user_id = u.id limit 1)))
-                  from billing.plants p where o.key = 'history_deleted' and p.id = o.ref::bigint)));
+      'plant', (select jsonb_build_object('id', p.id, 'name', coalesce((select lp.plant_name from plants.login_plants lp
+                         join plants.logins l on l.id = lp.login where l.account = o.account and lp.plant = p.id limit 1),
+                         (select pu.plant_name from plants.user_plants pu where pu.plant_id = p.id and pu.user_id = u.id limit 1)))
+                  from plants.plants p where o.key = 'history_deleted' and p.id = o.ref::bigint)));
   end loop;
   return out;
 end $function$;

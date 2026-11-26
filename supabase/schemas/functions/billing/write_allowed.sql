@@ -7,7 +7,7 @@ declare
   ok bigint[] := '{}';
   p record;
 begin
-  for p in select bp.id, bp.version from billing.plants bp
+  for p in select bp.id, bp.version from plants.plants bp
             where bp.id in (select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k)
             order by bp.id for share
   loop

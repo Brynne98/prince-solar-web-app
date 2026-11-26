@@ -16,7 +16,7 @@ declare
   v_on    int;
   v_sync  jsonb;
 begin
-  for p in select pu.plant_id from public.plant_users pu
+  for p in select pu.plant_id from plants.user_plants pu
             where pu.user_id = auth.uid() and pu.plant_id in (select public.my_plant_ids())
             order by pu.linked_at, pu.plant_id loop
     select max(ts) into v_ts from public.readings where plant_id = p.plant_id and ts > v_floor;
@@ -53,10 +53,10 @@ begin
              'window', 60)
       into v_sync
       from (select (pc.backfill_next is not null) as spine,
-                   (pc.temp_next is not null and pc.temp_next < public.today_tz(coalesce(pc.timezone, 'Africa/Johannesburg'))) as inv,
+                   (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(pc.plant_id))) as inv,
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
-                   public.today_tz(coalesce(pc.timezone, 'Africa/Johannesburg')) as today,
-                   coalesce(pc.timezone, 'Africa/Johannesburg') as tz
+                   public.today_tz(plants.tz(pc.plant_id)) as today,
+                   plants.tz(pc.plant_id) as tz
               from public.plant_config pc where pc.plant_id = p.plant_id) s;
 
     v_out := v_out || jsonb_build_array(jsonb_build_object(

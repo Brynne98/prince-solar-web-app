@@ -17,7 +17,9 @@ begin
   delete from private.refill_queue where plant_id = p_plant;
   update public.plant_config set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
    where plant_id = p_plant;
-  update billing.plants set history_purged_at = p_at, version = version + 1 where id = p_plant;
+  insert into billing.plant_facts (plant, history_purged_at) values (p_plant, p_at)
+  on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
+  perform plants.bump(array[p_plant]);
   update billing.history_fetches set status = 'dropped', drop_reason = 'deleted', finished_at = p_at, claimed_until = null
    where plant = p_plant and status in ('queued', 'running');
   return jsonb_build_object('queued', 1);                                  -- 0277: delete_due counts it as deleted

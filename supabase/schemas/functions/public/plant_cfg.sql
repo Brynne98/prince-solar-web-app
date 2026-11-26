@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION public.plant_cfg(p_plant bigint)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  select coalesce(c.timezone, 'Africa/Johannesburg'),
+  select plants.tz(p_plant),
          coalesce(c.currency, 'ZAR'),
          coalesce(c.lat, public.cfg('LAT')), coalesce(c.lon, public.cfg('LON')),
          c.system_kwp,   -- the owner's figure or nothing; the Solar tab then asks for it

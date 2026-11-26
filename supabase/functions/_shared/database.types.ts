@@ -148,14 +148,14 @@ export type Database = {
                   ]
                 },"plant_config": {
                   Row: {
-                    "backfill_next": string | null,"backfill_tries": number,"backfill_until": string | null,"batt_positive_means": string | null,"batt_sign_source": string,"batt_sign_updated_at": string | null,"battery_banks": string,"battery_groups": Json | null,"battery_kwh": number | null,"battery_reserve_confirmed": boolean,"battery_reserve_pct": number,"currency": string,"features_checked_at": string | null,"features_source": string,"features_updated_at": string | null,"geometry_source": string,"has_battery": boolean | null,"has_grid": boolean | null,"lat": number | null,"lon": number | null,"panel_azimuth": number,"panel_groups": Json | null,"panel_tilt": number,"plant_id": number,"system_kwp": number | null,"tariff_export": number,"tariff_import": number,"temp_next": string | null,"temp_tries": number,"timezone": string,"updated_at": string,"updated_by": string | null
+                    "backfill_next": string | null,"backfill_tries": number,"backfill_until": string | null,"batt_positive_means": string | null,"batt_sign_source": string,"batt_sign_updated_at": string | null,"battery_banks": string,"battery_groups": Json | null,"battery_kwh": number | null,"battery_reserve_confirmed": boolean,"battery_reserve_pct": number,"currency": string,"features_checked_at": string | null,"features_source": string,"features_updated_at": string | null,"geometry_source": string,"has_battery": boolean | null,"has_grid": boolean | null,"lat": number | null,"lon": number | null,"panel_azimuth": number,"panel_groups": Json | null,"panel_tilt": number,"plant_id": number,"system_kwp": number | null,"tariff_export": number,"tariff_import": number,"temp_next": string | null,"temp_tries": number,"updated_at": string,"updated_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "backfill_next"?: string | null,"backfill_tries"?: number,"backfill_until"?: string | null,"batt_positive_means"?: string | null,"batt_sign_source"?: string,"batt_sign_updated_at"?: string | null,"battery_banks"?: string,"battery_groups"?: Json | null,"battery_kwh"?: number | null,"battery_reserve_confirmed"?: boolean,"battery_reserve_pct"?: number,"currency"?: string,"features_checked_at"?: string | null,"features_source"?: string,"features_updated_at"?: string | null,"geometry_source"?: string,"has_battery"?: boolean | null,"has_grid"?: boolean | null,"lat"?: number | null,"lon"?: number | null,"panel_azimuth"?: number,"panel_groups"?: Json | null,"panel_tilt"?: number,"plant_id": number,"system_kwp"?: number | null,"tariff_export"?: number,"tariff_import"?: number,"temp_next"?: string | null,"temp_tries"?: number,"timezone"?: string,"updated_at"?: string,"updated_by"?: string | null
+                    "backfill_next"?: string | null,"backfill_tries"?: number,"backfill_until"?: string | null,"batt_positive_means"?: string | null,"batt_sign_source"?: string,"batt_sign_updated_at"?: string | null,"battery_banks"?: string,"battery_groups"?: Json | null,"battery_kwh"?: number | null,"battery_reserve_confirmed"?: boolean,"battery_reserve_pct"?: number,"currency"?: string,"features_checked_at"?: string | null,"features_source"?: string,"features_updated_at"?: string | null,"geometry_source"?: string,"has_battery"?: boolean | null,"has_grid"?: boolean | null,"lat"?: number | null,"lon"?: number | null,"panel_azimuth"?: number,"panel_groups"?: Json | null,"panel_tilt"?: number,"plant_id": number,"system_kwp"?: number | null,"tariff_export"?: number,"tariff_import"?: number,"temp_next"?: string | null,"temp_tries"?: number,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Update: {
-                    "backfill_next"?: string | null,"backfill_tries"?: number,"backfill_until"?: string | null,"batt_positive_means"?: string | null,"batt_sign_source"?: string,"batt_sign_updated_at"?: string | null,"battery_banks"?: string,"battery_groups"?: Json | null,"battery_kwh"?: number | null,"battery_reserve_confirmed"?: boolean,"battery_reserve_pct"?: number,"currency"?: string,"features_checked_at"?: string | null,"features_source"?: string,"features_updated_at"?: string | null,"geometry_source"?: string,"has_battery"?: boolean | null,"has_grid"?: boolean | null,"lat"?: number | null,"lon"?: number | null,"panel_azimuth"?: number,"panel_groups"?: Json | null,"panel_tilt"?: number,"plant_id"?: number,"system_kwp"?: number | null,"tariff_export"?: number,"tariff_import"?: number,"temp_next"?: string | null,"temp_tries"?: number,"timezone"?: string,"updated_at"?: string,"updated_by"?: string | null
+                    "backfill_next"?: string | null,"backfill_tries"?: number,"backfill_until"?: string | null,"batt_positive_means"?: string | null,"batt_sign_source"?: string,"batt_sign_updated_at"?: string | null,"battery_banks"?: string,"battery_groups"?: Json | null,"battery_kwh"?: number | null,"battery_reserve_confirmed"?: boolean,"battery_reserve_pct"?: number,"currency"?: string,"features_checked_at"?: string | null,"features_source"?: string,"features_updated_at"?: string | null,"geometry_source"?: string,"has_battery"?: boolean | null,"has_grid"?: boolean | null,"lat"?: number | null,"lon"?: number | null,"panel_azimuth"?: number,"panel_groups"?: Json | null,"panel_tilt"?: number,"plant_id"?: number,"system_kwp"?: number | null,"tariff_export"?: number,"tariff_import"?: number,"temp_next"?: string | null,"temp_tries"?: number,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Relationships: [
                     
@@ -170,20 +170,6 @@ export type Database = {
                   }
                   Update: {
                     "bucket"?: string,"chg_kwh"?: number | null,"dischg_kwh"?: number | null,"exp_kwh"?: number | null,"imp_kwh"?: number | null,"load_kwh"?: number | null,"period"?: string,"plant_id"?: number,"pv_kwh"?: number | null,"synced_at"?: string
-                  }
-                  Relationships: [
-                    
-                  ]
-                },"plant_users": {
-                  Row: {
-                    "account_id": string | null,"linked_at": string,"plant_id": number,"plant_name": string | null,"share_gone_at": string | null,"share_missing_at": string | null,"user_id": string,"via_share": boolean
-                  }
-                  ComputedFields: never
-                  Insert: {
-                    "account_id"?: string | null,"linked_at"?: string,"plant_id": number,"plant_name"?: string | null,"share_gone_at"?: string | null,"share_missing_at"?: string | null,"user_id": string,"via_share"?: boolean
-                  }
-                  Update: {
-                    "account_id"?: string | null,"linked_at"?: string,"plant_id"?: number,"plant_name"?: string | null,"share_gone_at"?: string | null,"share_missing_at"?: string | null,"user_id"?: string,"via_share"?: boolean
                   }
                   Relationships: [
                     
@@ -486,9 +472,6 @@ export type Database = {
 "api_inverter_history":
 { Args: { "p_date"?: string,"p_plant"?: number }; Returns: Json
                            },
-"api_link_disconnect":
-{ Args: { "p_account": string }; Returns: Json
-                           },
 "api_link_remove":
 { Args: { "p_account": string }; Returns: Json
                            },
@@ -754,11 +737,20 @@ export type Database = {
               "sn": string
             }[]
                            },
+"plant_link":
+{ Args: { "p_plant": number,"p_user": string }; Returns: Json
+                           },
 "plant_tz":
 { Args: { "p_plant": number }; Returns: string
                            },
-"plant_users_upsert":
-{ Args: { "p_account": string,"p_rows": Json,"p_user": string }; Returns: undefined
+"plant_vendor":
+{ Args: { "p_plant": number }; Returns: string
+                           },
+"plants_list_seen":
+{ Args: { "p_login": string,"p_mode"?: string,"p_plants": Json }; Returns: Json
+                           },
+"plants_of_login":
+{ Args: { "p_login": string }; Returns: Json
                            },
 "plants_seen_before":
 { Args: { "p_plants": (number)[],"p_user": string }; Returns: number
@@ -776,7 +768,7 @@ export type Database = {
                            },
 "poll_jobs_v2":
 { Args: { "p_account"?: string,"p_at"?: string,"p_shard": number,"p_shards": number }; Returns: {
-              "access_expires_at": number,"access_token": string,"account_id": string,"backfill_next": string,"backfill_tries": number,"backfill_until": string,"batt_positive_means": string,"has_grid": boolean,"plant_id": number,"plant_name": string,"plant_version": number,"sunsynk_username": string,"temp_next": string,"temp_tries": number,"timezone": string,"user_id": string
+              "access_expires_at": number,"access_token": string,"account_id": string,"backfill_next": string,"backfill_tries": number,"backfill_until": string,"batt_positive_means": string,"brand": string,"has_grid": boolean,"plant_id": number,"plant_name": string,"plant_version": number,"temp_next": string,"temp_tries": number,"timezone": string,"user_id": string,"username": string,"vendor_plant_id": string
             }[]
                            },
 "poll_routes":
@@ -853,20 +845,11 @@ export type Database = {
 "share_account_set":
 { Args: { "p_access": string,"p_expires": number,"p_user": string,"p_username": string }; Returns: string
                            },
-"share_claim":
-{ Args: { "p_account": string,"p_plant": number,"p_plant_name": string,"p_user": string }; Returns: string
-                           },
 "share_claim_any":
-{ Args: { "p_account": string,"p_plant": number,"p_plant_name": string,"p_user": string }; Returns: Json
-                           },
-"share_claim_live":
-{ Args: { "p_account": string,"p_plant": number,"p_plant_name": string,"p_user": string }; Returns: string
+{ Args: { "p_account": string,"p_plant": string,"p_plant_name": string,"p_user": string }; Returns: Json
                            },
 "share_retry_due":
 { Args: Record<PropertyKey, never>; Returns: string
-                           },
-"share_sync":
-{ Args: { "p_account": string,"p_plants": (number)[] }; Returns: Json
                            },
 "sunsynk_calls_report":
 { Args: Record<PropertyKey, never>; Returns: Json

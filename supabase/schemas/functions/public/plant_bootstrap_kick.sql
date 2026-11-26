@@ -31,7 +31,7 @@ begin
         on conflict (plant_id) do update set request_id = excluded.request_id, at = now();
     end if;
   end loop;
-  select account_id into acc from public.plant_users where plant_id = p_plant limit 1;
+  select account_id into acc from plants.user_plants where plant_id = p_plant limit 1;
   if acc is not null then
     perform net.http_post(
       url := fn_base || '/poll',

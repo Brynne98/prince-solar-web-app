@@ -18,7 +18,7 @@ begin
     from unnest(p_accounts) a(id)
     join private.inverters i
       on (i.account_id = a.id
-          or i.plant_id in (select pu.plant_id from public.plant_users pu where pu.account_id = a.id))
+          or i.plant_id in (select pu.plant_id from plants.user_plants pu where pu.account_id = a.id))
      and (p_plants is null or i.plant_id = any (p_plants))
     left join private.meta m on m.sn = i.sn
     left join lateral (

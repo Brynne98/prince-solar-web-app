@@ -11,12 +11,12 @@ begin
   -- Vault secret names are unique, so the old one must go before the new one is
   -- created under the same name. Same transaction: there is never a moment with
   -- no secret on file.
-  select refresh_secret_id into old_id from private.sunsynk_accounts where id = p_account;
+  select refresh_secret_id into old_id from plants.logins where id = p_account;
   if old_id is not null then
-    update private.sunsynk_accounts set refresh_secret_id = null where id = p_account;
+    update plants.logins set refresh_secret_id = null where id = p_account;
     delete from vault.secrets where id = old_id;
   end if;
   new_id := vault.create_secret(p_refresh, 'sunsynk_refresh_' || p_account::text,
                                 'SunSynk refresh token for account ' || p_account::text);
-  update private.sunsynk_accounts set refresh_secret_id = new_id where id = p_account;
+  update plants.logins set refresh_secret_id = new_id where id = p_account;
 end $function$;

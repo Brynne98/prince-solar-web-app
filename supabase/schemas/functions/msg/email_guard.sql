@@ -12,7 +12,7 @@ AS $function$
            when q.user_id is not null and private.email_switch_of(q.kind, q.data) is not null
                 and not public.email_wanted(q.user_id, private.email_switch_of(q.kind, q.data)) then 'switched off'
            when q.plant_id is not null and q.user_id is not null and q.kind <> 'needs_relink'
-                and not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
+                and not exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
            -- plan, chosen plant, still reached: asked again when sent (email_claim 0247)
            when q.kind like 'report\_%' and q.user_id is not null
@@ -27,14 +27,14 @@ AS $function$
            -- needs_relink is queued just before the login is marked broken (0261)
            when q.plant_id is not null and q.user_id is not null and not msg.email_any_plant(q.kind)
                 and not private.plant_live(q.user_id, q.plant_id) then 'plant not live'
-           when q.kind = 'welcome' and exists (select 1 from public.plant_users pu where pu.user_id = q.user_id)
+           when q.kind = 'welcome' and exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id)
              then 'plant linked'
-           when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
+           when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
                 and not private.pick_waiting(q.user_id)
              then 'login added'
            when q.kind = 'add_plant_reminder'
-                and (exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
-                     or exists (select 1 from public.plant_users pu where pu.user_id = q.user_id))
+                and (exists (select 1 from plants.logins a where a.user_id = q.user_id)
+                     or exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id))
              then 'login or plant added'
            when coalesce(q.to_email, (select u.email::text from auth.users u where u.id = q.user_id), p_o.to_email) is null
              then 'no address'

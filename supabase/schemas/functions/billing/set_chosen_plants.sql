@@ -40,7 +40,7 @@ begin
     if cardinality(want) = 0 and st.state = 'none' then
       raise exception 'choose at least one plant to start the free week' using errcode = '22023';
     end if;
-    select x into bad from unnest(want) x join billing.plants p on p.id = x
+    select x into bad from unnest(want) x join billing.plant_facts p on p.plant = x
      where p.trial_used_at is not null and p.trial_used_by is distinct from p_account limit 1;
     if found then
       raise exception 'plant % already had its free week', bad using errcode = '22023';

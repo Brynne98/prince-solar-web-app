@@ -12,12 +12,12 @@ begin
     perform pg_advisory_xact_lock(1, hashtext(x::text));
   end loop;
   moving := case when p_status is null then '{}'::uuid[]
-                 else array(select sa.id from private.sunsynk_accounts sa
+                 else array(select sa.id from plants.logins sa
                              where sa.id = any (p_logins) and sa.status is distinct from p_status) end;
   perform 1 from billing.accounts a
-   where a.id in (select bl.account from billing.logins bl where bl.id = any (moving))
+   where a.id in (select bl.account from plants.logins bl where bl.id = any (moving))
       or a.user_id = p_user
    order by a.id for update;
-  perform billing.lock_plants(array(select lp.plant from billing.login_plants lp where lp.login = any (moving))
+  perform billing.lock_plants(array(select lp.plant from plants.login_plants lp where lp.login = any (moving))
                               || coalesce(p_plants, '{}'));
 end $function$;

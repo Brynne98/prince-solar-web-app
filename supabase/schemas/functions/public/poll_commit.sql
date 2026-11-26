@@ -8,7 +8,7 @@ declare
   n_readings int := 0;
   n_strings  int := 0;
   gaps       bigint[] := '{}';
-  plants     bigint[] := '{}';
+  plant_list     bigint[] := '{}';
   a          record;
   prev_ts    bigint;
 begin
@@ -58,7 +58,7 @@ begin
       from jsonb_array_elements(coalesce(p_agg, '[]'::jsonb)) r
      where r->>'plant_id' is not null
   loop
-    plants := plants || a.plant_id;
+    plant_list := plant_list || a.plant_id;
 
     select max(ts) into prev_ts from public.agg_minute where plant_id = a.plant_id;
     if prev_ts is not null and p_ts - prev_ts > 90 then
@@ -82,23 +82,23 @@ begin
   perform public.inverters_seed(coalesce(p_inverters, '[]'::jsonb));
   -- the newer token wins: a shard that started on an older token (it slept up to 20 s)
   -- must not overwrite one renewed since (SOLAR-649)
-  update private.sunsynk_accounts
+  update plants.logins
      set access_token = case when p_expires >= coalesce(access_expires_at, 0) then p_access else access_token end,
          access_expires_at = greatest(p_expires, coalesce(access_expires_at, 0)),
          last_ok_at = now(), last_error = null
    where id = p_account;
-  -- The other logins that can see these plants were served this minute too.
-  update private.sunsynk_accounts s
+  -- The other logins that can see these plant_list were served this minute too.
+  update plants.logins s
      set last_ok_at = now()
-   where s.id in (select o.id from private.sunsynk_accounts o
-                   where o.status = 'active' and o.id <> p_account
-                     and exists (select 1 from public.plant_users pu where pu.account_id = o.id and pu.plant_id = any(plants))
+   where s.id in (select o.id from plants.logins o
+                   where o.status = 'ok' and o.id <> p_account
+                     and exists (select 1 from plants.user_plants pu where pu.account_id = o.id and pu.plant_id = any(plant_list))
                    order by o.id for no key update skip locked);
 
   return jsonb_build_object(
     'readings', n_readings,
     'strings',  n_strings,
-    'plants',   to_jsonb(plants),
+    'plants',   to_jsonb(plant_list),
     'gaps',     to_jsonb(gaps));
 end;
 $function$;

@@ -5,8 +5,8 @@ CREATE OR REPLACE FUNCTION public.my_plant_ids()
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
   select se.plant from billing.seats se join billing.accounts a on a.id = se.account
-    join billing.plants p on p.id = se.plant
-   where a.user_id = auth.uid() and se.closed_at is null and p.history_purged_at is null
+    join plants.plants p on p.id = se.plant
+   where a.user_id = auth.uid() and se.closed_at is null and (select f.history_purged_at from billing.plant_facts f where f.plant = p.id) is null
      and not private.history_deleting(se.plant)                                -- 0277
      -- a share removed or a plant gone from the login: hidden; its history stays and shows again
      and billing.has_route(a.id, se.plant, false)

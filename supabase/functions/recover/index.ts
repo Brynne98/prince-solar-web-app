@@ -62,7 +62,7 @@
 import { db } from "../_shared/db.ts";
 import { denyUnlessServer } from "../_shared/server.ts";
 import { type Account, brandOf, DEFAULT_BRAND, type FeedScale, saveAllCalls, type SpineRow } from "../_shared/brands/index.ts";
-import { markCursor, type PlantJob, plantsToPoll, rotateJobs, vendorIdOf } from "../_shared/plants.ts";
+import { markCursor, type PlantJob, plantsToPoll, rotateJobs, vendorOf } from "../_shared/plants.ts";
 import { dayStartEpoch, localDate } from "../_shared/localtime.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
 const H = (acc: Account) => brandOf(acc.brand).history;
@@ -104,7 +104,7 @@ async function currentFeedScale(acc: Account, plantId: number, tz: string): Prom
     const today = localDate(tz);
     const agg = await rpc("q_day_agg", { p_plant: plantId, p_day: today, p_source: null });
     if ((agg?.length ?? 0) > 5) {
-      const feed = await H(acc).plantDay(acc, vendorIdOf(acc.brand, plantId), today);
+      const feed = await H(acc).plantDay(acc, await vendorOf(plantId), today);
       if (feed) scale = H(acc).feedScale(feed, H(acc).bucketsOf(agg));
     }
   } catch { /* keep the default */ }
@@ -287,7 +287,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   if (historyOnly) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "plant feed skipped (day older than the feed keeps)" };
 
   // 2. the plant feed for what is left
-  const feed = await H(acc).plantDay(acc, vendorIdOf(acc.brand, plantId), day);
+  const feed = await H(acc).plantDay(acc, await vendorOf(plantId), day);
   if (!feed) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "cloud no longer has this day" };
 
   // Calibrate against this day's own poller rows when there are enough of them
@@ -513,7 +513,7 @@ async function dryRun(job: PlantJob, day: string, web = true) {
 // ---------------------------------------------------------------------------
 type Fetch = {
   id: number; claim: string; plant: number; account: string; day: string; floor: string; target_s: number;
-  version: number; timezone: string; login: Account & { sunsynk_username: string };
+  version: number; timezone: string; login: Account;
 };
 // Every minute from pg_cron: stop well inside the minute so runs do not pile up.
 const QUEUE_BUDGET_MS = 45_000;
@@ -525,7 +525,7 @@ const step = (args: Record<string, unknown>) =>
 // out and another run took the fetch): this run stops writing for it.
 const RENEW_MS = 30_000;
 async function runFetch(f: Fetch, started: number) {
-  const acc: Account = { ...f.login, username: f.login.sunsynk_username, brand: f.login.brand ?? DEFAULT_BRAND };
+  const acc: Account = { ...f.login, brand: f.login.brand ?? DEFAULT_BRAND };
   const g = newGuard(f.version);
   const claim = { id: f.id, claim: f.claim };
   let day = f.day, days = 0, banked = 0, lost = false;

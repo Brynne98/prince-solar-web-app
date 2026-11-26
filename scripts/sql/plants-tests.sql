@@ -12,23 +12,10 @@ returns void language sql as $$
   insert into t_results (label, pass, detail) values (p_label, coalesce(p_cond, false), p_detail)
 $$;
 
--- R24: api_link_disconnect is not callable by signed-in users
+-- R24: api_link_disconnect is gone (it skipped billing's half of a remove)
 do $$
 begin
-  perform pg_temp.ok('R24 api_link_disconnect: no execute for authenticated or anon',
-    not has_function_privilege('authenticated', 'public.api_link_disconnect(uuid)', 'execute')
-    and not has_function_privilege('anon', 'public.api_link_disconnect(uuid)', 'execute'));
-end $$;
-do $$
-declare refused boolean := false;
-begin
-  begin
-    set local role authenticated;
-    perform public.api_link_disconnect(gen_random_uuid());
-  exception when insufficient_privilege then refused := true;
-  end;
-  reset role;
-  perform pg_temp.ok('R24 a call as authenticated is refused', refused);
+  perform pg_temp.ok('R24 api_link_disconnect is gone', to_regproc('public.api_link_disconnect') is null);
 end $$;
 
 -- ---------------------------------------------------------------------------

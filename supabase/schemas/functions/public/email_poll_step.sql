@@ -10,7 +10,7 @@ declare
   clr bigint;
   failed jsonb := '[]'::jsonb;
 begin
-  update private.sunsynk_accounts a set last_try_at = now(), last_try = o.outcome
+  update plants.logins a set last_try_at = now(), last_try = o.outcome
     from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
    where a.id = o.account and o.outcome in ('ok', 'sunsynk', 'ours');
 
@@ -38,7 +38,7 @@ begin
       from public.readings x join public.plant_config c on c.plant_id = x.plant_id
      where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
      group by x.plant_id, x.sn
-    having max(extract(epoch from (x.device_time::timestamp at time zone coalesce(c.timezone, 'Africa/Johannesburg')))::bigint) >= p_ts - 600
+    having max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) >= p_ts - 600
   )
   select x.plant_id, x.sn, x.no, case when x.alive then p_ts end, 0, x.made
     from (select s.plant_id, s.sn, s.no, coalesce(s.volt_v, 0) >= 1.5 as alive,
@@ -139,7 +139,7 @@ begin
   for r in
     with d as (
       select x.plant_id, x.sn,
-             max(extract(epoch from (x.device_time::timestamp at time zone coalesce(c.timezone, 'Africa/Johannesburg')))::bigint) as dev
+             max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) as dev
         from public.readings x join public.plant_config c on c.plant_id = x.plant_id
        where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
        group by x.plant_id, x.sn
@@ -180,7 +180,7 @@ begin
                              else coalesce(bool_or(rd.grid_volt_v > 100) filter (
                                     where rd.grid_volt_v is not null and rd.device_time is not distinct from n.dt), false) end,
              'dev', max(case when rd.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-                             then extract(epoch from (rd.device_time::timestamp at time zone coalesce(c.timezone, 'Africa/Johannesburg')))::bigint end),
+                             then extract(epoch from (rd.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint end),
              'temp', max(rd.batt_temp_c) filter (where rd.batt_temp_c > 0 and rd.batt_temp_c < 80),
              'spread', case when count(distinct rd.sn) filter (where rd.batt_soc between 1 and 100) >= 2
                             then max(rd.batt_soc) filter (where rd.batt_soc between 1 and 100)
@@ -191,7 +191,7 @@ begin
       join rd on rd.plant_id = c.plant_id
       left join newest n on n.plant_id = c.plant_id
      where c.plant_id = any (todo)
-     group by c.plant_id, c.timezone, c.has_battery, c.battery_banks
+     group by c.plant_id, c.has_battery, c.battery_banks
   loop
     begin
       perform private.email_plant_apply(r.plant_id, p_ts, r.f);

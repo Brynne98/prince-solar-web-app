@@ -4,5 +4,5 @@ CREATE OR REPLACE FUNCTION public.account_by_username(p_username text)
  SECURITY DEFINER
  SET search_path TO 'private', 'pg_temp'
 AS $function$
-  select id, user_id, status from private.sunsynk_accounts where sunsynk_username = p_username
+  select id, user_id, status from plants.logins where username = p_username
 $function$;

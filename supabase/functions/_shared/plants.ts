@@ -10,25 +10,45 @@ import {
 /** A plant as a login lists it: our id and the brand's. */
 export type PlantInfo = { id: number; vendorId: VendorPlantId; name: string };
 
-/**
- * Our plant id for a brand's plant id. Until our own ids (R10-R12) the two are the same
- * number for every plant; this is the one place that says so.
- */
-export const plantIdFor = (_brand: string, v: VendorPlantId): number => Number(v);
-export const vendorIdOf = (_brand: string, id: number): VendorPlantId => vendorPlantId(id);
-const ours = (brand: string, list: VendorPlant[]): PlantInfo[] =>
-  list.map((p) => ({ id: plantIdFor(brand, p.vendorId), vendorId: p.vendorId, name: p.name }));
+// Our plant ids come from the database (plants.plant_for, R11): the brand's id is only sent to
+// the brand (R12). Every list the brand gives goes through plants.list_seen, which answers
+// with our id for each plant.
+const asPlants = (rows: any[] | null | undefined): PlantInfo[] =>
+  (rows ?? []).map((r) => ({ id: Number(r.id), vendorId: vendorPlantId(r.vendor_id), name: r.name ?? String(r.vendor_id) }));
 
-/** The login's plants from its brand, with our ids. */
-export async function listPlants(acc: Account): Promise<PlantInfo[]> {
-  return ours(acc.brand, await brandOf(acc.brand).listPlants(acc));
+/** The login's whole list into the database (R8, R9): our ids back. mode relink: the owner signed in again. */
+export async function listSeen(acc: Account, list: VendorPlant[], mode: "sync" | "relink" = "sync"): Promise<PlantInfo[]> {
+  const r = await rpc<{ plants: any[] } | null>("plants_list_seen", {
+    p_login: acc.id, p_plants: list.map((p) => ({ vendor_id: p.vendorId, name: p.name })), p_mode: mode,
+  });
+  return asPlants(r?.plants);
 }
+
+const vendorIds = new Map<number, VendorPlantId>();
+/** The brand's id for one of our plants (for calls to the brand only, R12). */
+export async function vendorOf(plant: number): Promise<VendorPlantId> {
+  const hit = vendorIds.get(plant);
+  if (hit) return hit;
+  const v = await rpc<string | null>("plant_vendor", { p_plant: plant });
+  if (v == null) throw new Error(`plant_vendor: no plant ${plant}`);
+  vendorIds.set(plant, vendorPlantId(v));
+  return vendorPlantId(v);
+}
+
+/** Our id for each of the brand's plant ids this login lists. */
+async function idsOfLogin(acc: Account): Promise<Map<string, number>> {
+  const rows = await rpc<any[] | null>("plants_of_login", { p_login: acc.id });
+  return new Map((rows ?? []).map((r) => [String(r.vendor_id), Number(r.id)]));
+}
+
+/** Gives each inverter our plant id; an inverter on a plant the login's list lacks gets none (not read). */
+export const withPlantIds = (invs: InverterInfo[], ids: Map<string, number>): InverterInfo[] =>
+  invs.map((i) => ({ ...i, plantId: i.vendorPlantId != null ? ids.get(i.vendorPlantId) : undefined }));
 
 /** The login's inverters from its brand, each with our plant id. */
 export async function liveInverters(acc: Account): Promise<InverterInfo[]> {
-  return (await brandOf(acc.brand).listInverters(acc)).map((i) => ({
-    ...i, plantId: i.vendorPlantId != null ? plantIdFor(acc.brand, i.vendorPlantId) : undefined,
-  }));
+  const [invs, ids] = await Promise.all([brandOf(acc.brand).listInverters(acc), idsOfLogin(acc)]);
+  return withPlantIds(invs, ids);
 }
 
 /**
@@ -72,7 +92,7 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
  * plants and which are paused. `reason` is from before the pick; nothing reads it.
  */
 export async function linkAccount(userId: string, username: string, password: string,
-  store?: (token: { access: string; expires: number; refresh: string }, plants: PlantInfo[]) => Promise<string>,
+  store?: (token: { access: string; expires: number; refresh: string }, plants: VendorPlant[]) => Promise<string>,
   brand = DEFAULT_BRAND) {
   const t = await brandOf(brand).signIn(username, password);
   const expires = t.expires_at;
@@ -80,21 +100,22 @@ export async function linkAccount(userId: string, username: string, password: st
     id: "", user_id: userId, username, brand,
     access_token: t.access_token, access_expires_at: expires,
   };
-  const plants = await listPlants(acc);
-  const invs = await liveInverters(acc);
+  const list = await brandOf(brand).listPlants(acc);
+  const rawInvs = await brandOf(brand).listInverters(acc);
 
   // store: the billing tables decide (the link function): the login, its token
   // and billing's half in one transaction, so a refusal throws before any plant is linked
   // and leaves no login behind.
   if (store) {
-    acc.id = await store({ access: t.access_token, expires, refresh: t.refresh_token }, plants);
+    acc.id = await store({ access: t.access_token, expires, refresh: t.refresh_token }, list);
   } else {
     acc.id = await rpc<string>("account_upsert", {
       p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
     });
     await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
   }
-  const active = new Set((await syncPlants(acc, { plants, invs })).map((p) => p.id));
+  const { all: plants, active: on } = await syncPlants(acc, { list, invs: rawInvs });
+  const active = new Set(on.map((p) => p.id));
   const paused = plants.filter((p) => !active.has(p.id)).map((p) => p.id);
   return { accountId: acc.id, plants, paused, reason: paused.length ? "upgrade_needed" : null };
 }
@@ -114,28 +135,19 @@ export async function linkAccount(userId: string, username: string, password: st
  * for a plant already seeded).
  */
 const MAX_BOOTSTRAP_KICKS = 5;
-export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; invs: InverterInfo[] }): Promise<PlantInfo[]> {
-  const all = linked?.plants ?? await listPlants(acc);
-  const invs = linked?.invs;
+export async function syncPlants(acc: Account, linked?: { list: VendorPlant[]; invs: InverterInfo[] }):
+  Promise<{ all: PlantInfo[]; active: PlantInfo[] }> {
   // The hourly refresh links a plant the brand shows later. The database links it locked
   // (0197 trigger); the user sees it in Plants and ticks it or upgrades. The whole list goes:
-  // a plant of this login missing from it twice is marked gone (plant_users_upsert).
-  await rpc("plant_users_upsert", {
-    p_user: acc.user_id, p_account: acc.id,
-    p_rows: all.slice().sort((a, b) => a.id - b.id).map((p) => ({ plant_id: p.id, plant_name: p.name })),
-  });
-  // The same list into the billing tables (0246): new plants added, one missing twice is gone.
-  // Not linked there yet (before the switch-over): nothing happens.
-  try {
-    await rpc("billing_jobs", { p_cmd: "login_seen", p_args: { login: acc.id, plants: all.map((p) => ({ id: p.id, name: p.name })) } });
-  } catch (e) {
-    noteError("login_seen_failed", e, { user: acc.user_id, hourly: true });
-  }
+  // a plant missing from it 50 minutes is gone (plants.list_seen, R8).
+  const all = await listSeen(acc, linked?.list ?? await brandOf(acc.brand).listPlants(acc));
+  const ids = new Map(all.map((p) => [String(p.vendorId), p.id]));
+  const invs = linked?.invs ? withPlantIds(linked.invs, ids) : undefined;
   // Only plants this user reads go on: any other gets its config row, nothing more. Which
   // plants are read comes from the billing tables once they are live (0247 chosen_plant_ids).
   const chosen = new Set(((await rpc<number[] | null>("chosen_plant_ids", { p_user: acc.user_id })) ?? []).map(Number));
   const paused = new Set(all.map((p) => p.id).filter((id) => !chosen.has(id)));
-  return await seedPlants(acc, all, paused, invs);
+  return { all, active: await seedPlants(acc, all, paused, invs) };
 }
 
 /**
@@ -163,12 +175,13 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
   }
   const have = new Set(await dbHandle().configuredPlants(all.map((p) => p.id)));
   const missing = all.filter((p) => !have.has(p.id));
+  const ourId = new Map(missing.map((p) => [String(p.vendorId), p.id]));
   const details = await Promise.allSettled(missing.map((p) => brandOf(acc.brand).plantDetail(acc, p.vendorId)));
   const rows = details
     .filter((r): r is PromiseFulfilledResult<VendorPlantDetail> => r.status === "fulfilled")
     .map((r) => ({
-      plant_id: plantIdFor(acc.brand, r.value.vendorId), timezone: r.value.timezone,
-      lat: r.value.lat, lon: r.value.lon, paused: paused.has(plantIdFor(acc.brand, r.value.vendorId)),
+      plant_id: ourId.get(String(r.value.vendorId))!, timezone: r.value.timezone,
+      lat: r.value.lat, lon: r.value.lon, paused: paused.has(ourId.get(String(r.value.vendorId))!),
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
   const activeRows = rows.filter((r) => !r.paused);
@@ -281,13 +294,13 @@ export async function pollJobs(shard: number, shards: number, account?: string):
   return (rows ?? []).map((r) => {
     const acc = accs.get(r.account_id) ?? {
       id: r.account_id, user_id: r.user_id, brand: r.brand ?? DEFAULT_BRAND,
-      username: r.sunsynk_username, // reuse-check: allow (column renamed with the login table, R3)
+      username: r.username,
       access_token: r.access_token, access_expires_at: r.access_expires_at,
     };
     accs.set(acc.id, acc); // one object per account: its token is refreshed in place
     return {
       plantId: Number(r.plant_id),
-      vendorPlantId: r.vendor_plant_id != null ? vendorPlantId(r.vendor_plant_id) : vendorIdOf(acc.brand, Number(r.plant_id)),
+      vendorPlantId: vendorPlantId(r.vendor_plant_id),
       plantName: r.plant_name ?? null,
       timezone: String(r.timezone),
       battPositiveMeans: r.batt_positive_means ?? null,
@@ -360,7 +373,7 @@ export async function shareAccount(brand = DEFAULT_BRAND): Promise<Account | nul
   const creds = brandOf(brand).shareLogin();
   if (!creds) return null;
   const row = (await rpc<any[]>("share_account_get", {}))?.[0];
-  if (row?.status === "active") {
+  if (row?.status === "ok") {
     return { id: row.id, user_id: row.user_id, username: creds.username, brand, access_token: row.access_token, access_expires_at: row.access_expires_at };
   }
   const t = await brandOf(brand).signIn(creds.username, creds.password);
@@ -372,46 +385,45 @@ export async function shareAccount(brand = DEFAULT_BRAND): Promise<Account | nul
   return { id, user_id: userId, username: creds.username, brand, access_token: t.access_token, access_expires_at: t.expires_at };
 }
 
-/** Hourly in poll: claimed plants that left the share list stop, and come back when shared again. */
+/** Hourly in poll: a claimed plant gone from the share list 50 minutes is released (R8). */
 export async function shareSync(acc: Account): Promise<unknown> {
   // the whole list or a throw (R9): a cut list would read the cut plants as unshared
-  const plants = await listPlants(acc);
-  return await rpc("share_sync", { p_account: acc.id, p_plants: plants.map((p) => p.id) });
+  return (await listSeen(acc, await brandOf(acc.brand).listPlants(acc))).length;
 }
 
 export type ClaimResult =
   | { result: "not_shared" }
   | { result: "taken" | "yours" | "claimed" | "claimed_paused"; plantId: number; plantName: string };
+export type Claimed = { result: "taken" | "yours" | "claimed" | "claimed_paused"; plant: number };
 
 /**
- * Claim a plant shared to the share login: `ref` is its plant id or one of its inverter
- * serials. Checked live against what the brand shows the share login.
+ * Claim a plant shared to the share login: `ref` is the brand's plant id or one of its inverter
+ * serials. Checked live against what the brand shows the share login. `claim` is claim-share's
+ * one transaction (share_claim_any): it makes the plant, and throws to refuse.
  */
 export async function claimShared(userId: string, ref: string,
-  claim?: (account: string, plant: PlantInfo) => Promise<"taken" | "yours" | "claimed" | "claimed_paused">): Promise<ClaimResult> {
+  claim: (account: string, plant: VendorPlant) => Promise<Claimed>): Promise<ClaimResult> {
   const acc = await shareAccount();
   if (!acc) throw new Error("share login not set up");
-  const plants = await listPlants(acc);
+  const brand = brandOf(acc.brand);
+  const list = await brand.listPlants(acc);
   // The login just answered: say so, or a plant claimed between polls shows "Not updating"
   // for its first minutes, timed from the share login's last poll (SOLAR-448).
   await rpc("account_access_set", { p_account: acc.id, p_access: acc.access_token, p_expires: acc.access_expires_at });
   let invs: InverterInfo[] | undefined;
-  let plant = /^\d+$/.test(ref) ? plants.find((p) => p.id === Number(ref)) : undefined;
-  if (!plant) {
-    invs = await liveInverters(acc);
-    const inv = invs.find((i) => i.sn.toLowerCase() === ref.toLowerCase());
-    plant = inv?.plantId != null ? plants.find((p) => p.id === Number(inv.plantId)) : undefined;
+  let found = list.find((p) => String(p.vendorId) === ref.trim());
+  if (!found) {
+    invs = await brand.listInverters(acc);
+    const inv = invs.find((i) => i.sn.toLowerCase() === ref.trim().toLowerCase());
+    found = inv?.vendorPlantId != null ? list.find((p) => p.vendorId === inv.vendorPlantId) : undefined;
   }
-  if (!plant) return { result: "not_shared" };
-  // claim: claim-share's one transaction (share_claim_any), the old claim before the switch and
-  // billing's after it. It throws to refuse.
-  const result = claim ? await claim(acc.id, plant) : await rpc<"taken" | "yours" | "claimed" | "claimed_paused">("share_claim", {
-    p_user: userId, p_account: acc.id, p_plant: plant.id, p_plant_name: plant.name,
-  });
+  if (!found) return { result: "not_shared" };
+  const { result, plant: id } = await claim(acc.id, found);
+  const plant: PlantInfo = { id, vendorId: found.vendorId, name: found.name };
   if (result === "claimed" || result === "claimed_paused") {
-    invs ??= await liveInverters(acc);
-    const mineOnly = invs.filter((i) => Number(i.plantId) === plant.id);
-    await seedPlants(acc, [plant], new Set(result === "claimed_paused" ? [plant.id] : []), mineOnly);
+    invs ??= await brand.listInverters(acc);
+    const mineOnly = invs.filter((i) => i.vendorPlantId === found!.vendorId).map((i) => ({ ...i, plantId: id }));
+    await seedPlants(acc, [plant], new Set(result === "claimed_paused" ? [id] : []), mineOnly);
   }
-  return { result, plantId: plant.id, plantName: plant.name };
+  return { result, plantId: id, plantName: plant.name };
 }

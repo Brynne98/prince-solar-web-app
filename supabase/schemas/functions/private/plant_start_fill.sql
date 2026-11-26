@@ -14,7 +14,7 @@ begin
     -- the seed sets the 60-day bookmarks.
     perform public.plant_config_seed(jsonb_build_array(jsonb_build_object('plant_id', p_plant)));
   else
-    select coalesce(timezone, 'Africa/Johannesburg') into tz from public.plant_config where plant_id = p_plant;
+    tz := plants.tz(p_plant);
     update public.plant_config
        set backfill_next = (now() at time zone tz)::date - 60,
            backfill_until = (now() at time zone tz)::date - 14,

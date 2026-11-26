@@ -74,7 +74,7 @@ begin
   elsif a.trial_started_at <= p_at or has_sub or grant_any then
     r.state := 'ended';
   elsif exists (select 1 from billing.linked_plants(p_account))
-        and not exists (select 1 from billing.linked_plants(p_account) t (x) join billing.plants p on p.id = t.x
+        and not exists (select 1 from billing.linked_plants(p_account) t (x) left join billing.plant_facts p on p.plant = t.x
                          where p.trial_used_at is null or p.trial_used_by = p_account) then
     r.state := 'ended';                          -- nothing left to try: pay screen
   else

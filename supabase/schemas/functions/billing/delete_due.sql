@@ -17,11 +17,12 @@ declare
 begin
   if not billing.is_live() then return jsonb_build_object('live', false); end if;
   if not pg_try_advisory_xact_lock(hashtext('billing.delete_due')) then return jsonb_build_object('busy', true); end if;
-  for p in select id from billing.plants where history_purged_at is null order by id loop
+  for p in select pp.id from plants.plants pp left join billing.plant_facts f on f.plant = pp.id
+            where f.history_purged_at is null order by pp.id loop
     ps := billing.plant_state(p.id, p_at);
     continue when ps->>'delete_at' is null or (ps->>'delete_at')::timestamptz > p_at;
     -- a plant being written now is left for the next run
-    perform 1 from billing.plants where id = p.id for update skip locked;
+    perform 1 from plants.plants where id = p.id for update skip locked;
     if not found then busy := busy || p.id; continue; end if;
     -- the clock moved while the job ran: one time from here on, after the lock, for every
     -- check and the delete itself; a seat opened since the job started keeps the plant

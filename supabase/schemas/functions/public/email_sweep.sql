@@ -24,14 +24,14 @@ begin
          count(*) filter (where a.last_try_at > now() - interval '3 minutes' and a.last_try = 'sunsynk'
                             and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes')
     into tried, failing
-    from private.sunsynk_accounts a where a.status = 'active';
+    from plants.logins a where a.status = 'ok';
   down := failing >= least(3, tried) and failing > 0 and failing * 2 > tried;
 
   if down and not sys.sunsynk_down then
     sys.sunsynk_down := true; sys.outage_id := sys.outage_id + 1; sys.clear_since := null;
     sys.down_since := (select extract(epoch from min(coalesce(a.last_ok_at, a.linked_at)))::bigint
-                         from private.sunsynk_accounts a
-                        where a.status = 'active' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
+                         from plants.logins a
+                        where a.status = 'ok' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
                           and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes');
   elsif down then
     sys.clear_since := null;
@@ -54,8 +54,8 @@ begin
     insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
     select distinct on (pu.user_id) pu.user_id, pu.plant_id, 'sunsynk_down', 'sunsynk_down:' || sys.outage_id,
            jsonb_build_object('since', sys.down_since), 0
-      from private.sunsynk_accounts a join public.plant_users pu on pu.account_id = a.id
-     where a.status = 'active' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
+      from plants.logins a join plants.user_plants pu on pu.account_id = a.id
+     where a.status = 'ok' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
        and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes'
        and private.plant_live(pu.user_id, pu.plant_id)                          -- 0256
      order by pu.user_id, pu.linked_at
@@ -74,8 +74,8 @@ begin
     for r in
       select s.plant_id, s.last_dev from private.plant_alert_state s
        where not s.stale and s.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
-         and exists (select 1 from public.plant_users pu join private.sunsynk_accounts a on a.id = pu.account_id
-                      where pu.plant_id = s.plant_id and a.status = 'active' and a.last_try in ('ok', 'sunsynk')
+         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+                      where pu.plant_id = s.plant_id and a.status = 'ok' and a.last_try in ('ok', 'sunsynk')
                         and a.last_try_at > now() - interval '3 minutes')
        for update of s skip locked
     loop
@@ -96,8 +96,8 @@ begin
        where not i.stale and i.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
          and not s.stale and s.last_dev >= now_s - 900
          and exists (select 1 from private.inverters v where v.sn = i.sn and v.plant_id = i.plant_id)
-         and exists (select 1 from public.plant_users pu join private.sunsynk_accounts a on a.id = pu.account_id
-                      where pu.plant_id = i.plant_id and a.status = 'active' and a.last_try in ('ok', 'sunsynk')
+         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+                      where pu.plant_id = i.plant_id and a.status = 'ok' and a.last_try in ('ok', 'sunsynk')
                         and a.last_try_at > now() - interval '3 minutes')
        for update of i skip locked
     loop

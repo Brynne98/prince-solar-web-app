@@ -79,12 +79,12 @@ begin
     returning s.id, s.outbox_id, s.sub_id)
   select l.id, v_claim, q.id, q.kind, q.plant_id,
          q.data, extract(epoch from q.created_at), public.plant_tz(q.plant_id), pu.plant_name,     -- 0264
-         (select count(*)::int from public.plant_users n where n.user_id = q.user_id),
+         (select count(*)::int from plants.user_plants n where n.user_id = q.user_id),
          ps.endpoint, ps.p256dh, ps.auth
     from leased l
     join msg.outbox o on o.id = l.outbox_id
     join public.email_queue q on q.id = o.event_id
     join public.push_subs ps on ps.id = l.sub_id
-    left join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
+    left join plants.user_plants pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
    order by l.id;
 end $function$;

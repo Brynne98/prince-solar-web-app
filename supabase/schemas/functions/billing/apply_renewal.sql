@@ -18,6 +18,6 @@ begin
     perform billing.lock_plants(dropped);
     update billing.seats set closed_at = p_at, close_reason = 'dropped', drop_at_period_end = false
      where account = p_inv.account and closed_at is null and drop_at_period_end;
-    update billing.plants set version = version + 1 where id = any (dropped);
+    perform plants.bump(dropped);
   end if;
 end $function$;

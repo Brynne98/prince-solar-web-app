@@ -1,23 +1,28 @@
-CREATE OR REPLACE FUNCTION public.share_claim_any(p_user uuid, p_account uuid, p_plant bigint, p_plant_name text)
+CREATE OR REPLACE FUNCTION public.share_claim_any(p_user uuid, p_account uuid, p_plant text, p_plant_name text)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
-declare res text; err text;
+declare
+  vendor text := btrim(p_plant);   -- the brand's id for the plant (R11)
+  v_brand text;
+  pid bigint;
+  acc uuid;
 begin
   perform pg_advisory_xact_lock_shared(3, 0);
-  if billing.is_live() then
-    return jsonb_build_object('result', public.share_claim_live(p_user, p_account, p_plant, p_plant_name));
+  select l.brand into v_brand from plants.logins l where l.id = p_account and l.kind = 'share' and l.status <> 'disabled';
+  if not found then raise exception 'share_claim: % is not the share login', p_account; end if;
+  acc := billing.account_of(p_user);
+  select p.id into pid from plants.plants p where p.brand = v_brand and p.vendor_id = vendor;
+  if pid is not null and exists (select 1 from plants.claims c where c.plant = pid and c.account = acc)
+     and exists (select 1 from plants.login_plants lp where lp.login = p_account and lp.plant = pid and lp.gone_at is null) then
+    return jsonb_build_object('result', 'yours', 'plant', pid);
   end if;
-  res := public.share_claim(p_user, p_account, p_plant, p_plant_name);
-  -- on every result but taken, so a retry repairs a missing copy
-  if res <> 'taken' then
-    begin
-      perform public.billing_links('claim_plant', jsonb_build_object('user', p_user, 'plant', p_plant, 'name', p_plant_name));
-    exception when others then
-      err := sqlerrm;
-    end;
-  end if;
-  return jsonb_build_object('result', res, 'copy_error', err);
-end $function$;
+  pid := plants.claim(acc, v_brand, vendor, p_plant_name);
+  -- a lapsed claim by someone else: its queued mail goes
+  delete from public.email_queue q where q.plant_id = pid and q.status = 'queued'
+     and q.user_id <> p_user and q.kind like 'share_%';
+  return jsonb_build_object('result', 'claimed', 'plant', pid);
+end
+$function$;

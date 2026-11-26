@@ -13,7 +13,7 @@ begin
     when 'history_renew' then to_jsonb(coalesce(billing.history_renew((p_args->>'id')::bigint, (p_args->>'claim')::uuid), false))
     when 'fetching'     then coalesce((select jsonb_agg(distinct plant) from billing.history_fetches
                                         where status in ('queued', 'running')), '[]'::jsonb)
-    when 'login_seen'   then billing.login_seen((p_args->>'login')::uuid, p_args->'plants')
+    when 'login_seen'   then plants.list_seen((p_args->>'login')::uuid, p_args->'plants')
     when 'alerts'       then billing.alerts()
     when 'heartbeat'    then (select '{}'::jsonb from (select billing.heartbeat(p_args->>'job', now(), p_args->'result',
                                p_args->>'error')) x)

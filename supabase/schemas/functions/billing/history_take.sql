@@ -35,7 +35,7 @@ begin
     continue when exists (select 1 from billing.history_fetches r where r.lane = q.lane and r.status = 'running'
                              and (r.next_step_at <= p_at or r.claimed_until > p_at))
                or exists (select 1 from billing.history_lanes hl where hl.lane = q.lane and hl.backoff_until > p_at);
-    tz := coalesce((select c.timezone from public.plant_config c where c.plant_id = q.plant), 'Africa/Johannesburg');
+    tz := plants.tz(q.plant);
     today := (p_at at time zone tz)::date;
     -- a fetch put back keeps its walk: started_at, floor and the next day stay
     update billing.history_fetches
@@ -53,23 +53,23 @@ begin
                           and o.id <> h.id and o.claimed_until > p_at)
        and not exists (select 1 from billing.history_lanes hl where hl.lane = h.lane and hl.backoff_until > p_at)
        and billing.reads_plant(h.account, h.plant, p_at)
-       and exists (select 1 from private.sunsynk_accounts sa where sa.id = h.lane and sa.status = 'active')
+       and exists (select 1 from plants.logins sa where sa.id = h.lane and sa.status = 'ok')
      order by h.lane, h.next_step_at, h.id),
   w as (
     update billing.history_fetches h
        set claimed_until = p_at + interval '90 seconds', claim = gen_random_uuid(),
-           version = (select bp.version from billing.plants bp where bp.id = h.plant)
+           version = (select bp.version from plants.plants bp where bp.id = h.plant)
      where h.id in (select id from due)
     returning h.*)
   select coalesce(jsonb_agg(jsonb_build_object(
            'id', w.id, 'claim', w.claim, 'plant', w.plant, 'account', w.account, 'day', w.day_next, 'floor', w.day_floor,
            'target_s', w.target_s, 'version', w.version,
-           'timezone', coalesce(c.timezone, 'Africa/Johannesburg'),
-           'login', jsonb_build_object('id', sa.id, 'user_id', sa.user_id, 'sunsynk_username', sa.sunsynk_username,
+           'timezone', plants.tz(w.plant), 'vendor_plant_id', (select p.vendor_id from plants.plants p where p.id = w.plant),
+           'login', jsonb_build_object('id', sa.id, 'user_id', sa.user_id, 'username', sa.username, 'brand', sa.brand,
                                        'access_token', sa.access_token, 'access_expires_at', sa.access_expires_at))
            order by w.id), '[]'::jsonb)
     into out
-    from w join private.sunsynk_accounts sa on sa.id = w.lane
+    from w join plants.logins sa on sa.id = w.lane
     left join public.plant_config c on c.plant_id = w.plant;
   perform billing.heartbeat('history', p_at, jsonb_build_object('handed_out', jsonb_array_length(out)));
   return out;

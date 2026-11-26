@@ -28,7 +28,7 @@ begin
   -- its plan row is gone and fail that bill's plan check (depends on the constraints' order)
   update billing.invoices set subscription = null where account = p_account and subscription is not null;
   delete from billing.accounts where id = p_account;
-  update billing.plants set version = version + 1 where id = any (held);
+  perform plants.bump(held);
   unprotected := array(select x from unnest(held) x where not (billing.plant_state(x, p_at)->>'protected')::boolean);
   perform billing.log_event(p_account, p_at, p_actor, 'delete_account', jsonb_build_object('state', st.state),
                             jsonb_build_object('unprotected', to_jsonb(unprotected)));

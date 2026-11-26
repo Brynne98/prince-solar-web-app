@@ -37,9 +37,9 @@ begin
   foreach x in array accts loop
     perform pg_advisory_xact_lock(1, hashtext(x::text));
   end loop;
-  perform 1 from private.sunsynk_accounts sa where sa.id = any (accts) order by sa.id for update;
+  perform 1 from plants.logins sa where sa.id = any (accts) order by sa.id for update;
   -- the newer token wins (0250): the last object with the latest expiry, when not older than the stored one
-  update private.sunsynk_accounts sa
+  update plants.logins sa
      set access_token = case when t.expires >= coalesce(sa.access_expires_at, 0) then t.access else sa.access_token end,
          access_expires_at = greatest(t.expires, coalesce(sa.access_expires_at, 0)),
          last_ok_at = now(), last_error = null
@@ -51,13 +51,13 @@ begin
   -- since step 8 updates it (two batches holding it for share would deadlock there). Then
   -- the version each read started on (looked up under the plant's own id, as write_allowed
   -- does) and read_now.
-  for pl in select bp.id, bp.history_purged_at is not null as purged from billing.plants bp
+  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plants bp
             where bp.id in (select k::bigint from _bin b cross join jsonb_object_keys(b.versions) k)
             order by bp.id loop
     if pl.purged then
-      perform 1 from billing.plants where id = pl.id for no key update;
+      perform 1 from plants.plants where id = pl.id for no key update;
     else
-      perform 1 from billing.plants where id = pl.id for share;
+      perform 1 from plants.plants where id = pl.id for share;
     end if;
   end loop;
   create temp table _bok on commit drop as
@@ -65,7 +65,7 @@ begin
                  from _bin b cross join jsonb_object_keys(b.versions) k)
     select v.i, v.plant from v
      where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), p_at) pr)
-       and exists (select 1 from billing.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
+       and exists (select 1 from plants.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
   -- one object sending an inverter twice fails in poll_commit_v2 (on conflict cannot update a
   -- row twice); here too, so the caller's login-by-login save fails that login alone
   if exists (select 1 from _bin b cross join jsonb_array_elements(b.inverters) e
@@ -200,21 +200,21 @@ begin
              order by e.v->>'sn', b.i desc, e.n desc) m), '[]'));
 
   -- 7. the other logins that see these plants were served this minute too
-  update private.sunsynk_accounts s set last_ok_at = now()
-   where s.id in (select o.id from private.sunsynk_accounts o
-                   where o.status = 'active' and o.id <> all (accts)
-                     and exists (select 1 from public.plant_users pu
+  update plants.logins s set last_ok_at = now()
+   where s.id in (select o.id from plants.logins o
+                   where o.status = 'ok' and o.id <> all (accts)
+                     and exists (select 1 from plants.user_plants pu
                                   where pu.account_id = o.id and pu.plant_id in (select g.plant from _bag g))
                    order by o.id for update skip locked);
   perform set_config('billing.guarded', 'off', true);
 
   -- 8. new readings on a deleted plant: it has history again (0246)
-  update billing.plants bp set history_purged_at = null
+  update billing.plant_facts bp set history_purged_at = null
    where bp.history_purged_at is not null
      and exists (select 1 from _bok o join _bin b on b.i = o.i
-                  where o.plant = bp.id
-                    and (exists (select 1 from jsonb_array_elements(b.readings) e where (e->>'plant_id')::bigint = bp.id)
-                         or exists (select 1 from jsonb_array_elements(b.agg) e where (e->>'plant_id')::bigint = bp.id)));
+                  where o.plant = bp.plant
+                    and (exists (select 1 from jsonb_array_elements(b.readings) e where (e->>'plant_id')::bigint = bp.plant)
+                         or exists (select 1 from jsonb_array_elements(b.agg) e where (e->>'plant_id')::bigint = bp.plant)));
 
   return query
   select b.i, b.account, jsonb_build_object(

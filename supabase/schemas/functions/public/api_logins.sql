@@ -5,8 +5,8 @@ CREATE OR REPLACE FUNCTION public.api_logins()
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
   with me as (select auth.uid() u, (select id from billing.accounts where user_id = auth.uid()) acc)
-  select a.id, a.sunsynk_username, a.status,
-         case when a.kind = 'share' then (select min(x.linked_at) from public.plant_users x where x.account_id = a.id and x.user_id = me.u)
+  select a.id, a.username, a.status,
+         case when a.kind = 'share' then (select min(x.linked_at) from plants.user_plants x where x.account_id = a.id and x.user_id = me.u)
               else a.linked_at end,
          a.last_ok_at,
          coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
@@ -17,10 +17,10 @@ AS $function$
                      'share_gone', pu.share_gone_at is not null,
                      'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id))
                    order by pu.linked_at, pu.plant_id)
-                     from public.plant_users pu where pu.account_id = a.id and pu.user_id = me.u), '[]'::jsonb),
+                     from plants.user_plants pu where pu.account_id = a.id and pu.user_id = me.u), '[]'::jsonb),
          a.kind
-    from private.sunsynk_accounts a cross join me
+    from plants.logins a cross join me
    where a.user_id = me.u
-      or (a.kind = 'share' and exists (select 1 from public.plant_users x where x.account_id = a.id and x.user_id = me.u))
+      or (a.kind = 'share' and exists (select 1 from plants.user_plants x where x.account_id = a.id and x.user_id = me.u))
    order by 4 desc
 $function$;

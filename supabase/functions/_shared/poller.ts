@@ -53,7 +53,7 @@ export const emptyResult = (acc: Account): AccountResult => ({
 });
 
 /**
- * A login whose read or save threw: marked on its row (needs_relink when its refresh token is
+ * A login whose read or save threw: marked on its row (needs_reconnect when its refresh token is
  * dead), logged, and noted for PostHog unless the owner must fix it. Returns its result.
  */
 export async function accountFailed(acc: Account, jobs: { plantId: number }[], e: unknown): Promise<AccountResult> {
@@ -61,7 +61,7 @@ export async function accountFailed(acc: Account, jobs: { plantId: number }[], e
   const fault = faultOf(e);
   const needsRelink = fault === "relink";
   await rpc("account_mark", {
-    p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
+    p_account: acc.id, p_status: needsRelink ? "needs_reconnect" : "ok", p_error: msg,
   }).catch(() => {});
   console.error(`poll: account ${acc.id} failed:`, msg);
   // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
@@ -198,8 +198,7 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
     // Since the billing switch-over (0246) only chosen plants are read: a plant new on the
     // login waits to be chosen. Before it (no versions), it is read from this minute on.
     try {
-      const plants = await syncPlants(acc);
-      if (jobs.every((j) => j.version == null)) for (const p of plants) wanted.add(p.id);
+      await syncPlants(acc);
     } catch (e) {
       console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
       noteError("plant_refresh_failed", e, { user: acc.user_id, hourly: true });

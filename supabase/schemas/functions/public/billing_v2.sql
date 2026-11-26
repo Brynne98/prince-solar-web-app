@@ -7,7 +7,7 @@ AS $function$
 declare
   acc uuid;
   uid uuid;
-  plants bigint[];
+  plant_list bigint[];
   mk text;
   out jsonb;
 begin
@@ -22,7 +22,7 @@ begin
     end if;
   end if;
   if jsonb_typeof(p_args->'plants') = 'array' then
-    plants := array(select jsonb_array_elements_text(p_args->'plants')::bigint);
+    plant_list := array(select jsonb_array_elements_text(p_args->'plants')::bigint);
   end if;
   if p_cmd = 'apply_payment' then
     -- for the billing function's counts: the user id, and for a first plan whether it is a return
@@ -37,8 +37,8 @@ begin
   end if;
   return case p_cmd
     when 'account_state'    then billing.account_state(acc)
-    when 'start_checkout'   then billing.start_checkout(acc, p_args->>'plan', p_args->>'interval', (p_args->>'extras')::int, plants)
-    when 'upgrade'          then billing.upgrade(acc, p_args->>'plan', (p_args->>'extras')::int, plants, p_interval => p_args->>'interval')
+    when 'start_checkout'   then billing.start_checkout(acc, p_args->>'plan', p_args->>'interval', (p_args->>'extras')::int, plant_list)
+    when 'upgrade'          then billing.upgrade(acc, p_args->>'plan', (p_args->>'extras')::int, plant_list, p_interval => p_args->>'interval')
     when 'downgrade'        then billing.downgrade(acc, p_args->>'plan', (p_args->>'extras')::int,
                                    array(select jsonb_array_elements_text(coalesce(p_args->'drop', '[]'))::bigint),
                                    p_interval => p_args->>'interval')

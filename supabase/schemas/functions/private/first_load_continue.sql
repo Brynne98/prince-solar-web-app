@@ -21,7 +21,7 @@ begin
     union
     select pc.plant_id from public.plant_config pc
      where pc.backfill_next is not null
-        or (pc.temp_next is not null and pc.temp_next < public.today_tz(coalesce(pc.timezone, 'Africa/Johannesburg')) - 1)
+        or (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(pc.plant_id)) - 1)
   loop
     -- 0235: the last run on this plant is still going.
     if has_net and exists (

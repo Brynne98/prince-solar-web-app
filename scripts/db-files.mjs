@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const write = process.argv.includes('--write');
 const live = process.argv.includes('--live');
-const SCHEMAS = ['billing', 'msg', 'private', 'public'];
+const SCHEMAS = ['billing', 'msg', 'plants', 'private', 'public'];
 const DIR = path.join(REPO, 'supabase/schemas/functions');
 const TYPES = path.join(REPO, 'supabase/functions/_shared/database.types.ts');
 const problems = [];

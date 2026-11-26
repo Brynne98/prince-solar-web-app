@@ -49,10 +49,10 @@ export const saveLogin = (rpc: Rpc, live: boolean, note: Note, user: string, log
 /** Live: the stored login, its refresh token and billing's link_login in one transaction
  *  (link_login_live). A refusal or failure leaves no login behind. Returns the login's id. */
 export async function saveLoginLive(rpc: Rpc, user: string, username: string,
-  token: { access: string; expires: number; refresh: string }, plants: { id: number; name: string }[]): Promise<string> {
+  token: { access: string; expires: number; refresh: string }, plants: { vendorId: string; name: string }[]): Promise<string> {
   const { data, error } = await rpc("link_login_live", {
     p_user: user, p_username: username, p_access: token.access, p_expires: token.expires, p_refresh: token.refresh,
-    p_plants: plants.map((p) => ({ id: p.id, name: p.name })),
+    p_plants: plants.map((p) => ({ vendor_id: p.vendorId, name: p.name })),
   });
   if (!error) return String(data);
   const answer = refusal(error);
@@ -68,14 +68,13 @@ export type ClaimAnswer = "taken" | "yours" | "claimed" | "claimed_paused";
  *  copy into the billing tables together, on every answer but taken, so a retry repairs a missing
  *  copy; a failed copy is only noted. */
 export async function claimAny(rpc: Rpc, note: Note, user: string, account: string,
-  plant: { id: number; name: string }): Promise<ClaimAnswer> {
-  const { data, error } = await rpc("share_claim_any", { p_user: user, p_account: account, p_plant: plant.id, p_plant_name: plant.name });
+  plant: { vendorId: string; name: string }): Promise<{ result: ClaimAnswer; plant: number }> {
+  const { data, error } = await rpc("share_claim_any", { p_user: user, p_account: account, p_plant: plant.vendorId, p_plant_name: plant.name });
   if (error) {
     const answer = refusal(error);
     if (answer) throw new Refused(answer);
     throw new Error(`share_claim_any: ${error.message}`);
   }
-  const r = data as { result: ClaimAnswer; copy_error?: string | null };
-  if (r.copy_error) note("claim_plant_failed", new Error(`claim_plant: ${r.copy_error}`), { user });
-  return r.result;
+  const r = data as { result: ClaimAnswer; plant: number };
+  return { result: r.result, plant: Number(r.plant) };
 }

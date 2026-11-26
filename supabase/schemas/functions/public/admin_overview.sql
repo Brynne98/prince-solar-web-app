@@ -16,7 +16,7 @@ begin
                'provider', u.raw_app_meta_data->>'provider',
                'createdAt', u.created_at,
                'lastSignInAt', u.last_sign_in_at,
-               'plants', (select count(*) from public.plant_users pu where pu.user_id = u.id),
+               'plants', (select count(*) from plants.user_plants pu where pu.user_id = u.id),
                'admin', exists (select 1 from private.admins a where a.user_id = u.id)
              ) order by u.created_at), '[]'::jsonb)
         from auth.users u),
@@ -30,18 +30,18 @@ begin
                'lastTs', (select a.ts from public.agg_minute a
                            where a.plant_id = pu.plant_id order by a.ts desc limit 1)
              ) order by u.email, pu.plant_id), '[]'::jsonb)
-        from public.plant_users pu
+        from plants.user_plants pu
         join auth.users u on u.id = pu.user_id),
     'logins', (
       select coalesce(jsonb_agg(jsonb_build_object(
                'email', u.email,
-               'sunsynkUser', s.sunsynk_username,
+               'sunsynkUser', s.username,
                'status', s.status,
                'linkedAt', s.linked_at,
                'lastOkAt', s.last_ok_at,
                'lastError', left(s.last_error, 300)
              ) order by u.email, s.linked_at), '[]'::jsonb)
-        from private.sunsynk_accounts s
+        from plants.logins s
         join auth.users u on u.id = s.user_id),
     'errors', (
       select coalesce(jsonb_agg(jsonb_build_object(

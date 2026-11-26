@@ -93,7 +93,7 @@ begin
                       where (p->>'chosen')::boolean and (p->>'delete_at')::timestamptz > p_at) then return 'nothing kept'; end if;
     when 'history_deleted' then
       if st.state <> 'ended' then return 'plan running again'; end if;
-      if not exists (select 1 from billing.plants p where p.id = o.ref::bigint and p.history_purged_at is not null) then
+      if not exists (select 1 from billing.plant_facts p where p.plant = o.ref::bigint and p.history_purged_at is not null) then
         return 'history back';
       end if;
   end case;

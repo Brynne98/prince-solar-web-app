@@ -9,7 +9,7 @@ declare
   live boolean;
   next_retry timestamptz;
   fit text;
-  plants jsonb;
+  plant_list jsonb;
   login_count int;
 begin
   st := billing.account_status(p_account, p_at);
@@ -24,33 +24,33 @@ begin
   -- the smallest plan that fits every linked plant; null when none does
   select p.code into fit from billing.plans p where p.places >= st.linked order by p.places limit 1;
 
-  login_count := (select count(*) from billing.logins l where l.account = p_account);
+  login_count := (select count(*) from plants.logins l where l.account = p_account);
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'plant', x.plant,
-           'name', coalesce((select lp.plant_name from billing.login_plants lp join billing.logins l on l.id = lp.login
+           'name', coalesce((select lp.plant_name from plants.login_plants lp join plants.logins l on l.id = lp.login
                               where l.account = p_account and lp.plant = x.plant and lp.plant_name is not null limit 1),
-                            (select c.plant_name from billing.plant_claims c where c.account = p_account and c.plant = x.plant),
+                            (select c.plant_name from plants.claims c where c.account = p_account and c.plant = x.plant),
                             -- a share removed (no claim left): the name it had
-                            (select pu.plant_name from public.plant_users pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
+                            (select pu.plant_name from plants.user_plants pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
                                 and pu.plant_id = x.plant and pu.plant_name is not null limit 1)),
            'chosen', x.chosen,
            'locked', not x.chosen,
            'read_now', x.chosen and live and not st.must_choose and billing.has_route(p_account, x.plant, true)
                        and not (ps->>'deleting')::boolean,                                         -- 0277
            'needs_reconnect', billing.has_route(p_account, x.plant, false) and not billing.has_route(p_account, x.plant, true),
-           'trial_used_elsewhere', pl.trial_used_at is not null and pl.trial_used_by is distinct from p_account,
+           'trial_used_elsewhere', pf.trial_used_at is not null and pf.trial_used_by is distinct from p_account,
            'delete_at', ps->'delete_at',
            'purged', ps->'purged',
            'deleting', ps->'deleting') order by x.plant), '[]'::jsonb)          -- 0277: deleting
-    into plants
+    into plant_list
     from (select y.plant, exists (select 1 from billing.seats se where se.account = p_account and se.plant = y.plant
                                      and se.chosen_at <= p_at and (se.closed_at is null or se.closed_at > p_at)) as chosen
             from (select t.x from billing.linked_plants(p_account) t (x)
                   union
                   select se.plant from billing.seats se where se.account = p_account
                      and se.chosen_at <= p_at and (se.closed_at is null or se.closed_at > p_at)) y (plant)) x
-    join billing.plants pl on pl.id = x.plant
+    left join billing.plant_facts pf on pf.plant = x.plant
     cross join lateral billing.plant_state(x.plant, p_at) ps;
 
   return jsonb_build_object(
@@ -80,5 +80,5 @@ begin
     'may_choose', st.state in ('trialing', 'active') or (st.state = 'none' and st.linked > 0),
     'may_switch', st.state in ('trialing', 'active'),
     'fit_all_plan', fit,
-    'plants', plants) || billing.money_state(p_account, p_at, st.state) || billing.renewal_state(p_account, p_at, st);
+    'plants', plant_list) || billing.money_state(p_account, p_at, st.state) || billing.renewal_state(p_account, p_at, st);
 end $function$;

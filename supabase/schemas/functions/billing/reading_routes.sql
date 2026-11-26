@@ -12,14 +12,14 @@ AS $function$
      cross join lateral billing.account_status(x.account, p_at) st
      where st.state in ('trialing', 'active', 'past_due') and not st.must_choose
   )
-  select se.plant, se.account, l.id, false, l.created_at
+  select se.plant, se.account, l.id, false, l.linked_at
     from seat se join live using (account)
-    join billing.logins l on l.account = se.account and l.status = 'ok'
-    join billing.login_plants lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
-    join private.sunsynk_accounts sa on sa.id = l.id and sa.status = 'active'
+    join plants.logins l on l.account = se.account and l.status = 'ok'
+    join plants.login_plants lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
+    join plants.logins sa on sa.id = l.id and sa.status = 'ok'
   union all
   select se.plant, se.account, sa.id, true, c.claimed_at
     from seat se join live using (account)
-    join billing.plant_claims c on c.plant = se.plant and c.account = se.account
-    join private.sunsynk_accounts sa on sa.kind = 'share' and sa.status = 'active'
+    join plants.claims c on c.plant = se.plant and c.account = se.account
+    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok'
 $function$;

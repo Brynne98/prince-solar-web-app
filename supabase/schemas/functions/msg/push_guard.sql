@@ -8,7 +8,7 @@ AS $function$
            when p_o.expires_at <= now() then 'too old'
            when q.id is null then 'event gone'
            when q.plant_id is not null
-                and not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
+                and not exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
            when q.plant_id is not null and not exists (
                   select 1 from billing.seats se join billing.accounts ba on ba.id = se.account

@@ -141,13 +141,13 @@ begin
                                 and f.ts <  public.day_start_epoch_tz(s.today - g.i, s.tz) + 86400))
            else 60 end as days
       from (select (pc.backfill_next is not null) as spine,
-                   (pc.temp_next is not null and pc.temp_next < public.today_tz(coalesce(c.timezone, 'Africa/Johannesburg'))) as inv,
+                   (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(v_plant))) as inv,
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
-                   public.today_tz(coalesce(c.timezone, 'Africa/Johannesburg')) as today,
-                   coalesce(c.timezone, 'Africa/Johannesburg') as tz
+                   public.today_tz(plants.tz(v_plant)) as today,
+                   plants.tz(v_plant) as tz
               from public.plant_config pc, cfg c where pc.plant_id = v_plant) s
   ),
-  plant as (select pu.plant_id as id, pu.plant_name as name from public.plant_users pu
+  plant as (select pu.plant_id as id, pu.plant_name as name from plants.user_plants pu
              where pu.plant_id = v_plant and pu.user_id = auth.uid() limit 1)
   select jsonb_build_object(
     'generatedAt', to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -167,7 +167,7 @@ begin
       'phaseDown', coalesce(t.phase_down, false)),
     'config', jsonb_build_object(
       'battCapacity', c.battery_kwh, 'reserve', c.battery_reserve_pct,
-      'currency', c.currency, 'timezone', c.timezone, 'tariffImport', c.tariff_import, 'tariffExport', c.tariff_export,
+      'currency', c.currency, 'timezone', plants.tz(v_plant), 'tariffImport', c.tariff_import, 'tariffExport', c.tariff_export,
       'systemKwp', c.system_kwp, 'panelTilt', c.panel_tilt, 'panelAzimuth', c.panel_azimuth,
       'geometrySource', c.geometry_source,
       'batteryBanks', c.battery_banks, 'hasBattery', c.has_battery, 'hasGrid', c.has_grid, 'featuresSource', c.features_source,

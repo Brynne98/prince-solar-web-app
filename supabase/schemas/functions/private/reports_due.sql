@@ -7,7 +7,7 @@ AS $function$
   with loc as (
     select pu.user_id, pu.plant_id, timezone(public.plant_tz(pu.plant_id), p_now) as t,
            timezone(public.plant_tz(pu.plant_id), pu.linked_at)::date as linked_on
-      from public.plant_users pu
+      from plants.user_plants pu
   )
   select l.user_id, l.plant_id, l.t::date, p.period
     from loc l, lateral (values ('week', 3), ('month', 7), ('year', 30)) p(period, min_days)

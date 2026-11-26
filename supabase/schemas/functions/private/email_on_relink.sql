@@ -15,18 +15,18 @@ begin
   -- stops and one when it is back. No sign-in wording: owners can't act on it. The
   -- company user, who owns the login, gets nothing.
   if new.kind = 'share' then
-    if new.status = 'needs_relink' and old.status is distinct from 'needs_relink' then
+    if new.status = 'needs_reconnect' and old.status is distinct from 'needs_reconnect' then
       insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
       select o.user_id, o.plant_id, 'share_down', 'share_down:' || new.id || ':' || o.user_id || ':' || now_s,
              jsonb_build_object('account', new.id, 'since', since_s, 'plants', o.names), 0
         from (select pu.user_id, (array_agg(pu.plant_id order by pu.linked_at))[1] plant_id,
                      jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at) names
-                from public.plant_users pu
+                from plants.user_plants pu
                where pu.account_id = new.id and pu.via_share and pu.share_gone_at is null and exists (select 1 from billing.seats se join billing.accounts ba on ba.id = se.account
                     where ba.user_id = pu.user_id and se.plant = pu.plant_id and se.closed_at is null)
                group by pu.user_id) o
       on conflict do nothing;
-    elsif old.status = 'needs_relink' and new.status = 'active' then
+    elsif old.status = 'needs_reconnect' and new.status = 'ok' then
       -- each owner's latest "stopped" with no "back" yet; paired so email_claim drops a
       -- "back" whose "stopped" never went
       insert into public.email_queue (user_id, plant_id, kind, key, pair_key, data, priority)
@@ -45,10 +45,10 @@ begin
   -- every plant this user has on the login, oldest link first; the email lists them all
   select coalesce(jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at), '[]'::jsonb)
     into names
-    from public.plant_users pu where pu.account_id = new.id and pu.user_id = new.user_id;
+    from plants.user_plants pu where pu.account_id = new.id and pu.user_id = new.user_id;
 
-  if new.status = 'needs_relink' and old.status is distinct from 'needs_relink' then
-    for r in select pu.plant_id from public.plant_users pu
+  if new.status = 'needs_reconnect' and old.status is distinct from 'needs_reconnect' then
+    for r in select pu.plant_id from plants.user_plants pu
               where pu.account_id = new.id and pu.user_id = new.user_id order by pu.linked_at loop  -- 0232
       n := n + 1;
       insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, last_error)
@@ -65,11 +65,11 @@ begin
       on conflict do nothing;
     end if;
 
-  elsif old.status = 'needs_relink' and new.status = 'active' then
+  elsif old.status = 'needs_reconnect' and new.status = 'ok' then
     -- each plant's latest dead-login row with no "back" yet
     for r in
       select d.plant_id, d.key, d.status, coalesce((d.data->>'since')::bigint, extract(epoch from d.created_at)::bigint) since
-        from public.plant_users pu
+        from plants.user_plants pu
         cross join lateral (select q.* from public.email_queue q
                              where q.user_id = new.user_id and q.plant_id = pu.plant_id and q.kind = 'needs_relink'
                                and q.data->>'account' = new.id::text

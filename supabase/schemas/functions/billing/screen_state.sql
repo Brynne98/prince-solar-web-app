@@ -12,7 +12,7 @@ declare
   last_sub billing.subscriptions;
   next_places int;
   prices jsonb;
-  plants jsonb;
+  plant_list jsonb;
 begin
   s := billing.account_state(p_account, p_at);
   if s is null then return null; end if;
@@ -47,22 +47,22 @@ begin
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
            -- the logins that list it now, and the ones it went from (removing the last route deletes it)
-           'logins', coalesce((select jsonb_agg(l.id order by l.created_at) from billing.logins l
-                                 join billing.login_plants lp on lp.login = l.id
+           'logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
+                                 join plants.login_plants lp on lp.login = l.id
                                 where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null), '[]'::jsonb),
-           'gone_logins', coalesce((select jsonb_agg(l.id order by l.created_at) from billing.logins l
-                                      join billing.login_plants lp on lp.login = l.id
+           'gone_logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
+                                      join plants.login_plants lp on lp.login = l.id
                                      where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is not null), '[]'::jsonb),
-           'claimed', exists (select 1 from billing.plant_claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
+           'claimed', exists (select 1 from plants.claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
            -- it came through the share: removing the shared group lets it go (api_link_remove)
-           'shared', exists (select 1 from public.plant_users pu join private.sunsynk_accounts sa on sa.id = pu.account_id
+           'shared', exists (select 1 from plants.user_plants pu join plants.logins sa on sa.id = pu.account_id
                               where sa.kind = 'share' and pu.plant_id = (p->>'plant')::bigint
                                 and pu.user_id = a.user_id))
          order by (p->>'plant')::bigint), '[]'::jsonb)
-    into plants from jsonb_array_elements(s->'plants') p;
+    into plant_list from jsonb_array_elements(s->'plants') p;
 
   return s || jsonb_build_object(
-    'plants', plants,
+    'plants', plant_list,
     'at', p_at,                                  -- when this was read: dates before it have passed
     'time_zone', coalesce(a.time_zone, m.default_time_zone),
     'locale', a.locale,
@@ -85,19 +85,19 @@ begin
     -- it is the one that decides for a chosen plant, that is no other account would keep that
     -- plant's history longer on what is booked now. Null: no such plant.
     'if_cancelled_delete_at', case when sub.id is not null
-                                    and exists (select 1 from jsonb_array_elements(plants) p
+                                    and exists (select 1 from jsonb_array_elements(plant_list) p
                                                  where (p->>'chosen')::boolean and not (p->>'purged')::boolean
                                                    and coalesce(billing.kept_by_others_until(p_account, (p->>'plant')::bigint, p_at),
                                                                 '-infinity') <= sub.period_end + make_interval(days => m.retention_days))
                                    then sub.period_end + make_interval(days => m.retention_days) end,
-    -- the earliest "kept until" among the chosen plants (null: nothing waits to be deleted)
-    'history_kept_until', (select min((p->>'delete_at')::timestamptz) from jsonb_array_elements(plants) p
+    -- the earliest "kept until" among the chosen plant_list (null: nothing waits to be deleted)
+    'history_kept_until', (select min((p->>'delete_at')::timestamptz) from jsonb_array_elements(plant_list) p
                             where (p->>'chosen')::boolean and (p->>'delete_at')::timestamptz > p_at),
-    'history_purged', exists (select 1 from jsonb_array_elements(plants) p where (p->>'chosen')::boolean and (p->>'purged')::boolean),
+    'history_purged', exists (select 1 from jsonb_array_elements(plant_list) p where (p->>'chosen')::boolean and (p->>'purged')::boolean),
     'prices', prices,
     'logins', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'brand', l.brand, 'username', l.username,
-                          'status', l.status) order by l.created_at)
-                          from billing.logins l where l.account = p_account), '[]'::jsonb),
+                          'status', l.status) order by l.linked_at)
+                          from plants.logins l where l.account = p_account), '[]'::jsonb),
     'bills', coalesce((select jsonb_agg(b order by b->>'paid_at' desc) from (
                 select jsonb_build_object('id', i.id, 'kind', i.kind, 'plan', i.plan,
                          'plan_name', i.plan_name, 'interval', i.interval,

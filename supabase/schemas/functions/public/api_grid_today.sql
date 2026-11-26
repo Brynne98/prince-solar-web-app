@@ -6,8 +6,7 @@ CREATE OR REPLACE FUNCTION public.api_grid_today(p_plant bigint DEFAULT NULL::bi
 AS $function$
   with p as (select public.my_plant(p_plant) as id),
   z as (
-    select p.id, coalesce((select c.timezone from public.plant_config c where c.plant_id = p.id),
-                          'Africa/Johannesburg') as tz
+    select p.id, plants.tz(p.id) as tz
       from p
   ),
   lo as (

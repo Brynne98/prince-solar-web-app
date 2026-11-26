@@ -16,7 +16,7 @@ begin
   if not exists (select 1 from private.plant_purge where plant_id = p_plant) then
     return null;
   end if;
-  if exists (select 1 from public.plant_users where plant_id = p_plant) then
+  if exists (select 1 from plants.user_plants where plant_id = p_plant) then
     delete from private.plant_purge where plant_id = p_plant;
     return jsonb_build_object('skipped', 'linked again');
   end if;

@@ -120,7 +120,7 @@ async function retryShareLogin() {
     } catch (e) {
       // Logged as another stop, which the next try is timed from. Already stopped, so no email.
       const msg = e instanceof Error ? e.message : String(e);
-      await db.rpc("account_mark", { p_account: id, p_status: "needs_relink", p_error: msg });
+      await db.rpc("account_mark", { p_account: id, p_status: "needs_reconnect", p_error: msg });
       console.warn("share login retry failed:", msg);
       noteError("share_login_retry_failed", e, { hourly: true });
     }

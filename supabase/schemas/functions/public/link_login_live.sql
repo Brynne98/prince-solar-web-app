@@ -6,19 +6,25 @@ CREATE OR REPLACE FUNCTION public.link_login_live(p_user uuid, p_username text, 
 AS $function$
 declare
   acc uuid;
+  login uuid;
   mine uuid[];
 begin
   perform pg_advisory_xact_lock_shared(3, 0);
+  -- the login's lock, then the account, then the plants (R19); every copy of the username too
   mine := private.username_logins(p_user, p_username);
-  perform private.login_lock(mine, 'active', p_user,
-    array(select (e->>'id')::bigint from jsonb_array_elements(coalesce(p_plants, '[]'::jsonb)) e where e->>'id' is not null
-          union
-          select lp.plant from billing.login_plants lp join billing.logins bl on bl.id = lp.login
-           join billing.accounts ba on ba.id = bl.account
-           where ba.user_id = p_user and bl.id = any (mine)));
-  acc := public.account_upsert(p_user, p_username, p_access, p_expires);
-  perform public.account_refresh_set(acc, p_refresh);
-  perform public.billing_links('link_login', jsonb_build_object('user', p_user, 'login', acc, 'username', p_username,
-                                                                 'plants', coalesce(p_plants, '[]'::jsonb)));
-  return acc;
-end $function$;
+  perform private.login_lock(mine, 'ok', p_user,
+    array(select lp.plant from plants.login_plants lp where lp.login = any (mine)));
+  if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
+    raise exception 'one login' using errcode = '22023';
+  end if;
+  acc := billing.account_of(p_user);
+  login := plants.link_login(acc, plants.default_brand(), p_username, coalesce(p_plants, '[]'::jsonb), now(), 'owner',
+                             null, p_access, p_expires);
+  -- a fresh sign-in replaces whatever the other copies of this username held
+  update plants.logins
+     set access_token = p_access, access_expires_at = p_expires, status = 'ok', last_error = null
+   where id in (select private.login_copies(login));
+  perform public.account_refresh_set(login, p_refresh);
+  return login;
+end
+$function$;
