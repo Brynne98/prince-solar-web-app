@@ -67,11 +67,32 @@ begin
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', pg_temp.t(0)) returning id into a;
   return a;
 end $$;
+-- Our plant id for a brand's id (SOLAR-681): plants.plant_for makes the plant the first time, so
+-- every plant here has the id a real plant gets; the ids inside the jsonb lists given to
+-- link_login / list_seen are the brand's.
+create function pg_temp.pid(v bigint) returns bigint language sql as $$ select plants.plant_for('sunsynk', v::text) $$;
+create function pg_temp.pids(v text) returns bigint[] language sql as $$
+  select coalesce(array_agg(plants.plant_for('sunsynk', x) order by o), '{}') from unnest(v::text[]) with ordinality t(x, o)
+$$;
+-- billing.link_login's old shape: the brand's ids in, the account's state out
+create function pg_temp.link_login(a uuid, b text, n text, s uuid, p jsonb, at timestamptz default now(),
+                                   actor text default 'owner', lid uuid default null) returns jsonb language plpgsql as $$
+begin perform plants.link_login(a, b, n, p, at, actor, lid); return billing.account_state(a, at); end $$;
+-- billing.plant_facts: no row means no trial used and no purge
+create function pg_temp.purged(p bigint) returns timestamptz language sql as $$
+  select history_purged_at from billing.plant_facts where plant = p $$;
+create function pg_temp.trial_at(p bigint) returns timestamptz language sql as $$
+  select trial_used_at from billing.plant_facts where plant = p $$;
+-- the old public.share_claim_live / share_sync shapes (brand's id in)
+create function pg_temp.share_claim_live(u uuid, sh uuid, v bigint, n text) returns text language sql as $$
+  select (public.share_claim_any(u, sh, v::text, n))->>'result' $$;
+create function pg_temp.share_sync(sh uuid, v text) returns void language sql as $$
+  select plants.list_seen(sh, (select coalesce(jsonb_agg(jsonb_build_object('id', x)), '[]') from unnest(v::bigint[]) x)) $$;
 create function pg_temp.link(p_acc uuid, p_user text, p_plants bigint[], p_at timestamptz) returns uuid language plpgsql as $$
 begin
-  perform billing.link_login(p_acc, 'sunsynk', p_user, null,
+  perform plants.link_login(p_acc, 'sunsynk', p_user,
     (select jsonb_agg(jsonb_build_object('id', x, 'name', 'Plant ' || x)) from unnest(p_plants) x), p_at);
-  return (select id from billing.logins where account = p_acc and username = p_user);
+  return (select id from plants.logins where account = p_acc and username = p_user);
 end $$;
 create function pg_temp.choose(p_acc uuid, p_plants bigint[], p_at timestamptz) returns jsonb language sql as $$
   select billing.set_chosen_plants(p_acc, p_plants, p_at)
@@ -148,6 +169,11 @@ declare a uuid := pg_temp.acct('l1'); d uuid := pg_temp.acct('l1d'); u uuid; ud 
 begin
   select user_id into u from billing.accounts where id = a;
   perform pg_temp.pay(a, 'home', 'month', now());
+  -- plants.claim needs the share login to exist (0283); the later blocks find this one
+  if not exists (select 1 from plants.logins where kind = 'share') then
+    insert into auth.users (id, email, created_at) values (su, 'l1share@state.test', now());
+    insert into plants.logins (user_id, brand, username, status, kind) values (su, 'sunsynk', 'l1share', 'ok', 'share');
+  end if;
   perform pg_temp.ok('L1 starts with no billing-run lock held', pg_temp.run_lock_held() is null, pg_temp.run_lock_held());
   perform pg_temp.eq('L1 a link or claim write waits for a billing run',
     pg_temp.run_lock_of(format('select public.billing_links(%L, %L)', 'claim_plant',
@@ -161,17 +187,17 @@ begin
 
   begin
     -- the one share login, made here when there is none (pg_temp.share_login comes later in the file)
-    select id into sh from private.sunsynk_accounts where kind = 'share';
+    select id into sh from plants.logins where kind = 'share';
     if sh is null then
       insert into auth.users (id, email, created_at) values (su, 'l1share@state.test', now());
-      insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (su, 'l1share', 'active', 'share')
+      insert into plants.logins (user_id, brand, username, status, kind) values (su, 'sunsynk', 'l1share', 'ok', 'share')
       returning id into sh;
     end if;
-    update private.sunsynk_accounts set status = 'active' where id = sh;
-    r := public.share_claim_any(u, sh, 990150003, 'L1 live');
+    update plants.logins set status = 'ok' where id = sh;
+    r := public.share_claim_any(u, sh, '990150003', 'L1 live');
     live := r->>'result';
-    live_ok := exists (select 1 from billing.plant_claims where plant = 990150003 and account = a)
-           and exists (select 1 from public.plant_users where plant_id = 990150003 and user_id = u and via_share);
+    live_ok := exists (select 1 from plants.claims where plant = pg_temp.pid(990150003) and account = a)
+           and exists (select 1 from plants.user_plants where plant_id = pg_temp.pid(990150003) and user_id = u and via_share);
     raise exception 'L1: undo';
   exception when others then
     if sqlerrm <> 'L1: undo' then err := sqlerrm; end if;
@@ -195,28 +221,28 @@ begin
   perform pg_temp.fails('S1 an empty choice does not start the week',
     format('select billing.set_chosen_plants(%L, ''{}'', %L)', a, pg_temp.t(0)), 'at least one plant');
 
-  r := pg_temp.choose(a, '{990000101,990000102}', pg_temp.t(0));
+  r := pg_temp.choose(a, pg_temp.pids('{990000101,990000102}'), pg_temp.t(0));
   perform pg_temp.eq('S1 choosing starts the week', r->>'state', 'trialing');
   perform pg_temp.eqt('S1 week ends day 7', r->>'trial_ends_at', pg_temp.t(7));
   perform pg_temp.eq('S1 week places', r->>'places', '5');
   perform pg_temp.eq('S1 chosen 2', r->>'chosen', '2');
   perform pg_temp.eq('S1 linked 3', r->>'linked', '3');
   perform pg_temp.eq('S1 open 3', r->>'open', '3');
-  perform pg_temp.eq('S1 chosen plant read', pg_temp.pp(a, pg_temp.t(1), 990000101, 'read_now'), 'true');
-  perform pg_temp.eq('S1 other plant locked', pg_temp.pp(a, pg_temp.t(1), 990000103, 'locked'), 'true');
-  perform pg_temp.eq('S1 locked plant not read', pg_temp.pp(a, pg_temp.t(1), 990000103, 'read_now'), 'false');
-  perform pg_temp.eq('S1 poller: chosen plant read', pg_temp.ps(990000101, pg_temp.t(1), 'read_now'), 'true');
-  perform pg_temp.eq('S1 poller: locked plant not read', pg_temp.ps(990000103, pg_temp.t(1), 'read_now'), 'false');
+  perform pg_temp.eq('S1 chosen plant read', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000101), 'read_now'), 'true');
+  perform pg_temp.eq('S1 other plant locked', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000103), 'locked'), 'true');
+  perform pg_temp.eq('S1 locked plant not read', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000103), 'read_now'), 'false');
+  perform pg_temp.eq('S1 poller: chosen plant read', pg_temp.ps(pg_temp.pid(990000101), pg_temp.t(1), 'read_now'), 'true');
+  perform pg_temp.eq('S1 poller: locked plant not read', pg_temp.ps(pg_temp.pid(990000103), pg_temp.t(1), 'read_now'), 'false');
   perform pg_temp.ok('S1 only seated plants used their week',
-    (select count(*) = 2 and bool_and(trial_used_by = a) from billing.plants where id in (990000101, 990000102) and trial_used_at = pg_temp.t(0))
-    and (select trial_used_at is null from billing.plants where id = 990000103));
+    (select count(*) = 2 and bool_and(trial_used_by = a) from billing.plant_facts where plant in (pg_temp.pid(990000101), pg_temp.pid(990000102)) and trial_used_at = pg_temp.t(0))
+    and (pg_temp.trial_at(pg_temp.pid(990000103)) is null));
   perform pg_temp.eq('S1 one login in the week', pg_temp.st(a, pg_temp.t(1), 'may_add_login'), 'false');
   perform pg_temp.fails('S1 second login refused in the week',
-    format('select billing.link_login(%L, ''sunsynk'', ''s1b'', null, ''[{"id":990000109}]'', %L)', a, pg_temp.t(1)), 'one login');
+    format('select pg_temp.link_login(%L, ''sunsynk'', ''s1b'', null, ''[{"id":990000109}]'', %L)', a, pg_temp.t(1)), 'one login');
 
-  r := pg_temp.choose(a, '{990000101,990000103}', pg_temp.t(1));
+  r := pg_temp.choose(a, pg_temp.pids('{990000101,990000103}'), pg_temp.t(1));
   perform pg_temp.eq('S1 switch inside the week', r->>'chosen', '2');
-  perform pg_temp.eq('S1 switched-out plant locked', pg_temp.pp(a, pg_temp.t(1), 990000102, 'locked'), 'true');
+  perform pg_temp.eq('S1 switched-out plant locked', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000102), 'locked'), 'true');
   perform pg_temp.ok('S1 switch logged', (select count(*) = 2 from billing.account_events where account = a and kind = 'set_chosen_plants'));
 
   s := pg_temp.pay(a, 'home', 'month', pg_temp.t(3));
@@ -230,7 +256,7 @@ begin
   perform pg_temp.eq('S1 paid may add login', r->>'may_add_login', 'true');
   perform pg_temp.eq('S1 paid may not delete', r->>'may_delete', 'false');
   perform pg_temp.fails('S1 Home holds 2 plants',
-    format('select billing.set_chosen_plants(%L, ''{990000101,990000102,990000103}'', %L)', a, pg_temp.t(4)), '2 places');
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990000101,990000102,990000103}''), %L)', a, pg_temp.t(4)), '2 places');
   perform pg_temp.eq('S1 still trialing at day 2 (clock moved back)', pg_temp.st(a, pg_temp.t(2), 'state'), 'trialing');
   perform pg_temp.eq('S1 renewal due, no try recorded: still active', pg_temp.st(a, pg_temp.t(4) + interval '1 month', 'state'), 'active');
   perform pg_temp.fail_renewal(s, pg_temp.t(3) + interval '1 month');
@@ -244,7 +270,7 @@ do $$
 declare a uuid := pg_temp.acct('s2'); r jsonb;
 begin
   perform pg_temp.link(a, 's2', '{990000201,990000202}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990000201}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990000201}'), pg_temp.t(0));
   perform pg_temp.eq('S2 day 6.9 still trialing', pg_temp.st(a, pg_temp.t(6.9), 'state'), 'trialing');
   r := billing.account_state(a, pg_temp.t(7));
   perform pg_temp.eq('S2 day 7: ended', r->>'state', 'ended');
@@ -254,16 +280,16 @@ begin
   perform pg_temp.eq('S2 no login added', r->>'may_add_login', 'false');
   perform pg_temp.eq('S2 no choosing', r->>'may_choose', 'false');
   perform pg_temp.eq('S2 may delete', r->>'may_delete', 'true');
-  perform pg_temp.eq('S2 reading stops', pg_temp.pp(a, pg_temp.t(7), 990000201, 'read_now'), 'false');
-  perform pg_temp.eqt('S2 history kept to day 37', pg_temp.pp(a, pg_temp.t(7), 990000201, 'delete_at'), pg_temp.t(37));
-  perform pg_temp.eq('S2 poller stops', pg_temp.ps(990000201, pg_temp.t(7), 'read_now'), 'false');
-  perform pg_temp.eqt('S2 never-chosen plant: delete now', pg_temp.ps(990000202, pg_temp.t(8), 'delete_at'), pg_temp.t(8));
-  perform pg_temp.fails('S2 choosing refused', format('select billing.set_chosen_plants(%L, ''{990000202}'', %L)', a, pg_temp.t(8)), 'ended');
-  perform pg_temp.fails('S2 new login refused', format('select billing.link_login(%L, ''sunsynk'', ''s2b'', null, ''[]'', %L)', a, pg_temp.t(8)), 'without a plan');
-  r := billing.link_login(a, 'sunsynk', 's2', null, '[{"id":990000201},{"id":990000202}]', pg_temp.t(8));
+  perform pg_temp.eq('S2 reading stops', pg_temp.pp(a, pg_temp.t(7), pg_temp.pid(990000201), 'read_now'), 'false');
+  perform pg_temp.eqt('S2 history kept to day 37', pg_temp.pp(a, pg_temp.t(7), pg_temp.pid(990000201), 'delete_at'), pg_temp.t(37));
+  perform pg_temp.eq('S2 poller stops', pg_temp.ps(pg_temp.pid(990000201), pg_temp.t(7), 'read_now'), 'false');
+  perform pg_temp.eqt('S2 never-chosen plant: delete now', pg_temp.ps(pg_temp.pid(990000202), pg_temp.t(8), 'delete_at'), pg_temp.t(8));
+  perform pg_temp.fails('S2 choosing refused', format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990000202}''), %L)', a, pg_temp.t(8)), 'ended');
+  perform pg_temp.fails('S2 new login refused', format('select pg_temp.link_login(%L, ''sunsynk'', ''s2b'', null, ''[]'', %L)', a, pg_temp.t(8)), 'without a plan');
+  r := pg_temp.link_login(a, 'sunsynk', 's2', null, '[{"id":990000201},{"id":990000202}]', pg_temp.t(8));
   perform pg_temp.eq('S2 reconnecting the same login allowed', r->>'state', 'ended');
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(20));
-  perform pg_temp.eq('S2 one payment reads again', pg_temp.pp(a, pg_temp.t(20), 990000201, 'read_now'), 'true');
+  perform pg_temp.eq('S2 one payment reads again', pg_temp.pp(a, pg_temp.t(20), pg_temp.pid(990000201), 'read_now'), 'true');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -273,17 +299,17 @@ do $$
 declare a uuid := pg_temp.acct('s3'); l uuid; r jsonb;
 begin
   l := pg_temp.link(a, 's3', '{990000301,990000302}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990000301,990000302}', pg_temp.t(0));
-  r := billing.remove_login(a, l, pg_temp.t(10));
-  perform pg_temp.eq('S3 both plants lose protection', r->>'unprotected', '[990000301, 990000302]');
+  perform pg_temp.choose(a, pg_temp.pids('{990000301,990000302}'), pg_temp.t(0));
+  r := plants.remove_login(a, l, pg_temp.t(10));
+  perform pg_temp.eq('S3 both plants lose protection', r->>'unprotected', ('[' || pg_temp.pid(990000301) || ', ' || pg_temp.pid(990000302) || ']'));
   perform pg_temp.eq('S3 still ended (week used)', r->>'state', 'ended');
   perform pg_temp.eq('S3 nothing linked', r->>'linked', '0');
   perform pg_temp.eq('S3 nothing chosen', r->>'chosen', '0');
-  perform pg_temp.eqt('S3 history deleted at once', (select history_purged_at::text from billing.plants where id = 990000301), pg_temp.t(10));
+  perform pg_temp.eqt('S3 history deleted at once', (pg_temp.purged(pg_temp.pid(990000301))::text), pg_temp.t(10));
   perform pg_temp.ok('S3 seats closed as login_removed',
     (select count(*) = 2 from billing.seats where account = a and close_reason = 'login_removed' and closed_at = pg_temp.t(10)));
   perform pg_temp.fails('S3 no new login without a plan',
-    format('select billing.link_login(%L, ''sunsynk'', ''s3'', null, ''[{"id":990000301}]'', %L)', a, pg_temp.t(11)), 'without a plan');
+    format('select pg_temp.link_login(%L, ''sunsynk'', ''s3'', null, ''[{"id":990000301}]'', %L)', a, pg_temp.t(11)), 'without a plan');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -293,24 +319,24 @@ do $$
 declare a1 uuid := pg_temp.acct('s4a'); a2 uuid := pg_temp.acct('s4b'); a3 uuid := pg_temp.acct('s4c'); s uuid;
 begin
   perform pg_temp.link(a2, 's4b', '{990000401}', pg_temp.t(0));
-  perform pg_temp.choose(a2, '{990000401}', pg_temp.t(0));
+  perform pg_temp.choose(a2, pg_temp.pids('{990000401}'), pg_temp.t(0));
   perform pg_temp.link(a1, 's4a', '{990000401}', pg_temp.t(0));
   perform pg_temp.eq('S4 week used by the other account: pay screen', pg_temp.st(a1, pg_temp.t(0), 'state'), 'ended');
   s := pg_temp.pay(a1, 'home', 'month', pg_temp.t(1));
-  perform pg_temp.choose(a1, '{990000401}', pg_temp.t(1));
-  perform pg_temp.eq('S4 plant read for the payer', pg_temp.pp(a1, pg_temp.t(8), 990000401, 'read_now'), 'true');
-  perform pg_temp.eq('S4 not read for the unpaid one', pg_temp.pp(a2, pg_temp.t(8), 990000401, 'read_now'), 'false');
-  perform pg_temp.eq('S4 unpaid one: no kept-until, the payer keeps it', pg_temp.pp(a2, pg_temp.t(8), 990000401, 'delete_at'), null);
-  perform pg_temp.eq('S4 poller reads it', pg_temp.ps(990000401, pg_temp.t(8), 'read_now'), 'true');
-  perform pg_temp.eq('S4 protected', pg_temp.ps(990000401, pg_temp.t(8), 'protected'), 'true');
+  perform pg_temp.choose(a1, pg_temp.pids('{990000401}'), pg_temp.t(1));
+  perform pg_temp.eq('S4 plant read for the payer', pg_temp.pp(a1, pg_temp.t(8), pg_temp.pid(990000401), 'read_now'), 'true');
+  perform pg_temp.eq('S4 not read for the unpaid one', pg_temp.pp(a2, pg_temp.t(8), pg_temp.pid(990000401), 'read_now'), 'false');
+  perform pg_temp.eq('S4 unpaid one: no kept-until, the payer keeps it', pg_temp.pp(a2, pg_temp.t(8), pg_temp.pid(990000401), 'delete_at'), null);
+  perform pg_temp.eq('S4 poller reads it', pg_temp.ps(pg_temp.pid(990000401), pg_temp.t(8), 'read_now'), 'true');
+  perform pg_temp.eq('S4 protected', pg_temp.ps(pg_temp.pid(990000401), pg_temp.t(8), 'protected'), 'true');
   update billing.subscriptions set cancel_at_period_end = true where id = s;
-  perform pg_temp.eqt('S4 both ended: latest end + 30 days', pg_temp.ps(990000401, pg_temp.t(40), 'delete_at'),
+  perform pg_temp.eqt('S4 both ended: latest end + 30 days', pg_temp.ps(pg_temp.pid(990000401), pg_temp.t(40), 'delete_at'),
                       pg_temp.t(1) + interval '1 month' + interval '30 days');
 
-  insert into billing.plants (id, brand, external_id) values (990000403, 'sunsynk', '990000403');
-  insert into billing.plant_claims (plant, account, claimed_at) values (990000403, a3, pg_temp.t(0));
-  perform pg_temp.choose(a3, '{990000403}', pg_temp.t(0));
-  perform pg_temp.eq('S4 share claim is a route', pg_temp.pp(a3, pg_temp.t(1), 990000403, 'read_now'), 'true');
+  perform pg_temp.pid(990000403);
+  insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990000403), a3, pg_temp.t(0));
+  perform pg_temp.choose(a3, pg_temp.pids('{990000403}'), pg_temp.t(0));
+  perform pg_temp.eq('S4 share claim is a route', pg_temp.pp(a3, pg_temp.t(1), pg_temp.pid(990000403), 'read_now'), 'true');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -322,13 +348,13 @@ begin
   l1 := pg_temp.link(a, 's5a', '{990000501,990000502}', pg_temp.t(0));
   perform pg_temp.pay(a, 'family', 'month', pg_temp.t(0));
   l2 := pg_temp.link(a, 's5b', '{990000502,990000503}', pg_temp.t(0));
-  perform pg_temp.ok('S5 plant on two logins: two rows', (select count(*) = 2 from billing.login_plants where plant = 990000502));
-  r := pg_temp.choose(a, '{990000501,990000502,990000503}', pg_temp.t(1));
+  perform pg_temp.ok('S5 plant on two logins: two rows', (select count(*) = 2 from plants.login_plants where plant = pg_temp.pid(990000502)));
+  r := pg_temp.choose(a, pg_temp.pids('{990000501,990000502,990000503}'), pg_temp.t(1));
   perform pg_temp.eq('S5 linked counts the plant once', r->>'linked', '3');
-  perform pg_temp.ok('S5 one seat', (select count(*) = 1 from billing.seats where plant = 990000502 and closed_at is null));
-  r := billing.remove_login(a, l1, pg_temp.t(2));
-  perform pg_temp.eq('S5 only the plant with no other route loses its seat', r->>'unprotected', '[990000501]');
-  perform pg_temp.eq('S5 shared plant still read', pg_temp.pp(a, pg_temp.t(2), 990000502, 'read_now'), 'true');
+  perform pg_temp.ok('S5 one seat', (select count(*) = 1 from billing.seats where plant = pg_temp.pid(990000502) and closed_at is null));
+  r := plants.remove_login(a, l1, pg_temp.t(2));
+  perform pg_temp.eq('S5 only the plant with no other route loses its seat', r->>'unprotected', ('[' || pg_temp.pid(990000501) || ']'));
+  perform pg_temp.eq('S5 shared plant still read', pg_temp.pp(a, pg_temp.t(2), pg_temp.pid(990000502), 'read_now'), 'true');
   perform pg_temp.eq('S5 chosen 2', r->>'chosen', '2');
 end $$;
 
@@ -339,16 +365,16 @@ do $$
 declare a uuid := pg_temp.acct('s6'); l uuid;
 begin
   l := pg_temp.link(a, 's6', '{990000601}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990000601}', pg_temp.t(0));
-  update billing.logins set status = 'needs_reconnect' where id = l;
-  perform pg_temp.eq('S6 broken login: not read', pg_temp.pp(a, pg_temp.t(1), 990000601, 'read_now'), 'false');
-  perform pg_temp.eq('S6 needs reconnect', pg_temp.pp(a, pg_temp.t(1), 990000601, 'needs_reconnect'), 'true');
-  perform pg_temp.eq('S6 history kept', pg_temp.ps(990000601, pg_temp.t(1), 'protected'), 'true');
-  perform pg_temp.eq('S6 no delete date', pg_temp.ps(990000601, pg_temp.t(1), 'delete_at'), null);
-  perform pg_temp.eq('S6 still chosen', pg_temp.pp(a, pg_temp.t(1), 990000601, 'chosen'), 'true');
-  perform billing.link_login(a, 'sunsynk', 's6', gen_random_uuid(), '[{"id":990000601}]', pg_temp.t(2));
-  perform pg_temp.eq('S6 reconnected: read again', pg_temp.pp(a, pg_temp.t(2), 990000601, 'read_now'), 'true');
-  perform pg_temp.eq('S6 reconnected: flag gone', pg_temp.pp(a, pg_temp.t(2), 990000601, 'needs_reconnect'), 'false');
+  perform pg_temp.choose(a, pg_temp.pids('{990000601}'), pg_temp.t(0));
+  update plants.logins set status = 'needs_reconnect' where id = l;
+  perform pg_temp.eq('S6 broken login: not read', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000601), 'read_now'), 'false');
+  perform pg_temp.eq('S6 needs reconnect', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000601), 'needs_reconnect'), 'true');
+  perform pg_temp.eq('S6 history kept', pg_temp.ps(pg_temp.pid(990000601), pg_temp.t(1), 'protected'), 'true');
+  perform pg_temp.eq('S6 no delete date', pg_temp.ps(pg_temp.pid(990000601), pg_temp.t(1), 'delete_at'), null);
+  perform pg_temp.eq('S6 still chosen', pg_temp.pp(a, pg_temp.t(1), pg_temp.pid(990000601), 'chosen'), 'true');
+  perform pg_temp.link_login(a, 'sunsynk', 's6', gen_random_uuid(), '[{"id":990000601}]', pg_temp.t(2));
+  perform pg_temp.eq('S6 reconnected: read again', pg_temp.pp(a, pg_temp.t(2), pg_temp.pid(990000601), 'read_now'), 'true');
+  perform pg_temp.eq('S6 reconnected: flag gone', pg_temp.pp(a, pg_temp.t(2), pg_temp.pid(990000601), 'needs_reconnect'), 'false');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -359,7 +385,7 @@ declare a uuid := pg_temp.acct('s7'); b uuid := pg_temp.acct('s7b'); s uuid; p t
 begin
   s := pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
   perform pg_temp.link(a, 's7', '{990000701}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990000701}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990000701}'), pg_temp.t(0));
   perform pg_temp.eqt('S7 next charge on the due date', pg_temp.st(a, p - interval '1 hour', 'next_charge_at'), p);
   perform pg_temp.eq('S7 due, not tried: active', pg_temp.st(a, p + interval '1 day', 'state'), 'active');
   perform pg_temp.eq('S7 due, not tried: no past_due_since', pg_temp.st(a, p + interval '1 day', 'past_due_since'), null);
@@ -376,7 +402,7 @@ begin
   perform pg_temp.eqt('S7 day 0 is the due date', r->>'past_due_since', p);
   perform pg_temp.eqt('S7 next retry day 3', r->>'next_retry_at', p + interval '3 days');
   perform pg_temp.eqt('S7 plan ends at the end of day 15', r->>'plan_ends_at', pg_temp.cut(p));
-  perform pg_temp.eq('S7 reading goes on', pg_temp.pp(a, p + interval '1 day', 990000701, 'read_now'), 'true');
+  perform pg_temp.eq('S7 reading goes on', pg_temp.pp(a, p + interval '1 day', pg_temp.pid(990000701), 'read_now'), 'true');
   perform pg_temp.eq('S7 no switching', r->>'may_switch', 'false');
   perform pg_temp.fails('S7 choosing refused while past_due',
     format('select billing.set_chosen_plants(%L, ''{}'', %L)', a, p + interval '1 day'), 'past_due');
@@ -388,15 +414,15 @@ begin
   r := billing.account_state(a, pg_temp.cut(p));
   perform pg_temp.eq('S7 end of day 15: ended', r->>'state', 'ended');
   perform pg_temp.eqt('S7 ended at the end of day 15', r->>'access_ended_at', pg_temp.cut(p));
-  perform pg_temp.eq('S7 end of day 15: not read', pg_temp.pp(a, pg_temp.cut(p), 990000701, 'read_now'), 'false');
-  perform pg_temp.eqt('S7 history kept 30 days', pg_temp.pp(a, pg_temp.cut(p), 990000701, 'delete_at'), pg_temp.cut(p) + interval '30 days');
+  perform pg_temp.eq('S7 end of day 15: not read', pg_temp.pp(a, pg_temp.cut(p), pg_temp.pid(990000701), 'read_now'), 'false');
+  perform pg_temp.eqt('S7 history kept 30 days', pg_temp.pp(a, pg_temp.cut(p), pg_temp.pid(990000701), 'delete_at'), pg_temp.cut(p) + interval '30 days');
   perform pg_temp.eqt('S7 day 4: next retry day 7', pg_temp.st(a, p + interval '4 days', 'next_retry_at'), p + interval '7 days');
   -- paid on day 10: same billing day, next period
   update billing.subscriptions set status = 'active', past_due_since = null, period_start = p, period_end = p + interval '1 month' where id = s;
   r := billing.account_state(a, p + interval '10 days');
   perform pg_temp.eq('S7 paid on day 10: active', r->>'state', 'active');
   perform pg_temp.eqt('S7 billing date kept', r->>'next_charge_at', p + interval '1 month');
-  perform pg_temp.eq('S7 paid: read', pg_temp.pp(a, p + interval '10 days', 990000701, 'read_now'), 'true');
+  perform pg_temp.eq('S7 paid: read', pg_temp.pp(a, p + interval '10 days', pg_temp.pid(990000701), 'read_now'), 'true');
   -- yearly price copied
   perform pg_temp.pay(b, 'family', 'year', pg_temp.t(0));
   perform pg_temp.eq('S7 yearly = 10 months', pg_temp.st(b, pg_temp.t(1), 'amount_minor'), '199000');
@@ -410,7 +436,7 @@ declare a uuid := pg_temp.acct('s8'); s uuid; e timestamptz := pg_temp.t(0) + in
 begin
   s := pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
   perform pg_temp.link(a, 's8', '{990000801}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990000801}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990000801}'), pg_temp.t(0));
   update billing.subscriptions set cancel_at_period_end = true where id = s;
   r := billing.account_state(a, pg_temp.t(10));
   perform pg_temp.eq('S8 cancel booked: still active', r->>'state', 'active');
@@ -420,7 +446,7 @@ begin
   r := billing.account_state(a, e);
   perform pg_temp.eq('S8 cancel date reached: ended (no job ran)', r->>'state', 'ended');
   perform pg_temp.eqt('S8 ended on the cancel date', r->>'access_ended_at', e);
-  perform pg_temp.eqt('S8 history kept 30 days', pg_temp.pp(a, e, 990000801, 'delete_at'), e + interval '30 days');
+  perform pg_temp.eqt('S8 history kept 30 days', pg_temp.pp(a, e, pg_temp.pid(990000801), 'delete_at'), e + interval '30 days');
   perform pg_temp.eq('S8 may delete', r->>'may_delete', 'true');
 end $$;
 
@@ -433,23 +459,23 @@ begin
   perform pg_temp.link(a, 's9', '{990000901,990000902,990000903,990000904}', pg_temp.t(0));
   s := pg_temp.pay(a, 'home', 'month', pg_temp.t(0), 'launch');
   perform pg_temp.eq('S9 launch price', pg_temp.st(a, pg_temp.t(0), 'amount_minor'), '4900');
-  perform pg_temp.choose(a, '{990000901,990000902}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990000901,990000902}'), pg_temp.t(0));
   perform pg_temp.fails('S9 Home: third plant refused',
-    format('select billing.set_chosen_plants(%L, ''{990000901,990000902,990000903}'', %L)', a, pg_temp.t(1)), '2 places');
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990000901,990000902,990000903}''), %L)', a, pg_temp.t(1)), '2 places');
   update billing.subscriptions set plan = 'family', amount_minor = 9900 where id = s;   -- upgrade (phase 3 command)
-  r := pg_temp.choose(a, '{990000901,990000902,990000903,990000904}', pg_temp.t(2));
+  r := pg_temp.choose(a, pg_temp.pids('{990000901,990000902,990000903,990000904}'), pg_temp.t(2));
   perform pg_temp.eq('S9 Family: 5 places', r->>'places', '5');
   perform pg_temp.eq('S9 Family: 4 chosen', r->>'chosen', '4');
   update billing.subscriptions set plan = 'home', amount_minor = 4900 where id = s;     -- downgrade applied
   r := billing.account_state(a, pg_temp.t(3));
   perform pg_temp.eq('S9 over places: must choose', r->>'must_choose', 'true');
-  perform pg_temp.eq('S9 must choose: nothing read', pg_temp.ps(990000901, pg_temp.t(3), 'read_now'), 'false');
-  perform pg_temp.eq('S9 must choose: history kept', pg_temp.ps(990000901, pg_temp.t(3), 'protected'), 'true');
+  perform pg_temp.eq('S9 must choose: nothing read', pg_temp.ps(pg_temp.pid(990000901), pg_temp.t(3), 'read_now'), 'false');
+  perform pg_temp.eq('S9 must choose: history kept', pg_temp.ps(pg_temp.pid(990000901), pg_temp.t(3), 'protected'), 'true');
   perform pg_temp.eq('S9 must choose: may choose', r->>'may_choose', 'true');
-  r := pg_temp.choose(a, '{990000901,990000902}', pg_temp.t(3));
+  r := pg_temp.choose(a, pg_temp.pids('{990000901,990000902}'), pg_temp.t(3));
   perform pg_temp.eq('S9 picked: must choose cleared', r->>'must_choose', 'false');
-  perform pg_temp.eq('S9 picked: read again', pg_temp.pp(a, pg_temp.t(3), 990000901, 'read_now'), 'true');
-  perform pg_temp.eqt('S9 dropped plant: no other holder, deleted now', (select history_purged_at::text from billing.plants where id = 990000904), pg_temp.t(3));
+  perform pg_temp.eq('S9 picked: read again', pg_temp.pp(a, pg_temp.t(3), pg_temp.pid(990000901), 'read_now'), 'true');
+  perform pg_temp.eqt('S9 dropped plant: no other holder, deleted now', (pg_temp.purged(pg_temp.pid(990000904))::text), pg_temp.t(3));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -459,22 +485,22 @@ do $$
 declare a1 uuid := pg_temp.acct('s10a'); a2 uuid := pg_temp.acct('s10b'); l uuid; r jsonb;
 begin
   perform pg_temp.link(a1, 's10a', '{990001001,990001003}', pg_temp.t(0));
-  perform pg_temp.choose(a1, '{990001001}', pg_temp.t(0));
+  perform pg_temp.choose(a1, pg_temp.pids('{990001001}'), pg_temp.t(0));
   l := pg_temp.link(a2, 's10b', '{990001001}', pg_temp.t(1));
   perform pg_temp.eq('S10 only used plants: pay screen', pg_temp.st(a2, pg_temp.t(1), 'state'), 'ended');
-  perform pg_temp.eq('S10 marked used elsewhere', pg_temp.pp(a2, pg_temp.t(1), 990001001, 'trial_used_elsewhere'), 'true');
+  perform pg_temp.eq('S10 marked used elsewhere', pg_temp.pp(a2, pg_temp.t(1), pg_temp.pid(990001001), 'trial_used_elsewhere'), 'true');
   perform pg_temp.fails('S10 used plant cannot start a week',
-    format('select billing.set_chosen_plants(%L, ''{990001001}'', %L)', a2, pg_temp.t(1)), 'cannot be chosen');
-  r := billing.remove_login(a2, l, pg_temp.t(1));
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990001001}''), %L)', a2, pg_temp.t(1)), 'cannot be chosen');
+  r := plants.remove_login(a2, l, pg_temp.t(1));
   perform pg_temp.eq('S10 no login, no week: none (not stuck)', r->>'state', 'none');
   perform pg_temp.link(a2, 's10c', '{990001001,990001002}', pg_temp.t(1));
   perform pg_temp.eq('S10 an unused plant: none', pg_temp.st(a2, pg_temp.t(1), 'state'), 'none');
   perform pg_temp.fails('S10 used plant refused in the week',
-    format('select billing.set_chosen_plants(%L, ''{990001001,990001002}'', %L)', a2, pg_temp.t(1)), 'already had its free week');
-  r := pg_temp.choose(a2, '{990001002}', pg_temp.t(1));
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990001001,990001002}''), %L)', a2, pg_temp.t(1)), 'already had its free week');
+  r := pg_temp.choose(a2, pg_temp.pids('{990001002}'), pg_temp.t(1));
   perform pg_temp.eq('S10 unused plant starts the week', r->>'state', 'trialing');
-  r := pg_temp.choose(a1, '{990001003}', pg_temp.t(2));
-  r := pg_temp.choose(a1, '{990001001}', pg_temp.t(3));
+  r := pg_temp.choose(a1, pg_temp.pids('{990001003}'), pg_temp.t(2));
+  r := pg_temp.choose(a1, pg_temp.pids('{990001001}'), pg_temp.t(3));
   perform pg_temp.eq('S10 switching back to its own week''s plant works', r->>'chosen', '1');
 end $$;
 
@@ -488,12 +514,12 @@ begin
   perform pg_temp.eq('S11 7 linked', pg_temp.st(a, pg_temp.t(0), 'linked'), '7');
   perform pg_temp.eq('S11 no plan fits 7', pg_temp.st(a, pg_temp.t(0), 'fit_all_plan'), null);
   perform pg_temp.fails('S11 6 refused',
-    format('select billing.set_chosen_plants(%L, ''{990001101,990001102,990001103,990001104,990001105,990001106}'', %L)', a, pg_temp.t(0)), 'up to 5');
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990001101,990001102,990001103,990001104,990001105,990001106}''), %L)', a, pg_temp.t(0)), 'up to 5');
   perform pg_temp.eq('S11 refusal starts nothing', pg_temp.st(a, pg_temp.t(0), 'state'), 'none');
-  r := pg_temp.choose(a, '{990001101,990001102,990001103,990001104,990001105}', pg_temp.t(0));
+  r := pg_temp.choose(a, pg_temp.pids('{990001101,990001102,990001103,990001104,990001105}'), pg_temp.t(0));
   perform pg_temp.eq('S11 5 chosen', r->>'chosen', '5');
-  perform pg_temp.eq('S11 sixth locked', pg_temp.pp(a, pg_temp.t(0), 990001106, 'locked'), 'true');
-  perform pg_temp.ok('S11 unchosen plants keep their week', (select trial_used_at is null from billing.plants where id = 990001106));
+  perform pg_temp.eq('S11 sixth locked', pg_temp.pp(a, pg_temp.t(0), pg_temp.pid(990001106), 'locked'), 'true');
+  perform pg_temp.ok('S11 unchosen plants keep their week', (pg_temp.trial_at(pg_temp.pid(990001106)) is null));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -505,22 +531,22 @@ begin
   perform pg_temp.link(a, 's12', '{990001201,990001202,990001203}', pg_temp.t(0));
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
   insert into billing.grants (account, places, reason, starts_at, ends_at) values (a, 1, 'support', pg_temp.t(0), pg_temp.t(10));
-  r := pg_temp.choose(a, '{990001201,990001202,990001203}', pg_temp.t(1));
+  r := pg_temp.choose(a, pg_temp.pids('{990001201,990001202,990001203}'), pg_temp.t(1));
   perform pg_temp.eq('S12 plan + grant places', r->>'places', '3');
   r := billing.account_state(a, pg_temp.t(10));
   perform pg_temp.eq('S12 grant ended: places 2', r->>'places', '2');
   perform pg_temp.eq('S12 grant ended: must choose', r->>'must_choose', 'true');
-  perform pg_temp.eq('S12 must choose: not read', pg_temp.pp(a, pg_temp.t(10), 990001201, 'read_now'), 'false');
-  perform pg_temp.eq('S12 must choose: kept', pg_temp.pp(a, pg_temp.t(10), 990001201, 'delete_at'), null);
+  perform pg_temp.eq('S12 must choose: not read', pg_temp.pp(a, pg_temp.t(10), pg_temp.pid(990001201), 'read_now'), 'false');
+  perform pg_temp.eq('S12 must choose: kept', pg_temp.pp(a, pg_temp.t(10), pg_temp.pid(990001201), 'delete_at'), null);
   insert into billing.grants (account, places, reason, starts_at) values (b, 2, 'comped', pg_temp.t(0));
   r := billing.account_state(b, pg_temp.t(5));
   perform pg_temp.eq('S12 grant only: active', r->>'state', 'active');
   perform pg_temp.eq('S12 grant only: places', r->>'places', '2');
   perform pg_temp.eq('S12 grant only: no charge', r->>'next_charge_at', null);
   -- a seat on an account with no known end date: no delete date, never "now"
-  insert into billing.plants (id, brand, external_id) values (990001209, 'sunsynk', '990001209');
-  insert into billing.seats (account, plant, chosen_at) values (pg_temp.acct('s12c'), 990001209, pg_temp.t(0));
-  perform pg_temp.eq('S12 open seat, no end date: delete_at null', pg_temp.ps(990001209, pg_temp.t(1), 'delete_at'), null);
+  perform pg_temp.pid(990001209);
+  insert into billing.seats (account, plant, chosen_at) values (pg_temp.acct('s12c'), pg_temp.pid(990001209), pg_temp.t(0));
+  perform pg_temp.eq('S12 open seat, no end date: delete_at null', pg_temp.ps(pg_temp.pid(990001209), pg_temp.t(1), 'delete_at'), null);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -542,21 +568,21 @@ begin
   perform pg_temp.ok('S13 a command bumps the version', (select version = v + 1 from billing.accounts where id = a));
   perform pg_temp.ok('S13 a command is logged', exists (select 1 from billing.account_events where account = a and kind = 'link_login'));
   perform pg_temp.fails('S13 a plant not on the account cannot be chosen',
-    format('select billing.set_chosen_plants(%L, ''{990000101}'', %L)', a, pg_temp.t(6)), 'not on this account');
-  perform pg_temp.choose(a, '{990001301}', pg_temp.t(6));
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990000101}''), %L)', a, pg_temp.t(6)), 'not on this account');
+  perform pg_temp.choose(a, pg_temp.pids('{990001301}'), pg_temp.t(6));
   perform pg_temp.ok('S13 a seat on a paid plan uses the plant''s week',
-    (select trial_used_at = pg_temp.t(6) and trial_used_by = a from billing.plants where id = 990001301));
+    (select trial_used_at = pg_temp.t(6) and trial_used_by = a from billing.plant_facts where plant = pg_temp.pid(990001301)));
   b := pg_temp.acct('s13b');
   perform pg_temp.link(b, 's13b', '{990001301}', pg_temp.t(7));
   perform pg_temp.eq('S13 a paid-for plant gives no free week', pg_temp.st(b, pg_temp.t(7), 'state'), 'ended');
   -- link_login bumps the version of plants whose route changed
-  v := (select version from billing.plants where id = 990001301);
-  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(8));
-  perform pg_temp.ok('S13 a plant gone from the login: version bumped', (select version = v + 1 from billing.plants where id = 990001301));
-  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(9));
-  perform pg_temp.ok('S13 nothing changed: no bump', (select version = v + 1 from billing.plants where id = 990001301));
-  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001301},{"id":990001302}]', pg_temp.t(10));
-  perform pg_temp.ok('S13 a plant back on the login: version bumped', (select version = v + 2 from billing.plants where id = 990001301));
+  v := (select version from plants.plants where id = pg_temp.pid(990001301));
+  perform pg_temp.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(8));
+  perform pg_temp.ok('S13 a plant gone from the login: version bumped', (select version = v + 1 from plants.plants where id = pg_temp.pid(990001301)));
+  perform pg_temp.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(9));
+  perform pg_temp.ok('S13 nothing changed: no bump', (select version = v + 1 from plants.plants where id = pg_temp.pid(990001301)));
+  perform pg_temp.link_login(a, 'sunsynk', 's13', null, '[{"id":990001301},{"id":990001302}]', pg_temp.t(10));
+  perform pg_temp.ok('S13 a plant back on the login: version bumped', (select version = v + 2 from plants.plants where id = pg_temp.pid(990001301)));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -672,13 +698,13 @@ begin
   perform pg_temp.fails('P1 checkout needs the plant choice',
     format('select billing.start_checkout(%L, ''home'', ''month'', 0, null, %L)', a, pg_temp.t(0)), 'choose the plants');
   perform pg_temp.fails('P1 checkout: Home holds 2',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990010101,990010102,990010103}'', %L)', a, pg_temp.t(0)), '2 places');
-  r := billing.start_checkout(a, 'home', 'month', 0, '{990010101,990010102}', pg_temp.t(0));
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, pg_temp.pids(''{990010101,990010102,990010103}''), %L)', a, pg_temp.t(0)), '2 places');
+  r := billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010101,990010102}'), pg_temp.t(0));
   inv := (r->>'invoice')::uuid;
   perform pg_temp.eq('P1 first-time member: launch price', r->>'amount_minor', '4900');
   perform pg_temp.eq('P1 no saved card yet', r->>'saved_card', 'false');
   perform pg_temp.ok('P1 version and choice bound to the bill',
-    (select expected_version = (select version from billing.accounts where id = a) and plants = '{990010101,990010102}'
+    (select expected_version = (select version from billing.accounts where id = a) and plants = pg_temp.pids('{990010101,990010102}')
        from billing.invoices where id = inv));
   perform pg_temp.eq('P1 checkout changes nothing yet', pg_temp.st(a, pg_temp.t(0), 'state'), 'none');
   perform pg_temp.fails('P1 saved card: none to charge',
@@ -699,7 +725,7 @@ begin
     s.billing_day = 1 and s.period_start = pg_temp.t(0) + interval '2 minutes' and s.period_end = pg_temp.t(31) + interval '2 minutes' and s.offer = 'launch');
   perform pg_temp.ok('P1 bill paid, period frozen', exists (select 1 from billing.invoices where id = inv and status = 'paid'
     and subscription = s.id and period_end = s.period_end));
-  perform pg_temp.ok('P1 seated plants used their week', (select count(*) = 2 from billing.plants where id in (990010101, 990010102) and trial_used_by = a));
+  perform pg_temp.ok('P1 seated plants used their week', (select count(*) = 2 from billing.plant_facts where plant in (pg_temp.pid(990010101), pg_temp.pid(990010102)) and trial_used_by = a));
   r := pg_temp.answer(ref, 'ok', pg_temp.t(0) + interval '3 minutes');
   perform pg_temp.eq('P1 the same answer again: nothing new', r->>'action', 'again');
   perform pg_temp.ok('P1 one plan', (select count(*) = 1 from billing.subscriptions where account = a));
@@ -727,11 +753,11 @@ declare a uuid := pg_temp.acct('p2'); b uuid := pg_temp.acct('p2b'); c uuid := p
         i1 uuid; i2 uuid; i3 uuid; r1 text; r1b text; r2 text; r jsonb;
 begin
   perform pg_temp.link(a, 'p2', '{990010201,990010202}', pg_temp.t(0));
-  i1 := (billing.start_checkout(a, 'home', 'month', 0, '{990010201}', pg_temp.t(0))->>'invoice')::uuid;
+  i1 := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010201}'), pg_temp.t(0))->>'invoice')::uuid;
   r1 := billing.begin_attempt(i1, 'card_page', pg_temp.t(0))->>'reference';
   perform billing.attempt_page(r1, 'https://checkout.paystack.com/p2a');
   perform pg_temp.eq('P2 the same checkout again: the same bill',
-    billing.start_checkout(a, 'home', 'month', 0, '{990010201}', pg_temp.t(0))->>'invoice', i1::text);
+    billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010201}'), pg_temp.t(0))->>'invoice', i1::text);
   r := billing.begin_attempt(i1, 'card_page', pg_temp.t(0) + interval '5 minutes');
   perform pg_temp.eq('P2 page closed, tried again: the same page', r->>'url', 'https://checkout.paystack.com/p2a');
   perform pg_temp.eq('P2 ... and the same try', r->>'reference', r1);
@@ -744,7 +770,7 @@ begin
   perform pg_temp.ok('P2 abandoned: a new page', r1b is not null and r1b <> r1);
   -- another checkout while that page is open: no wait; the open page is replaced, never
   -- handed back, but stays pending until Paystack says it cannot pay (final fix 1)
-  i2 := (billing.start_checkout(a, 'family', 'month', 0, '{990010201,990010202}', pg_temp.t(0) + interval '63 minutes')->>'invoice')::uuid;
+  i2 := (billing.start_checkout(a, 'family', 'month', 0, pg_temp.pids('{990010201,990010202}'), pg_temp.t(0) + interval '63 minutes')->>'invoice')::uuid;
   perform pg_temp.ok('P2 a new checkout replaces the open bill', i2 <> i1 and (select status = 'void' from billing.invoices where id = i1));
   perform pg_temp.ok('P2 its open page replaced, still pending', (select status = 'pending' and replaced_at is not null
     from billing.payment_attempts where reference = r1b));
@@ -756,10 +782,10 @@ begin
   perform pg_temp.eq('P2 replaced bill: stale', r->>'reason', 'stale');
   -- the offer gone: a new bill at list price, not the old launch-price one
   perform pg_temp.link(c, 'p2c', '{990010211}', pg_temp.t(0));
-  i3 := (billing.start_checkout(c, 'home', 'month', 0, '{990010211}', pg_temp.t(0))->>'invoice')::uuid;
+  i3 := (billing.start_checkout(c, 'home', 'month', 0, pg_temp.pids('{990010211}'), pg_temp.t(0))->>'invoice')::uuid;
   update billing.offers set valid_until = pg_temp.t(0) - interval '1 day' where code = 'launch';
   perform pg_temp.ok('P2 offer gone: not the old launch-price bill',
-    (billing.start_checkout(c, 'home', 'month', 0, '{990010211}', pg_temp.t(0))->>'invoice')::uuid <> i3);
+    (billing.start_checkout(c, 'home', 'month', 0, pg_temp.pids('{990010211}'), pg_temp.t(0))->>'invoice')::uuid <> i3);
   update billing.offers set valid_until = null where code = 'launch';
   perform pg_temp.eq('P2 the paid choice stands', pg_temp.st(a, pg_temp.t(1), 'plan'), 'family');
   perform pg_temp.ok('P2 one plan', (select count(*) = 1 from billing.subscriptions where account = a));
@@ -767,7 +793,7 @@ begin
     where pa.reference = r1b and r.reason = 'stale' and r.status = 'due'));
   -- the same bill paid twice (a try let go, then paid late): the second is a duplicate
   perform pg_temp.link(b, 'p2b', '{990010203}', pg_temp.t(0));
-  i1 := (billing.start_checkout(b, 'home', 'month', 0, '{990010203}', pg_temp.t(0))->>'invoice')::uuid;
+  i1 := (billing.start_checkout(b, 'home', 'month', 0, pg_temp.pids('{990010203}'), pg_temp.t(0))->>'invoice')::uuid;
   r1 := billing.begin_attempt(i1, 'card_page', pg_temp.t(0))->>'reference';
   perform pg_temp.answer(r1, 'abandoned', pg_temp.t(0));
   r2 := billing.begin_attempt(i1, 'card_page', pg_temp.t(0))->>'reference';
@@ -781,19 +807,19 @@ do $$
 declare a uuid := pg_temp.acct('p3'); inv uuid; ref text; r jsonb;
 begin
   perform pg_temp.link(a, 'p3', '{990010301}', pg_temp.t(0));
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990010301}', pg_temp.t(0))->>'invoice')::uuid;
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010301}'), pg_temp.t(0))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(0))->>'reference';
-  perform billing.link_login(a, 'sunsynk', 'p3', null, '[{"id":990010301},{"id":990010302}]', pg_temp.t(0) + interval '5 minutes');
+  perform pg_temp.link_login(a, 'sunsynk', 'p3', null, '[{"id":990010301},{"id":990010302}]', pg_temp.t(0) + interval '5 minutes');
   r := pg_temp.answer(ref, 'ok', pg_temp.t(0) + interval '10 minutes');
   perform pg_temp.eq('P3 account changed after checkout: stale, refunded', r->>'reason', 'stale');
   perform pg_temp.eq('P3 nothing applied', pg_temp.st(a, pg_temp.t(1), 'state'), 'none');
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990010301}', pg_temp.t(1))->>'invoice')::uuid;
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010301}'), pg_temp.t(1))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(1))->>'reference';
   r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_main', 100), pg_temp.t(1));
   perform pg_temp.eq('P3 wrong amount: refunded', r->>'reason', 'wrong_amount');
   r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_main', null, 'NGN'), pg_temp.t(1));
   perform pg_temp.eq('P3 refunded try: a later answer changes nothing', r->>'action', 'again');
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990010301}', pg_temp.t(1))->>'invoice')::uuid;
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010301}'), pg_temp.t(1))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(1))->>'reference';
   r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_main', null, 'NGN'), pg_temp.t(1));
   perform pg_temp.eq('P3 wrong currency: refunded', r->>'reason', 'wrong_amount');
@@ -814,7 +840,7 @@ do $$
 declare a uuid := pg_temp.acct('p4'); ref text; ref2 text; r jsonb; s billing.subscriptions; pe timestamptz; inv uuid;
 begin
   perform pg_temp.link(a, 'p4', '{990010401}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010401}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010401}'), pg_temp.t(0));
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.eq('P4 before the date: nothing to charge', pg_temp.job(a, pe - interval '1 hour'), null);
   ref := pg_temp.job(a, pe + interval '1 hour');
@@ -845,7 +871,7 @@ do $$
 declare a uuid := pg_temp.acct('p5'); pe timestamptz; r jsonb; ref text;
 begin
   perform pg_temp.link(a, 'p5', '{990010501}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010501}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010501}'), pg_temp.t(0));
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.ok('P5 day 0 charged', pg_temp.job(a, pe, 'fail') is not null);
   r := billing.account_state(a, pe + interval '1 hour');
@@ -853,7 +879,7 @@ begin
   perform pg_temp.eqt('P5 past_due since the first try', r->>'past_due_since', pe);
   perform pg_temp.eqt('P5 next retry day 3', r->>'next_retry_at', pe + interval '3 days');
   perform pg_temp.eq('P5 amount due shown', r->>'amount_due_minor', '4900');
-  perform pg_temp.eq('P5 reading goes on', pg_temp.pp(a, pe + interval '1 hour', 990010501, 'read_now'), 'true');
+  perform pg_temp.eq('P5 reading goes on', pg_temp.pp(a, pe + interval '1 hour', pg_temp.pid(990010501), 'read_now'), 'true');
   perform pg_temp.eq('P5 day 1: no try', pg_temp.job(a, pe + interval '1 day', 'fail'), null);
   perform pg_temp.ok('P5 day 3: retry', pg_temp.job(a, pe + interval '3 days', 'fail') is not null);
   perform pg_temp.eq('P5 day 3 again: no second try', pg_temp.job(a, pe + interval '3 days 2 hours', 'fail'), null);
@@ -872,14 +898,14 @@ begin
   perform pg_temp.eq('P5 day 16: ended', r->>'state', 'ended');
   perform pg_temp.ok('P5 the job ended it at the end of day 15', (select status = 'ended' and ended_at = pg_temp.cut(pe) from billing.subscriptions where account = a));
   perform pg_temp.ok('P5 open bill voided', not exists (select 1 from billing.invoices where account = a and status = 'open'));
-  perform pg_temp.eq('P5 not read', pg_temp.pp(a, pg_temp.cut(pe), 990010501, 'read_now'), 'false');
+  perform pg_temp.eq('P5 not read', pg_temp.pp(a, pg_temp.cut(pe), pg_temp.pid(990010501), 'read_now'), 'false');
   ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
            where i.account = a and i.kind = 'renewal' and pa.status = 'failed' order by pa.created_at desc limit 1);
   perform pg_temp.eq('P5 a late success on the void bill: refunded', billing.apply_payment(ref, pg_temp.tx_ok(ref), pe + interval '16 days')->>'reason', 'stale');
   perform pg_temp.fails('P5 restart: launch price refused (database)',
     format('insert into billing.subscriptions (account, plan, currency, interval, amount_minor, offer, status, started_at, billing_day, period_start, period_end) values (%L, ''home'', ''ZAR'', ''month'', 4900, ''launch'', ''active'', %L, 1, %L, %L)',
            a, pe + interval '20 days', pe + interval '20 days', pe + interval '50 days'), 'first-time');
-  perform pg_temp.eq('P5 restart pays list price', billing.start_checkout(a, 'home', 'month', 0, '{990010501}', pe + interval '20 days')->>'amount_minor', '9900');
+  perform pg_temp.eq('P5 restart pays list price', billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990010501}'), pe + interval '20 days')->>'amount_minor', '9900');
 end $$;
 
 do $$
@@ -887,7 +913,7 @@ declare a uuid := pg_temp.acct('p5b'); pe timestamptz;
 begin
   update billing.markets set retry_days = '{0,2,5}' where code = 'ZA';
   perform pg_temp.link(a, 'p5b', '{990010551}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010551}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010551}'), pg_temp.t(0));
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.job(a, pe, 'fail');
   perform pg_temp.eqt('P5 retry days come from the market row', pg_temp.st(a, pe + interval '1 hour', 'next_retry_at'), pe + interval '2 days');
@@ -903,13 +929,13 @@ do $$
 declare a uuid := pg_temp.acct('p6'); b uuid := pg_temp.acct('p6b'); pe timestamptz; inv uuid; ref text; r jsonb;
 begin
   perform pg_temp.link(a, 'p6', '{990010601}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010601}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010601}'), pg_temp.t(0));
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.job(a, pe, 'fail');
   perform pg_temp.fails('P6 no switching while past_due',
-    format('select billing.set_chosen_plants(%L, ''{990010601}'', %L)', a, pe + interval '1 day'), 'past_due');
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990010601}''), %L)', a, pe + interval '1 day'), 'past_due');
   perform pg_temp.fails('P6 no upgrade while past_due',
-    format('select billing.upgrade(%L, ''family'', 0, ''{990010601}'', %L)', a, pe + interval '1 day'), 'failed payment first');
+    format('select billing.upgrade(%L, ''family'', 0, pg_temp.pids(''{990010601}''), %L)', a, pe + interval '1 day'), 'failed payment first');
   inv := (billing.pay_now(a, pe + interval '5 days')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'saved_card', pe + interval '5 days')->>'reference';
   r := pg_temp.answer(ref, 'ok', pe + interval '5 days');
@@ -922,7 +948,7 @@ begin
   perform pg_temp.eq('P6 next renewal day 3 does not retry the paid bill', pg_temp.job(a, pe + interval '6 days', 'fail'), null);
 
   perform pg_temp.link(b, 'p6b', '{990010602}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'month', '{990010602}', pg_temp.t(0), 'AUTH_b111');
+  perform pg_temp.buy(b, 'home', 'month', pg_temp.pids('{990010602}'), pg_temp.t(0), 'AUTH_b111');
   pe := (pg_temp.sub(b)).period_end;
   perform pg_temp.job(b, pe, 'hard');
   r := billing.account_state(b, pe + interval '1 hour');
@@ -945,7 +971,7 @@ do $$
 declare a uuid := pg_temp.acct('p7'); b uuid := pg_temp.acct('p7b'); c uuid := pg_temp.acct('p7c'); pe timestamptz; ref text; r jsonb; inv uuid;
 begin
   perform pg_temp.link(a, 'p7', '{990010701}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010701}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010701}'), pg_temp.t(0));
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.eq('P7 job down: still active on day 8', pg_temp.st(a, pe + interval '8 days', 'state'), 'active');
   perform pg_temp.ok('P7 first run on day 8: one try', pg_temp.job(a, pe + interval '8 days', 'fail') is not null);
@@ -960,7 +986,7 @@ begin
 
   -- unknown result: verify before any new try
   perform pg_temp.link(b, 'p7b', '{990010702}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'month', '{990010702}', pg_temp.t(0), 'AUTH_p7b');
+  perform pg_temp.buy(b, 'home', 'month', pg_temp.pids('{990010702}'), pg_temp.t(0), 'AUTH_p7b');
   pe := (pg_temp.sub(b)).period_end;
   ref := pg_temp.job(b, pe, 'unknown');
   perform pg_temp.ok('P7 no answer: unknown', (select status = 'unknown' from billing.payment_attempts where reference = ref));
@@ -984,7 +1010,7 @@ begin
 
   -- bank challenge: pending plus a pay link
   perform pg_temp.link(c, 'p7c', '{990010703}', pg_temp.t(0));
-  perform pg_temp.buy(c, 'home', 'month', '{990010703}', pg_temp.t(0), 'AUTH_p7c');
+  perform pg_temp.buy(c, 'home', 'month', pg_temp.pids('{990010703}'), pg_temp.t(0), 'AUTH_p7c');
   pe := (pg_temp.sub(c)).period_end;
   ref := pg_temp.job(c, pe, 'pending');
   r := billing.account_state(c, pe + interval '1 minute');
@@ -1008,7 +1034,7 @@ begin
   perform pg_temp.eqt('P8 yearly 29 Feb -> 28 Feb', billing.add_period('2028-02-29 10:00+02', 'year', 29, 'Africa/Johannesburg')::text, '2029-02-28 10:00+02');
   perform pg_temp.eqt('P8 local day, not UTC: 1 Mar 00:30 local', billing.add_period('2027-03-01 00:30+02', 'month', 1, 'Africa/Johannesburg')::text, '2027-04-01 00:30+02');
   perform pg_temp.link(a, 'p8', '{990010801}', (pg_temp.y() + 1 || '-01-31 10:00+02')::timestamptz);
-  perform pg_temp.buy(a, 'home', 'month', '{990010801}', (pg_temp.y() + 1 || '-01-31 10:00+02')::timestamptz, 'AUTH_p8');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010801}'), (pg_temp.y() + 1 || '-01-31 10:00+02')::timestamptz, 'AUTH_p8');
   s := pg_temp.sub(a);
   perform pg_temp.ok('P8 bought 31 Jan: billing day 31, due 28 Feb', s.billing_day = 31 and s.period_end = (pg_temp.y() + 1 || '-02-28 10:00+02')::timestamptz);
   perform pg_temp.job(a, (pg_temp.y() + 1 || '-02-28 10:05+02')::timestamptz, 'ok');
@@ -1025,11 +1051,11 @@ do $$
 declare a uuid := pg_temp.acct('p9'); r jsonb; inv uuid; ref text; s billing.subscriptions; pe timestamptz;
 begin
   perform pg_temp.link(a, 'p9', '{990010901,990010902,990010903,990010904}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010901,990010902}', pg_temp.t(0), 'AUTH_p9');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010901,990010902}'), pg_temp.t(0), 'AUTH_p9');
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.fails('P9 upgrade to the same places refused',
-    format('select billing.upgrade(%L, ''home'', 0, ''{990010901}'', %L)', a, pg_temp.t(10)), 'not more places');
-  r := billing.upgrade(a, 'family', 0, '{990010901,990010902,990010903,990010904}', pg_temp.t(10));
+    format('select billing.upgrade(%L, ''home'', 0, pg_temp.pids(''{990010901}''), %L)', a, pg_temp.t(10)), 'not more places');
+  r := billing.upgrade(a, 'family', 0, pg_temp.pids('{990010901,990010902,990010903,990010904}'), pg_temp.t(10));
   perform pg_temp.eq('P9 21 of 31 days of (9900 - 4900), rounded', r->>'amount_minor', '3387');
   perform pg_temp.eq('P9 not applied before paying', r->>'applied', 'false');
   perform pg_temp.eq('P9 still Home until paid', pg_temp.st(a, pg_temp.t(10), 'plan'), 'home');
@@ -1043,21 +1069,21 @@ begin
   perform pg_temp.ok('P9 billing day and date kept', s.billing_day = 1 and s.period_end = pe);
   perform pg_temp.eq('P9 the bound choice applied', pg_temp.st(a, pg_temp.t(10), 'chosen'), '4');
   -- stale: the account changes between the upgrade and the payment
-  r := billing.upgrade(a, 'family', 1, '{990010901,990010902,990010903,990010904}', pg_temp.t(20));
+  r := billing.upgrade(a, 'family', 1, pg_temp.pids('{990010901,990010902,990010903,990010904}'), pg_temp.t(20));
   perform pg_temp.eq('P9 11 days of an extra place', r->>'amount_minor', '1029');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'card_page', pg_temp.t(20))->>'reference';
-  perform billing.set_chosen_plants(a, '{990010901,990010902,990010903}', pg_temp.t(20));
+  perform billing.set_chosen_plants(a, pg_temp.pids('{990010901,990010902,990010903}'), pg_temp.t(20));
   perform pg_temp.eq('P9 stale upgrade refunded', pg_temp.answer(ref, 'ok', pg_temp.t(20))->>'reason', 'stale');
   perform pg_temp.eq('P9 stale upgrade: places unchanged', pg_temp.st(a, pg_temp.t(20), 'places'), '5');
   -- below Paystack's minimum: waived, applied at once
-  r := billing.upgrade(a, 'family', 1, '{990010901,990010902,990010903,990010904}', pg_temp.t(30));
+  r := billing.upgrade(a, 'family', 1, pg_temp.pids('{990010901,990010902,990010903,990010904}'), pg_temp.t(30));
   perform pg_temp.eq('P9 one day of an extra place (94 c): waived', r->>'status', 'waived');
   perform pg_temp.eq('P9 waived: applied', r->>'applied', 'true');
   perform pg_temp.eq('P9 waived: 6 places', pg_temp.st(a, pg_temp.t(30), 'places'), '6');
   -- a booked "fewer extra places", then an upgrade clears it
   perform billing.downgrade(a, 'family', 0, '{}', pg_temp.t(30));
   perform pg_temp.ok('P9 fewer places booked', (pg_temp.sub(a)).next_extra_places = 0);
-  r := billing.upgrade(a, 'family', 2, '{990010901,990010902,990010903,990010904}', pg_temp.t(30));
+  r := billing.upgrade(a, 'family', 2, pg_temp.pids('{990010901,990010902,990010903,990010904}'), pg_temp.t(30));
   perform pg_temp.ok('P9 upgrade clears the booked downgrade', (pg_temp.sub(a)).next_extra_places is null and (pg_temp.sub(a)).next_price is null);
 end $$;
 
@@ -1072,18 +1098,18 @@ declare a uuid := pg_temp.acct('p9b'); b uuid := pg_temp.acct('p9c'); q jsonb; r
 begin
   -- Home monthly (launch R49), 1 Dec; Family yearly (launch R990) on day 10: 21 of 31 days unused
   perform pg_temp.link(a, 'p9b', '{990010951,990010952,990010953}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990010951,990010952}', pg_temp.t(0), 'AUTH_p9b');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990010951,990010952}'), pg_temp.t(0), 'AUTH_p9b');
   q := billing.quote(a, 'family', 'year', pg_temp.t(10));
   perform pg_temp.eq('P9b quote: 99000 less 21/31 of 4900', q->>'due_minor', '95681');
   perform pg_temp.ok('P9b quote: yearly from today', q->>'interval' = 'year' and (q->>'starts_now')::boolean
     and (q->>'next_amount_minor')::int = 99000 and (q->>'next_at')::timestamptz = pg_temp.t(10) + interval '1 year');
-  r := billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10));
-  r2 := billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10), p_interval => 'year');
+  r := billing.upgrade(a, 'family', 0, pg_temp.pids('{990010951,990010952,990010953}'), pg_temp.t(10));
+  r2 := billing.upgrade(a, 'family', 0, pg_temp.pids('{990010951,990010952,990010953}'), pg_temp.t(10), p_interval => 'year');
   perform pg_temp.ok('P9b another interval: a new bill, the monthly one void', r2->>'invoice' <> r->>'invoice'
     and (select status from billing.invoices where id = (r->>'invoice')::uuid) = 'void');
   perform pg_temp.eq('P9b bill = quote', r2->>'amount_minor', q->>'due_minor');
   perform pg_temp.eq('P9b the same move again: the same bill',
-    billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10), p_interval => 'year')->>'invoice', r2->>'invoice');
+    billing.upgrade(a, 'family', 0, pg_temp.pids('{990010951,990010952,990010953}'), pg_temp.t(10), p_interval => 'year')->>'invoice', r2->>'invoice');
   perform pg_temp.eq('P9b still Home monthly until paid', pg_temp.st(a, pg_temp.t(10), 'interval'), 'month');
   ref := billing.begin_attempt((r2->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
   perform pg_temp.eq('P9b paid', pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9b')->>'action', 'applied');
@@ -1098,13 +1124,13 @@ begin
 
   -- Home yearly (R490), 1 Dec; Family on the Monthly view on day 100: 265 of 365 days left
   perform pg_temp.link(b, 'p9c', '{990010961,990010962,990010963}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'year', '{990010961,990010962}', pg_temp.t(0), 'AUTH_p9c');
+  perform pg_temp.buy(b, 'home', 'year', pg_temp.pids('{990010961,990010962}'), pg_temp.t(0), 'AUTH_p9c');
   pe := (pg_temp.sub(b)).period_end;
   q := billing.quote(b, 'family', 'month', pg_temp.t(100));
   perform pg_temp.eq('P9b yearly to monthly: 265/365 of (99000 - 49000) now', q->>'due_minor', '36301');
   perform pg_temp.ok('P9b yearly to monthly: R99 a month from the billing date', q->>'interval' = 'month'
     and not (q->>'starts_now')::boolean and (q->>'next_amount_minor')::int = 9900 and (q->>'next_at')::timestamptz = pe);
-  r := billing.upgrade(b, 'family', 0, '{990010961,990010962,990010963}', pg_temp.t(100), p_interval => 'month');
+  r := billing.upgrade(b, 'family', 0, pg_temp.pids('{990010961,990010962,990010963}'), pg_temp.t(100), p_interval => 'month');
   perform pg_temp.eq('P9b yearly to monthly: bill = quote', r->>'amount_minor', q->>'due_minor');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(100))->>'reference';
   perform pg_temp.eq('P9b yearly to monthly: paid', pg_temp.answer(ref, 'ok', pg_temp.t(100), 'AUTH_p9c')->>'action', 'applied');
@@ -1124,7 +1150,7 @@ begin
   perform pg_temp.eq('P9b no interval: the plan''s own', billing.quote(a, 'family', null, pg_temp.t(20))->>'kind', 'interval');
 
   perform pg_temp.fails('P9b a made-up interval refused',
-    format('select billing.upgrade(%L, ''family'', 0, ''{990010951}'', %L, p_interval => ''week'')', a, pg_temp.t(20)), 'monthly or yearly');
+    format('select billing.upgrade(%L, ''family'', 0, pg_temp.pids(''{990010951}''), %L, p_interval => ''week'')', a, pg_temp.t(20)), 'monthly or yearly');
   perform pg_temp.ok('P9b billing_v2 passes the interval to upgrade and downgrade',
     (select count(*) = 2 from regexp_matches(pg_get_functiondef('public.billing_v2(text, jsonb)'::regprocedure),
                                              'p_interval => p_args->>''interval''', 'g')));
@@ -1138,19 +1164,19 @@ do $$
 declare a uuid := pg_temp.acct('p10'); r jsonb; s billing.subscriptions; pe timestamptz;
 begin
   perform pg_temp.link(a, 'p10', '{990011001,990011002,990011003,990011004,990011005}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'family', 'month', '{990011001,990011002,990011003,990011004}', pg_temp.t(0), 'AUTH_p10');
+  perform pg_temp.buy(a, 'family', 'month', pg_temp.pids('{990011001,990011002,990011003,990011004}'), pg_temp.t(0), 'AUTH_p10');
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.fails('P10 downgrade without enough plants to drop',
-    format('select billing.downgrade(%L, ''home'', 0, ''{990011004}'', %L)', a, pg_temp.t(5)), 'pick 1 more');
+    format('select billing.downgrade(%L, ''home'', 0, pg_temp.pids(''{990011004}''), %L)', a, pg_temp.t(5)), 'pick 1 more');
   perform pg_temp.fails('P10 drop list must be chosen plants',
-    format('select billing.downgrade(%L, ''home'', 0, ''{990011005,990011004}'', %L)', a, pg_temp.t(5)), 'not chosen');
-  r := billing.downgrade(a, 'home', 0, '{990011003,990011004}', pg_temp.t(5));
+    format('select billing.downgrade(%L, ''home'', 0, pg_temp.pids(''{990011005,990011004}''), %L)', a, pg_temp.t(5)), 'not chosen');
+  r := billing.downgrade(a, 'home', 0, pg_temp.pids('{990011003,990011004}'), pg_temp.t(5));
   perform pg_temp.eq('P10 downgrade booked: next plan', r->>'next_plan', 'home');
   perform pg_temp.eq('P10 next amount: Home launch', r->>'next_amount_minor', '4900');
   perform pg_temp.eq('P10 still Family now', r->>'plan', 'family');
   perform pg_temp.fails('P10 a switch must still fit the next plan',
-    format('select billing.set_chosen_plants(%L, ''{990011001,990011002,990011003,990011005}'', %L)', a, pg_temp.t(6)), 'drop first');
-  r := pg_temp.choose(a, '{990011001,990011002,990011003}', pg_temp.t(6));
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990011001,990011002,990011003,990011005}''), %L)', a, pg_temp.t(6)), 'drop first');
+  r := pg_temp.choose(a, pg_temp.pids('{990011001,990011002,990011003}'), pg_temp.t(6));
   perform pg_temp.eq('P10 switching out a dropped plant is fine', r->>'chosen', '3');
   r := billing.switch_interval(a, 'year', pg_temp.t(7));
   perform pg_temp.eq('P10 yearly booked', r->>'next_interval', 'year');
@@ -1166,8 +1192,8 @@ begin
     and s.amount_minor = 49000 and s.offer = 'launch' and s.next_price is null and s.period_end = pe + interval '1 year');
   r := billing.account_state(a, pe);
   perform pg_temp.eq('P10 dropped plants gone', r->>'chosen', '2');
-  perform pg_temp.eq('P10 kept plant read', pg_temp.pp(a, pe, 990011001, 'read_now'), 'true');
-  perform pg_temp.eq('P10 dropped plant locked', pg_temp.pp(a, pe, 990011003, 'locked'), 'true');
+  perform pg_temp.eq('P10 kept plant read', pg_temp.pp(a, pe, pg_temp.pid(990011001), 'read_now'), 'true');
+  perform pg_temp.eq('P10 dropped plant locked', pg_temp.pp(a, pe, pg_temp.pid(990011003), 'locked'), 'true');
   -- undo a booking: back to the current plan
   perform billing.switch_interval(a, 'month', pe + interval '1 day');
   r := billing.switch_interval(a, 'year', pe + interval '1 day');
@@ -1182,29 +1208,29 @@ declare c uuid := pg_temp.acct('p9d'); d uuid := pg_temp.acct('p9e'); e uuid := 
 begin
   -- Home monthly, yearly booked, then Family on the Monthly view: stays monthly
   perform pg_temp.link(c, 'p9d', '{990010971,990010972,990010973}', pg_temp.t(0));
-  perform pg_temp.buy(c, 'home', 'month', '{990010971,990010972}', pg_temp.t(0), 'AUTH_p9d');
+  perform pg_temp.buy(c, 'home', 'month', pg_temp.pids('{990010971,990010972}'), pg_temp.t(0), 'AUTH_p9d');
   perform billing.switch_interval(c, 'year', pg_temp.t(5));
   perform pg_temp.ok('P9c quote: Family monthly from the billing date',
     (select q->>'interval' = 'month' and (q->>'next_amount_minor')::int = 9900 from billing.quote(c, 'family', 'month', pg_temp.t(10)) q));
-  r := billing.upgrade(c, 'family', 0, '{990010971,990010972,990010973}', pg_temp.t(10), p_interval => 'month');
+  r := billing.upgrade(c, 'family', 0, pg_temp.pids('{990010971,990010972,990010973}'), pg_temp.t(10), p_interval => 'month');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
   perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9d');
   perform pg_temp.ok('P9c the given monthly replaces the booked yearly', (pg_temp.sub(c)).plan = 'family'
     and (pg_temp.sub(c)).interval = 'month' and (pg_temp.sub(c)).next_price is null);
   -- the same with no interval given: the booked yearly carries over, as before 0279
   perform pg_temp.link(d, 'p9e', '{990010981,990010982,990010983}', pg_temp.t(0));
-  perform pg_temp.buy(d, 'home', 'month', '{990010981,990010982}', pg_temp.t(0), 'AUTH_p9e');
+  perform pg_temp.buy(d, 'home', 'month', pg_temp.pids('{990010981,990010982}'), pg_temp.t(0), 'AUTH_p9e');
   perform billing.switch_interval(d, 'year', pg_temp.t(5));
-  r := billing.upgrade(d, 'family', 0, '{990010981,990010982,990010983}', pg_temp.t(10));
+  r := billing.upgrade(d, 'family', 0, pg_temp.pids('{990010981,990010982,990010983}'), pg_temp.t(10));
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
   perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9e');
   perform pg_temp.ok('P9c no interval: the booked yearly carries to Family',
     (select interval = 'year' and plan = 'family' from billing.prices where id = (pg_temp.sub(d)).next_price));
   -- yearly to monthly left unpaid, tried again a day later: a new bill at the new sum
   perform pg_temp.link(e, 'p9f', '{990010991,990010992,990010993}', pg_temp.t(0));
-  perform pg_temp.buy(e, 'home', 'year', '{990010991,990010992}', pg_temp.t(0), 'AUTH_p9f');
-  r := billing.upgrade(e, 'family', 0, '{990010991,990010992,990010993}', pg_temp.t(100), p_interval => 'month');
-  r2 := billing.upgrade(e, 'family', 0, '{990010991,990010992,990010993}', pg_temp.t(101), p_interval => 'month');
+  perform pg_temp.buy(e, 'home', 'year', pg_temp.pids('{990010991,990010992}'), pg_temp.t(0), 'AUTH_p9f');
+  r := billing.upgrade(e, 'family', 0, pg_temp.pids('{990010991,990010992,990010993}'), pg_temp.t(100), p_interval => 'month');
+  r2 := billing.upgrade(e, 'family', 0, pg_temp.pids('{990010991,990010992,990010993}'), pg_temp.t(101), p_interval => 'month');
   perform pg_temp.ok('P9c a day later: a new, smaller bill; the old one void', r2->>'invoice' <> r->>'invoice'
     and (r2->>'amount_minor')::int < (r->>'amount_minor')::int
     and (r2->>'amount_minor')::int = (billing.quote(e, 'family', 'month', pg_temp.t(101))->>'due_minor')::int
@@ -1212,8 +1238,8 @@ begin
   -- monthly to yearly opened on day 10, its card page paid on day 11: the credit was day 10's,
   -- so it is refunded as stale and Home stays (review, Neon)
   perform pg_temp.link(f, 'p9g', '{990010941,990010942,990010943}', pg_temp.t(0));
-  perform pg_temp.buy(f, 'home', 'month', '{990010941,990010942}', pg_temp.t(0), 'AUTH_p9g');
-  r := billing.upgrade(f, 'family', 0, '{990010941,990010942,990010943}', pg_temp.t(10), p_interval => 'year');
+  perform pg_temp.buy(f, 'home', 'month', pg_temp.pids('{990010941,990010942}'), pg_temp.t(0), 'AUTH_p9g');
+  r := billing.upgrade(f, 'family', 0, pg_temp.pids('{990010941,990010942,990010943}'), pg_temp.t(10), p_interval => 'year');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'card_page', pg_temp.t(10))->>'reference';
   perform pg_temp.eq('P9c paid a day later: stale', pg_temp.answer(ref, 'ok', pg_temp.t(11))->>'reason', 'stale');
   perform pg_temp.ok('P9c ... Home monthly kept', (pg_temp.sub(f)).plan = 'home' and (pg_temp.sub(f)).interval = 'month');
@@ -1224,11 +1250,11 @@ do $$
 declare a uuid := pg_temp.acct('p10b'); r jsonb;
 begin
   perform pg_temp.link(a, 'p10b', '{990011051,990011052,990011053}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'family', 'month', '{990011051,990011052,990011053}', pg_temp.t(0), 'AUTH_p10b');
+  perform pg_temp.buy(a, 'family', 'month', pg_temp.pids('{990011051,990011052,990011053}'), pg_temp.t(0), 'AUTH_p10b');
   r := billing.quote(a, 'home', 'year', pg_temp.t(5));
   perform pg_temp.ok('P10b quote: Home yearly from the billing date, nothing now', r->>'kind' = 'downgrade'
     and r->>'interval' = 'year' and (r->>'next_amount_minor')::int = 49000 and (r->>'due_minor')::int = 0);
-  r := billing.downgrade(a, 'home', 0, '{990011053}', pg_temp.t(5), p_interval => 'year');
+  r := billing.downgrade(a, 'home', 0, pg_temp.pids('{990011053}'), pg_temp.t(5), p_interval => 'year');
   perform pg_temp.ok('P10b Home yearly booked', r->>'next_plan' = 'home' and r->>'next_interval' = 'year'
     and (r->>'next_amount_minor')::int = 49000 and r->>'plan' = 'family' and r->>'interval' = 'month');
   -- Billing's undo sends the running interval: plan and interval both undone (review, Sol, Fable)
@@ -1247,7 +1273,7 @@ do $$
 declare a uuid := pg_temp.acct('p11'); r jsonb; pe timestamptz;
 begin
   perform pg_temp.link(a, 'p11', '{990011101}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990011101}', pg_temp.t(0), 'AUTH_p11');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990011101}'), pg_temp.t(0), 'AUTH_p11');
   pe := (pg_temp.sub(a)).period_end;
   r := billing.cancel(a, pg_temp.t(3));
   perform pg_temp.eqt('P11 cancel booked', r->>'cancel_at', pe);
@@ -1261,7 +1287,7 @@ begin
   perform pg_temp.ok('P11 late job ends it on the cancel date', (select status = 'ended' and ended_at = pe from billing.subscriptions where account = a));
   perform pg_temp.fails('P11 undo after the end refused',
     format('select billing.undo_cancel(%L, %L)', a, pe + interval '4 days'), 'no cancel to undo');
-  r := billing.start_checkout(a, 'home', 'month', 0, '{990011101}', pe + interval '5 days');
+  r := billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990011101}'), pe + interval '5 days');
   perform pg_temp.eq('P11 restart pays list price', r->>'amount_minor', '9900');
   perform pg_temp.eq('P11 saved card offered', r->>'saved_card', 'true');
   perform pg_temp.eq('P11 restart on the saved card', pg_temp.answer(billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pe + interval '5 days')->>'reference',
@@ -1276,7 +1302,7 @@ do $$
 declare a uuid := pg_temp.acct('p12'); b uuid := pg_temp.acct('p12b'); pe timestamptz; buy_ref text; ren_ref text; r jsonb; rf uuid; inv uuid; ref text;
 begin
   perform pg_temp.link(a, 'p12', '{990011201}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990011201}', pg_temp.t(0), 'AUTH_p12');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990011201}'), pg_temp.t(0), 'AUTH_p12');
   buy_ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice where i.account = a and i.kind = 'purchase');
   pe := (pg_temp.sub(a)).period_end;
   ren_ref := pg_temp.job(a, pe, 'ok');
@@ -1291,7 +1317,7 @@ begin
   r := billing.account_state(a, pe + interval '4 days');
   perform pg_temp.eq('P12 ended', r->>'state', 'ended');
   perform pg_temp.eq('P12 card switched off', r->>'card', null);
-  perform pg_temp.eq('P12 reading stops', pg_temp.pp(a, pe + interval '4 days', 990011201, 'read_now'), 'false');
+  perform pg_temp.eq('P12 reading stops', pg_temp.pp(a, pe + interval '4 days', pg_temp.pid(990011201), 'read_now'), 'false');
   perform pg_temp.ok('P12 no retries after a lost dispute', pg_temp.job(a, pe + interval '7 days') is null);
   perform pg_temp.fails('P12 owed blocks delete', format('select billing.delete_account(%L, %L)', a, pe + interval '5 days'), 'money is owed');
 
@@ -1325,7 +1351,7 @@ do $$
 declare a uuid := pg_temp.acct('p13'); b uuid := pg_temp.acct('p13b'); c uuid := pg_temp.acct('p13c'); pe timestamptz; ref text; r jsonb; inv uuid;
 begin
   perform pg_temp.link(a, 'p13', '{990011301}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990011301}', pg_temp.t(0), 'AUTH_p13');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990011301}'), pg_temp.t(0), 'AUTH_p13');
   ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice where i.account = a);
   pe := (pg_temp.sub(a)).period_end;
   perform pg_temp.fails('P13 active: refused', format('select billing.delete_account(%L, %L)', a, pg_temp.t(1)), 'cancel it');
@@ -1337,15 +1363,15 @@ begin
   inv := (select invoice from billing.payment_attempts where reference = ref);
   r := billing.delete_account(a, pe + interval '4 days');
   perform pg_temp.eq('P13 ended, nothing owed: deleted', r->>'deleted', 'true');
-  perform pg_temp.eq('P13 its plant loses protection', r->>'unprotected', '[990011301]');
+  perform pg_temp.eq('P13 its plant loses protection', r->>'unprotected', ('[' || pg_temp.pid(990011301) || ']'));
   perform pg_temp.ok('P13 account gone', not exists (select 1 from billing.accounts where id = a));
   perform pg_temp.ok('P13 bill and try kept, account cleared', exists (select 1 from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id
     where i.id = inv and i.account is null and i.amount_minor = 4900 and pa.reference = ref));
   perform pg_temp.ok('P13 card kept, account cleared', exists (select 1 from billing.payment_methods where auth_ref = 'AUTH_p13' and account is null));
-  perform pg_temp.ok('P13 plant keeps its used week', (select trial_used_at is not null and trial_used_by is null from billing.plants where id = 990011301));
+  perform pg_temp.ok('P13 plant keeps its used week', (select trial_used_at is not null and trial_used_by is null from billing.plant_facts where plant = pg_temp.pid(990011301)));
   -- a payment for a deleted account refunds itself
   perform pg_temp.link(b, 'p13b', '{990011302}', pg_temp.t(0));
-  inv := (billing.start_checkout(b, 'home', 'month', 0, '{990011302}', pg_temp.t(0))->>'invoice')::uuid;
+  inv := (billing.start_checkout(b, 'home', 'month', 0, pg_temp.pids('{990011302}'), pg_temp.t(0))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(0))->>'reference';
   perform pg_temp.eq('P13 none: may delete', pg_temp.st(b, pg_temp.t(0), 'may_delete'), 'true');
   perform billing.delete_account(b, pg_temp.t(0) + interval '1 minute');
@@ -1354,7 +1380,7 @@ begin
   perform pg_temp.ok('P13 open bill voided on delete', (select status = 'void' from billing.invoices where id = inv));
   -- trialing may delete
   perform pg_temp.link(c, 'p13c', '{990011303}', pg_temp.t(0));
-  perform pg_temp.choose(c, '{990011303}', pg_temp.t(0));
+  perform pg_temp.choose(c, pg_temp.pids('{990011303}'), pg_temp.t(0));
   perform pg_temp.eq('P13 trialing: deleted', billing.delete_account(c, pg_temp.t(1))->>'deleted', 'true');
 end $$;
 
@@ -1365,8 +1391,8 @@ do $$
 declare a uuid := pg_temp.acct('p14'); r jsonb;
 begin
   perform pg_temp.link(a, 'p14', '{990011401,990011402}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990011401}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990011401,990011402}', pg_temp.t(2), 'AUTH_p14');
+  perform pg_temp.choose(a, pg_temp.pids('{990011401}'), pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990011401,990011402}'), pg_temp.t(2), 'AUTH_p14');
   r := billing.account_state(a, pg_temp.t(2));
   perform pg_temp.eq('P14 paid in the week: active', r->>'state', 'active');
   perform pg_temp.eqt('P14 week ends on payment', r->>'trial_ends_at', pg_temp.t(2));
@@ -1383,8 +1409,8 @@ begin
   insert into auth.users (id, email, created_at) values (u, 'door@state.test', now());
   r := public.billing_v2('account_state', jsonb_build_object('user', u));
   perform pg_temp.eq('P15 first call makes the account', r->>'state', 'none');
-  perform billing.link_login((select id from billing.accounts where user_id = u), 'sunsynk', 'door', null, '[{"id":990011501}]');
-  r := public.billing_v2('start_checkout', jsonb_build_object('user', u, 'plan', 'home', 'interval', 'month', 'plants', '[990011501]'::jsonb));
+  perform pg_temp.link_login((select id from billing.accounts where user_id = u), 'sunsynk', 'door', null, '[{"id":990011501}]');
+  r := public.billing_v2('start_checkout', jsonb_build_object('user', u, 'plan', 'home', 'interval', 'month', 'plants', ('[' || pg_temp.pid(990011501) || ']')::jsonb));
   ref := public.billing_v2('begin_attempt', jsonb_build_object('invoice', r->>'invoice', 'channel', 'card_page'))->>'reference';
   perform pg_temp.eq('P15 owner of a try', public.billing_v2('attempt_user', jsonb_build_object('reference', ref))->>'user', u::text);
   r := public.billing_v2('apply_payment', jsonb_build_object('reference', ref, 'tx', pg_temp.tx_ok(ref, 'AUTH_door')));
@@ -1405,7 +1431,7 @@ end $$;
 create function pg_temp.member(p_acc uuid, p_name text, p_plant bigint, p_plan text default 'home') returns timestamptz language plpgsql as $$
 begin
   perform pg_temp.link(p_acc, p_name, array[p_plant], pg_temp.t(0));
-  perform pg_temp.buy(p_acc, p_plan, 'month', array[p_plant], pg_temp.t(0), 'AUTH_' || p_name);
+  perform pg_temp.buy(p_acc, p_plan, 'month', array[pg_temp.pid(p_plant)], pg_temp.t(0), 'AUTH_' || p_name);
   return (pg_temp.sub(p_acc)).period_end;
 end $$;
 
@@ -1460,17 +1486,17 @@ do $$
 declare a uuid := pg_temp.acct('f2'); pe timestamptz; inv uuid; inv2 uuid; ref text;
 begin
   perform pg_temp.link(a, 'f2', '{990020201,990020202,990020203}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990020201}', pg_temp.t(0), 'AUTH_f2');
-  inv := (billing.upgrade(a, 'family', 0, '{990020201,990020202}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990020201}'), pg_temp.t(0), 'AUTH_f2');
+  inv := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990020201,990020202}'), pg_temp.t(5))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
-  inv2 := (billing.upgrade(a, 'family', 0, '{990020201,990020202,990020203}', pg_temp.t(5))->>'invoice')::uuid;
+  inv2 := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990020201,990020202,990020203}'), pg_temp.t(5))->>'invoice')::uuid;
   perform pg_temp.ok('F2 an open card page: the new upgrade replaces it', inv2 <> inv
     and (select status = 'void' from billing.invoices where id = inv)
     and (select status = 'pending' and replaced_at is not null from billing.payment_attempts where reference = ref));
   perform pg_temp.answer(ref, 'abandoned', pg_temp.t(5));                -- the replaced page verified: it cannot pay
   perform billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5));
   perform pg_temp.fails('F2 second upgrade while a charge may still take money',
-    format('select billing.upgrade(%L, ''family'', 0, ''{990020201,990020202}'', %L)', a, pg_temp.t(5)), 'already in progress');
+    format('select billing.upgrade(%L, ''family'', 0, pg_temp.pids(''{990020201,990020202}''), %L)', a, pg_temp.t(5)), 'already in progress');
   perform pg_temp.eq('F2 the charged bill stays open', (select status from billing.invoices where id = inv2), 'open');
 end $$;
 
@@ -1520,7 +1546,7 @@ do $$
 declare a uuid := pg_temp.acct('f5'); inv uuid; ref text;
 begin
   perform pg_temp.link(a, 'f5', '{990020501}', pg_temp.t(0));
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990020501}', pg_temp.t(0))->>'invoice')::uuid;
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990020501}'), pg_temp.t(0))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(0))->>'reference';
   perform pg_temp.fails('F5 success with no reference refused',
     format('select billing.apply_payment(%L, %L, %L)', ref, pg_temp.tx_ok(ref) - 'reference', pg_temp.t(0)), 'does not match');
@@ -1558,7 +1584,7 @@ begin
 
   pe := pg_temp.member(b, 'f7b', 990020702);
   perform billing.cancel(b, pg_temp.t(1));
-  inv := (billing.start_checkout(b, 'home', 'month', 0, '{990020702}', pe + interval '1 day')->>'invoice')::uuid;
+  inv := (billing.start_checkout(b, 'home', 'month', 0, pg_temp.pids('{990020702}'), pe + interval '1 day')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pe + interval '1 day')->>'reference';
   r := pg_temp.answer(ref, 'ok', pe + interval '1 day');
   perform pg_temp.eq('F7 restart before the job ended the old plan: applied', r->>'action', 'applied');
@@ -1570,9 +1596,9 @@ do $$
 declare a uuid := pg_temp.acct('f8'); pe timestamptz; inv uuid; ref text; r jsonb;
 begin
   perform pg_temp.link(a, 'f8', '{990020801,990020802}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990020801}', pg_temp.t(0), 'AUTH_f8');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990020801}'), pg_temp.t(0), 'AUTH_f8');
   pe := (pg_temp.sub(a)).period_end;
-  inv := (billing.upgrade(a, 'family', 0, '{990020801,990020802}', pe - interval '2 days')->>'invoice')::uuid;
+  inv := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990020801,990020802}'), pe - interval '2 days')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pe - interval '2 days')->>'reference';
   r := pg_temp.answer(ref, 'ok', pe + interval '1 hour');
   perform pg_temp.eq('F8 settled after the period: refunded', r->>'reason', 'stale');
@@ -1609,11 +1635,11 @@ begin
   perform pg_temp.link(a, 'f12a', '{990021201}', pg_temp.t(0));
   perform pg_temp.link(b, 'f12b', '{990021202}', pg_temp.t(0));
   perform pg_temp.eq('F12 first checkout: launch price',
-    billing.start_checkout(a, 'home', 'month', 0, '{990021201}', pg_temp.t(200))->>'amount_minor', '4900');
+    billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990021201}'), pg_temp.t(200))->>'amount_minor', '4900');
   perform pg_temp.eq('F12 second checkout: the place is held',
-    billing.start_checkout(b, 'home', 'month', 0, '{990021202}', pg_temp.t(200))->>'amount_minor', '9900');
+    billing.start_checkout(b, 'home', 'month', 0, pg_temp.pids('{990021202}'), pg_temp.t(200))->>'amount_minor', '9900');
   perform pg_temp.eq('F12 first checkout lapsed after an hour: place free again',
-    billing.start_checkout(b, 'home', 'month', 0, '{990021202}', pg_temp.t(200) + interval '2 hours')->>'amount_minor', '4900');
+    billing.start_checkout(b, 'home', 'month', 0, pg_temp.pids('{990021202}'), pg_temp.t(200) + interval '2 hours')->>'amount_minor', '4900');
   update billing.offers set max_members = 100 where code = 'launch';
 end $$;
 
@@ -1632,9 +1658,9 @@ begin
   perform pg_temp.pay(t, 'home', 'month', pg_temp.t(100), 'launch');
   -- day 300: F12's checkouts at day 200 still hold their hour there
   perform pg_temp.eq('F12b test account checkout: launch price',
-    billing.start_checkout(c, 'home', 'month', 0, '{990021212}', pg_temp.t(300))->>'amount_minor', '4900');
+    billing.start_checkout(c, 'home', 'month', 0, pg_temp.pids('{990021212}'), pg_temp.t(300))->>'amount_minor', '4900');
   perform pg_temp.eq('F12b last place still free after a test plan and a test checkout',
-    billing.start_checkout(a, 'home', 'month', 0, '{990021213}', pg_temp.t(300))->>'amount_minor', '4900');
+    billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990021213}'), pg_temp.t(300))->>'amount_minor', '4900');
   update billing.offers set max_members = 100 where code = 'launch';
 end $$;
 
@@ -1689,30 +1715,27 @@ end $$;
 -- Phase 3: reading, deleting and history fetches (0246). No network: the poller's
 -- and recover's writes are called directly with made-up rows; the clock moves.
 -- ===========================================================================
--- the stored inverter-cloud login behind a billing login (same id)
+-- the stored inverter-cloud login behind a billing login: since 0283 the same row
 create function pg_temp.stored(p_login uuid) returns uuid language sql as $$
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind)
-  select l.id, a.user_id, 'stored-' || l.id, 'active', 'login'
-    from billing.logins l join billing.accounts a on a.id = l.account where l.id = p_login
-  returning id
+  select id from plants.logins where id = p_login
 $$;
 create function pg_temp.share_login() returns uuid language plpgsql as $$
 declare s uuid; u uuid := gen_random_uuid();
 begin
-  select id into s from private.sunsynk_accounts where kind = 'share';
+  select id into s from plants.logins where kind = 'share';
   if s is null then
     insert into auth.users (id, email, created_at) values (u, 'share@state.test', now());
-    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (u, 'share', 'active', 'share')
+    insert into plants.logins (user_id, brand, username, status, kind) values (u, 'sunsynk', 'share', 'ok', 'share')
     returning id into s;
   end if;
-  update private.sunsynk_accounts set status = 'active' where id = s and status <> 'active';
+  update plants.logins set status = 'ok' where id = s and status <> 'ok';
   return s;
 end $$;
 create function pg_temp.lane_of(p_plant bigint, p_at timestamptz) returns text language sql as $$
   select coalesce((select account_id::text from public.poll_jobs_v2(0, 1, null, p_at) where plant_id = p_plant), '<not read>')
 $$;
 create function pg_temp.ver(p_plant bigint) returns bigint language sql as $$
-  select version from billing.plants where id = p_plant
+  select version from plants.plants where id = p_plant
 $$;
 -- stored history for a plant, as a guarded write would leave it (the clock here is not now())
 create function pg_temp.agg(p_plant bigint, p_at timestamptz, p_guarded boolean default true) returns void language sql as $$
@@ -1756,42 +1779,42 @@ declare a uuid := pg_temp.acct('r1'); l1 uuid; l2 uuid; sh uuid := pg_temp.share
 begin
   l1 := pg_temp.link(a, 'r1a', '{990030101,990030102}', pg_temp.t(0));
   perform pg_temp.stored(l1);
-  perform pg_temp.choose(a, '{990030101,990030102}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990030101,990030102}'), pg_temp.t(0));
   perform pg_temp.pay(a, 'family', 'month', pg_temp.t(0.5));
   l2 := pg_temp.link(a, 'r1b', '{990030102}', pg_temp.t(0.6));
   perform pg_temp.stored(l2);
-  insert into billing.plants (id, brand, external_id) values (990030103, 'sunsynk', '990030103');
-  insert into billing.plant_claims (plant, account, claimed_at) values (990030103, a, pg_temp.t(0.6));
-  perform pg_temp.choose(a, '{990030101,990030102,990030103}', pg_temp.t(0.7));
+  perform pg_temp.pid(990030103);
+  insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990030103), a, pg_temp.t(0.6));
+  perform pg_temp.choose(a, pg_temp.pids('{990030101,990030102,990030103}'), pg_temp.t(0.7));
 
-  select count(*) into n from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = 990030102;
+  select count(*) into n from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = pg_temp.pid(990030102);
   perform pg_temp.eq('R1 plant on two logins read once', n::text, '1');
-  perform pg_temp.eq('R1 through the earlier login', pg_temp.lane_of(990030102, pg_temp.t(1)), l1::text);
-  perform pg_temp.eq('R1 share claim read through the share login', pg_temp.lane_of(990030103, pg_temp.t(1)), sh::text);
-  perform pg_temp.ok('R1 job carries the plant version', (select plant_version = pg_temp.ver(990030101)
-    from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = 990030101));
-  select count(*) into n from public.poll_jobs_v2(0, 2, null, pg_temp.t(1)) where plant_id = 990030101;
-  select n + count(*) into n from public.poll_jobs_v2(1, 2, null, pg_temp.t(1)) where plant_id = 990030101;
+  perform pg_temp.eq('R1 through the earlier login', pg_temp.lane_of(pg_temp.pid(990030102), pg_temp.t(1)), l1::text);
+  perform pg_temp.eq('R1 share claim read through the share login', pg_temp.lane_of(pg_temp.pid(990030103), pg_temp.t(1)), sh::text);
+  perform pg_temp.ok('R1 job carries the plant version', (select plant_version = pg_temp.ver(pg_temp.pid(990030101))
+    from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = pg_temp.pid(990030101)));
+  select count(*) into n from public.poll_jobs_v2(0, 2, null, pg_temp.t(1)) where plant_id = pg_temp.pid(990030101);
+  select n + count(*) into n from public.poll_jobs_v2(1, 2, null, pg_temp.t(1)) where plant_id = pg_temp.pid(990030101);
   perform pg_temp.eq('R1 in exactly one shard', n::text, '1');
   perform pg_temp.eq('R1 one account only', (select count(*)::text from public.poll_jobs_v2(0, 1, l2, pg_temp.t(1))), '0');
 
   -- l1 breaks: the shared plant moves to l2, the other is not read, history kept
-  perform pg_temp.agg(990030101, pg_temp.t(1));
-  n := pg_temp.ver(990030101);
-  update private.sunsynk_accounts set status = 'needs_relink' where id = l1;
-  perform pg_temp.eq('R1 broken login copied to billing', (select status from billing.logins where id = l1), 'needs_reconnect');
-  perform pg_temp.ok('R1 its plants'' versions moved', pg_temp.ver(990030101) = n + 1);
-  perform pg_temp.eq('R1 shared plant now through the other login', pg_temp.lane_of(990030102, pg_temp.t(1)), l2::text);
-  perform pg_temp.eq('R1 broken login: not read', pg_temp.lane_of(990030101, pg_temp.t(1)), '<not read>');
-  perform pg_temp.eq('R1 broken login: protected', pg_temp.ps(990030101, pg_temp.t(1), 'protected'), 'true');
+  perform pg_temp.agg(pg_temp.pid(990030101), pg_temp.t(1));
+  n := pg_temp.ver(pg_temp.pid(990030101));
+  update plants.logins set status = 'needs_reconnect' where id = l1;
+  perform pg_temp.eq('R1 broken login is one row', (select status from plants.logins where id = l1), 'needs_reconnect');
+  perform pg_temp.ok('R1 its plants'' versions moved', pg_temp.ver(pg_temp.pid(990030101)) = n + 1);
+  perform pg_temp.eq('R1 shared plant now through the other login', pg_temp.lane_of(pg_temp.pid(990030102), pg_temp.t(1)), l2::text);
+  perform pg_temp.eq('R1 broken login: not read', pg_temp.lane_of(pg_temp.pid(990030101), pg_temp.t(1)), '<not read>');
+  perform pg_temp.eq('R1 broken login: protected', pg_temp.ps(pg_temp.pid(990030101), pg_temp.t(1), 'protected'), 'true');
   perform billing.delete_due(pg_temp.t(1));
-  perform pg_temp.ok('R1 broken login: history kept by the delete job', pg_temp.has_agg(990030101));
+  perform pg_temp.ok('R1 broken login: history kept by the delete job', pg_temp.has_agg(pg_temp.pid(990030101)));
   perform pg_temp.ok('R1 status change logged', exists (select 1 from billing.account_events where account = a and kind = 'login_status'));
-  update private.sunsynk_accounts set status = 'active' where id = l1;
-  perform pg_temp.eq('R1 fixed: read again', pg_temp.lane_of(990030101, pg_temp.t(1)), l1::text);
-  update private.sunsynk_accounts set status = 'disabled' where id = l1;
-  perform pg_temp.eq('R1 disabled is not a broken login', (select status from billing.logins where id = l1), 'ok');
-  update private.sunsynk_accounts set status = 'active' where id = l1;
+  update plants.logins set status = 'ok' where id = l1;
+  perform pg_temp.eq('R1 fixed: read again', pg_temp.lane_of(pg_temp.pid(990030101), pg_temp.t(1)), l1::text);
+  update plants.logins set status = 'disabled' where id = l1;
+  perform pg_temp.eq('R1 disabled is not a broken login', (select status from plants.logins where id = l1), 'disabled');
+  update plants.logins set status = 'ok' where id = l1;
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1802,26 +1825,26 @@ declare b uuid := pg_temp.acct('r2'); l uuid; v bigint; r jsonb;
 begin
   l := pg_temp.link(b, 'r2', '{990030201,990030202}', pg_temp.t(0));
   perform pg_temp.stored(l);
-  perform pg_temp.choose(b, '{990030201}', pg_temp.t(0));
-  v := pg_temp.ver(990030201);
-  perform pg_temp.eq('R2 first plant queued for history', (pg_temp.fetch_row(b, 990030201)).status, 'queued');
-  perform pg_temp.choose(b, '{990030202}', pg_temp.t(0.5));      -- switched while the minute was read
-  r := public.poll_commit_v2(jsonb_build_object('990030201', v), l, extract(epoch from pg_temp.t(0.5))::bigint,
-         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', 990030201, 'pv_w', 5)), '[]', '[]', null, null, pg_temp.t(0.5));
-  perform pg_temp.eq('R2 poll write refused', r->>'refused', '[990030201]');
-  perform pg_temp.ok('R2 nothing written', not pg_temp.has_agg(990030201));
+  perform pg_temp.choose(b, pg_temp.pids('{990030201}'), pg_temp.t(0));
+  v := pg_temp.ver(pg_temp.pid(990030201));
+  perform pg_temp.eq('R2 first plant queued for history', (pg_temp.fetch_row(b, pg_temp.pid(990030201))).status, 'queued');
+  perform pg_temp.choose(b, pg_temp.pids('{990030202}'), pg_temp.t(0.5));      -- switched while the minute was read
+  r := public.poll_commit_v2(jsonb_build_object(pg_temp.pid(990030201)::text, v), l, extract(epoch from pg_temp.t(0.5))::bigint,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', pg_temp.pid(990030201), 'pv_w', 5)), '[]', '[]', null, null, pg_temp.t(0.5));
+  perform pg_temp.eq('R2 poll write refused', r->>'refused', ('[' || pg_temp.pid(990030201) || ']'));
+  perform pg_temp.ok('R2 nothing written', not pg_temp.has_agg(pg_temp.pid(990030201)));
   perform pg_temp.fails('R2 recover write refused',
-    format('select public.q_insert_recovered_v2(990030201, %s, %L, %L, %L)', v,
+    format('select public.q_insert_recovered_v2(pg_temp.pid(990030201), %s, %L, %L, %L)', v,
            jsonb_build_array(jsonb_build_object('ts', extract(epoch from pg_temp.t(-3))::bigint, 'pv_w', 1)), 'invhistory', pg_temp.t(0.5)),
     'is not read now');
   perform pg_temp.fails('R2 a write with no version is refused',
-    format('select public.q_insert_inverter_history_v2(990030202, null, %L, %L, %L)', 'SN1', '[]', pg_temp.t(0.5)), 'is not read now');
-  perform pg_temp.eq('R2 switched-out request dropped', (pg_temp.fetch_row(b, 990030201)).drop_reason, 'switched_out');
-  perform pg_temp.eq('R2 new plant queued', (pg_temp.fetch_row(b, 990030202)).status, 'queued');
-  r := public.poll_commit_v2(jsonb_build_object('990030202', pg_temp.ver(990030202)), l, extract(epoch from pg_temp.t(0.6))::bigint,
-         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', 990030202, 'pv_w', 5)), '[]', '[]', 'tok', 1, pg_temp.t(0.6));
-  perform pg_temp.ok('R2 the plant read now is written', r->'refused' = '[]'::jsonb and pg_temp.has_agg(990030202));
-  perform pg_temp.eq('R2 token saved', (select access_token from private.sunsynk_accounts where id = l), 'tok');
+    format('select public.q_insert_inverter_history_v2(pg_temp.pid(990030202), null, %L, %L, %L)', 'SN1', '[]', pg_temp.t(0.5)), 'is not read now');
+  perform pg_temp.eq('R2 switched-out request dropped', (pg_temp.fetch_row(b, pg_temp.pid(990030201))).drop_reason, 'switched_out');
+  perform pg_temp.eq('R2 new plant queued', (pg_temp.fetch_row(b, pg_temp.pid(990030202))).status, 'queued');
+  r := public.poll_commit_v2(jsonb_build_object(pg_temp.pid(990030202)::text, pg_temp.ver(pg_temp.pid(990030202))), l, extract(epoch from pg_temp.t(0.6))::bigint,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', pg_temp.pid(990030202), 'pv_w', 5)), '[]', '[]', 'tok', 1, pg_temp.t(0.6));
+  perform pg_temp.ok('R2 the plant read now is written', r->'refused' = '[]'::jsonb and pg_temp.has_agg(pg_temp.pid(990030202)));
+  perform pg_temp.eq('R2 token saved', (select access_token from plants.logins where id = l), 'tok');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1833,30 +1856,30 @@ declare c uuid := pg_temp.acct('r3'); l uuid; inv uuid; ref text; r jsonb; v big
 begin
   l := pg_temp.link(c, 'r3', '{990030301}', pg_temp.t(0));
   perform pg_temp.stored(l);
-  perform pg_temp.choose(c, '{990030301}', pg_temp.t(0));
-  perform pg_temp.agg(990030301, pg_temp.t(1));
-  perform pg_temp.eqt('R3 week over unpaid: deleted 30 days after', pg_temp.ps(990030301, pg_temp.t(8), 'delete_at'), pg_temp.t(37));
+  perform pg_temp.choose(c, pg_temp.pids('{990030301}'), pg_temp.t(0));
+  perform pg_temp.agg(pg_temp.pid(990030301), pg_temp.t(1));
+  perform pg_temp.eqt('R3 week over unpaid: deleted 30 days after', pg_temp.ps(pg_temp.pid(990030301), pg_temp.t(8), 'delete_at'), pg_temp.t(37));
   r := billing.delete_due(pg_temp.t(36));
-  perform pg_temp.ok('R3 not before its date', pg_temp.has_agg(990030301));
+  perform pg_temp.ok('R3 not before its date', pg_temp.has_agg(pg_temp.pid(990030301)));
 
-  inv := (billing.start_checkout(c, 'home', 'month', 0, '{990030301}', pg_temp.t(37.5))->>'invoice')::uuid;
+  inv := (billing.start_checkout(c, 'home', 'month', 0, pg_temp.pids('{990030301}'), pg_temp.t(37.5))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(37.5))->>'reference';
   r := billing.delete_due(pg_temp.t(38));
-  perform pg_temp.eq('R3 held while a payment is pending', r->>'held', '[990030301]');
-  perform pg_temp.ok('R3 history still there', pg_temp.has_agg(990030301));
-  perform pg_temp.ok('R3 held plant is not an alert', not pg_temp.alert('history_unprotected', '990030301', pg_temp.t(38)));
+  perform pg_temp.eq('R3 held while a payment is pending', r->>'held', ('[' || pg_temp.pid(990030301) || ']'));
+  perform pg_temp.ok('R3 history still there', pg_temp.has_agg(pg_temp.pid(990030301)));
+  perform pg_temp.ok('R3 held plant is not an alert', not pg_temp.alert('history_unprotected', pg_temp.pid(990030301)::text, pg_temp.t(38)));
   perform pg_temp.ok('R3 try pending over an hour: alert', pg_temp.alert('attempt_pending', ref, pg_temp.t(38)));
-  perform pg_temp.ok('R3 history past its date, no hold: alert', pg_temp.alert('history_unprotected', '990030301', pg_temp.t(39)));
-  v := pg_temp.ver(990030301);
+  perform pg_temp.ok('R3 history past its date, no hold: alert', pg_temp.alert('history_unprotected', pg_temp.pid(990030301)::text, pg_temp.t(39)));
+  v := pg_temp.ver(pg_temp.pid(990030301));
   r := billing.delete_due(pg_temp.t(39));
-  perform pg_temp.eq('R3 deleted once the hold is over 24 hours', r->>'deleted', '[990030301]');
-  perform pg_temp.ok('R3 readings gone', not pg_temp.has_agg(990030301));
-  perform pg_temp.eqt('R3 purge recorded', (select history_purged_at::text from billing.plants where id = 990030301), pg_temp.t(39));
-  perform pg_temp.ok('R3 version moved', pg_temp.ver(990030301) = v + 1);
-  perform pg_temp.eq('R3 purged: no kept-until', pg_temp.ps(990030301, pg_temp.t(39), 'delete_at'), null);
-  perform pg_temp.ok('R3 no alert after the delete', not pg_temp.alert('history_unprotected', '990030301', pg_temp.t(39)));
+  perform pg_temp.eq('R3 deleted once the hold is over 24 hours', r->>'deleted', ('[' || pg_temp.pid(990030301) || ']'));
+  perform pg_temp.ok('R3 readings gone', not pg_temp.has_agg(pg_temp.pid(990030301)));
+  perform pg_temp.eqt('R3 purge recorded', (pg_temp.purged(pg_temp.pid(990030301))::text), pg_temp.t(39));
+  perform pg_temp.ok('R3 version moved', pg_temp.ver(pg_temp.pid(990030301)) = v + 1);
+  perform pg_temp.eq('R3 purged: no kept-until', pg_temp.ps(pg_temp.pid(990030301), pg_temp.t(39), 'delete_at'), null);
+  perform pg_temp.ok('R3 no alert after the delete', not pg_temp.alert('history_unprotected', pg_temp.pid(990030301)::text, pg_temp.t(39)));
   r := billing.delete_due(pg_temp.t(40));
-  perform pg_temp.ok('R3 a purged plant is skipped', not (r->'deleted') @> '[990030301]');
+  perform pg_temp.ok('R3 a purged plant is skipped', not (r->'deleted') @> ('[' || pg_temp.pid(990030301) || ']')::jsonb);
   perform pg_temp.ok('R3 heartbeat written', (select last_run_at from billing.job_heartbeats where job = 'delete') = pg_temp.t(40));
 
   -- the late payment lands: the plan restarts, the kept plant is fetched again
@@ -1869,7 +1892,7 @@ begin
   r := pg_temp.answer(ref, 'ok', pg_temp.t(40));
   perform pg_temp.eq('R3 payment applied', r->>'action', 'applied');
   perform pg_temp.ok('R3 restart: history asked for again', (select status = 'queued' and requested_at = pg_temp.t(40)
-    from billing.history_fetches where account = c and plant = 990030301 order by id desc limit 1));
+    from billing.history_fetches where account = c and plant = pg_temp.pid(990030301) order by id desc limit 1));
   perform pg_temp.ok('R3 win-back return found', (billing.winback_return(ref)->>'user')::uuid = uid
     and (billing.winback_return(ref)->>'days')::int = 3);
   r := public.billing_jobs('winback', jsonb_build_object('reference', ref));
@@ -1877,13 +1900,13 @@ begin
   perform pg_temp.ok('R3 the old public.winback_return reads the new tables', (select w.user_id = uid and w.days = 3
     from public.winback_return(ref) w));
 
-  perform public.q_insert_recovered_v2(990030301, pg_temp.ver(990030301),
+  perform public.q_insert_recovered_v2(pg_temp.pid(990030301), pg_temp.ver(pg_temp.pid(990030301)),
     jsonb_build_array(jsonb_build_object('ts', extract(epoch from date_trunc('minute', pg_temp.t(39.5)))::bigint, 'pv_w', 7)),
     'invhistory', pg_temp.t(40));
-  perform pg_temp.ok('R3 new readings written', pg_temp.has_agg(990030301));
-  perform pg_temp.eq('R3 the restart cleared the purge (phase 3 fix 20: not the readings)', (select history_purged_at::text from billing.plants where id = 990030301), null);
+  perform pg_temp.ok('R3 new readings written', pg_temp.has_agg(pg_temp.pid(990030301)));
+  perform pg_temp.eq('R3 the restart cleared the purge (phase 3 fix 20: not the readings)', (pg_temp.purged(pg_temp.pid(990030301))::text), null);
   perform pg_temp.eq('R3 a whole past day is missing for the history queue',
-    (select count(*)::text from public.q_missing_minutes_day(990030301, (now() at time zone 'Africa/Johannesburg')::date - 3)), '1440');
+    (select count(*)::text from public.q_missing_minutes_day(pg_temp.pid(990030301), (now() at time zone 'Africa/Johannesburg')::date - 3)), '1440');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1897,8 +1920,8 @@ begin
   perform pg_temp.stored(l);
   perform pg_temp.pay(d, 'home', 'month', pg_temp.t(0));
   for i in 1..7 loop
-    perform pg_temp.choose(d, array[990030400 + i]::bigint[], pg_temp.t(i * 0.1));
-    got := got || (pg_temp.fetch_row(d, 990030400 + i)).target_s || ' ';
+    perform pg_temp.choose(d, array[pg_temp.pid(990030400 + i)]::bigint[], pg_temp.t(i * 0.1));
+    got := got || (pg_temp.fetch_row(d, pg_temp.pid(990030400 + i))).target_s || ' ';
   end loop;
   -- the first choice after the login was linked is not a switch: not counted
   perform pg_temp.eq('R4 targets for choices 1-7', got, '0 0 0 0 1200 2400 4800 ');
@@ -1909,15 +1932,15 @@ begin
   perform pg_temp.ok('R4 seven switches in a week: alert', pg_temp.alert('many_switches', d::text, pg_temp.t(1)));
   perform pg_temp.ok('R4 not after the week', not pg_temp.alert('many_switches', d::text, pg_temp.t(8)));
   -- 7 days after the 4th (t 0.4): fetches at 0.5, 0.6, 0.7 still count, so this is the 4th
-  perform pg_temp.choose(d, '{990030408}', pg_temp.t(7.4));
-  perform pg_temp.eq('R4 older fetches dropped out of the count', (pg_temp.fetch_row(d, 990030408)).fetch_no::text, '4');
-  perform pg_temp.eq('R4 so it is 20 minutes again', (pg_temp.fetch_row(d, 990030408)).target_s::text, '1200');
+  perform pg_temp.choose(d, pg_temp.pids('{990030408}'), pg_temp.t(7.4));
+  perform pg_temp.eq('R4 older fetches dropped out of the count', (pg_temp.fetch_row(d, pg_temp.pid(990030408))).fetch_no::text, '4');
+  perform pg_temp.eq('R4 so it is 20 minutes again', (pg_temp.fetch_row(d, pg_temp.pid(990030408))).target_s::text, '1200');
   -- the 1200 s fetch starts at once and spreads over its 60 days: 20 s a day
   w := billing.history_take(pg_temp.t(7.4));
-  f := pg_temp.fetch_row(d, 990030408);
+  f := pg_temp.fetch_row(d, pg_temp.pid(990030408));
   perform pg_temp.ok('R4 started at once', f.status = 'running' and f.started_at = pg_temp.t(7.4) and f.days_total = 60);
   perform pg_temp.ok('R4 handed out with its login and version', exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'id')::bigint = f.id and x->'login'->>'id' = l::text and (x->>'version')::bigint = pg_temp.ver(990030408)));
+    where (x->>'id')::bigint = f.id and x->'login'->>'id' = l::text and (x->>'version')::bigint = pg_temp.ver(pg_temp.pid(990030408))));
   s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds', f.claim);
   -- 60 starts on 59 gaps: 1200 s / 59 after the start (phase 3 fix 17)
   perform pg_temp.eqt('R4 next day waits a 59th of the target', s->>'next_step_at', pg_temp.t(7.4) + make_interval(secs => 1200.0 / 59));
@@ -1933,7 +1956,7 @@ begin
     (s->>'next_step_at')::timestamptz >= f.started_at + make_interval(secs => f.target_s));
   -- the cap: eleven fetches in a day
   for i in 1..11 loop
-    perform pg_temp.choose(d, array[990030401 + (i % 2)]::bigint[], pg_temp.t(20 + i * 0.01));
+    perform pg_temp.choose(d, array[pg_temp.pid(990030401 + (i % 2))]::bigint[], pg_temp.t(20 + i * 0.01));
   end loop;
   perform pg_temp.eq('R4 capped at 24 h', (select target_s::text from billing.history_fetches where account = d
     order by id desc limit 1), '86400');
@@ -1949,51 +1972,50 @@ declare e1 uuid := pg_temp.acct('r5a'); e2 uuid := pg_temp.acct('r5b'); sh uuid 
 begin
   -- R1's claim fetch holds the share login since R4's take: finish it
   update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0) where lane = sh and status = 'running';
-  insert into billing.plants (id, brand, external_id) values (990030501, 'sunsynk', '990030501'),
-    (990030502, 'sunsynk', '990030502'), (990030503, 'sunsynk', '990030503');
-  insert into billing.plant_claims (plant, account, claimed_at) values (990030501, e1, pg_temp.t(0)),
-    (990030502, e1, pg_temp.t(0)), (990030503, e2, pg_temp.t(0));
-  perform pg_temp.choose(e1, '{990030501,990030502}', pg_temp.t(0));
-  perform pg_temp.choose(e2, '{990030503}', pg_temp.t(0.001));
+  perform pg_temp.pid(990030501); perform pg_temp.pid(990030502); perform pg_temp.pid(990030503);
+  insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990030501), e1, pg_temp.t(0)),
+    (pg_temp.pid(990030502), e1, pg_temp.t(0)), (pg_temp.pid(990030503), e2, pg_temp.t(0));
+  perform pg_temp.choose(e1, pg_temp.pids('{990030501,990030502}'), pg_temp.t(0));
+  perform pg_temp.choose(e2, pg_temp.pids('{990030503}'), pg_temp.t(0.001));
   w := billing.history_take(pg_temp.t(0.01));
   select count(*) into n from billing.history_fetches where lane = sh and status = 'running';
   perform pg_temp.eq('R5 one fetch at a time on the share login', n::text, '1');
-  perform pg_temp.eq('R5 first asked, first started', (pg_temp.fetch_row(e1, 990030501)).status, 'running');
-  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0.02) where account = e1 and plant = 990030501;
+  perform pg_temp.eq('R5 first asked, first started', (pg_temp.fetch_row(e1, pg_temp.pid(990030501))).status, 'running');
+  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0.02) where account = e1 and plant = pg_temp.pid(990030501);
   w := billing.history_take(pg_temp.t(0.02));
-  perform pg_temp.eq('R5 the other account takes its turn', (pg_temp.fetch_row(e2, 990030503)).status, 'running');
-  perform pg_temp.eq('R5 the first account waits', (pg_temp.fetch_row(e1, 990030502)).status, 'queued');
+  perform pg_temp.eq('R5 the other account takes its turn', (pg_temp.fetch_row(e2, pg_temp.pid(990030503))).status, 'running');
+  perform pg_temp.eq('R5 the first account waits', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).status, 'queued');
 
-  f := pg_temp.fetch_row(e2, 990030503);
+  f := pg_temp.fetch_row(e2, pg_temp.pid(990030503));
   s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03), f.claim);
   perform pg_temp.eq('R5 429: backed off a minute', s->>'backoff_s', '60');
   w := billing.history_take(pg_temp.t(0.03) + interval '30 seconds');
   perform pg_temp.ok('R5 nothing handed out on a backed-off login', not exists (select 1 from jsonb_array_elements(w) x
     where (x->>'id')::bigint = f.id));
   w := billing.history_take(pg_temp.t(0.03) + interval '61 seconds');
-  f := pg_temp.fetch_row(e2, 990030503);
+  f := pg_temp.fetch_row(e2, pg_temp.pid(990030503));
   s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03) + interval '62 seconds', f.claim);
   perform pg_temp.eq('R5 429 again: twice as long', s->>'backoff_s', '120');
   -- the walk ends at its floor
   update billing.history_fetches set day_next = day_floor, claimed_until = null, claim = gen_random_uuid() where id = f.id
   returning * into f;
   s := billing.history_step(f.id, f.day_floor, false, false, pg_temp.t(0.1), f.claim);
-  perform pg_temp.eq('R5 last day walked: done', (pg_temp.fetch_row(e2, 990030503)).status, 'done');
+  perform pg_temp.eq('R5 last day walked: done', (pg_temp.fetch_row(e2, pg_temp.pid(990030503))).status, 'done');
   perform pg_temp.ok('R5 a good answer clears the back-off', (select backoff_s = 0 from billing.history_lanes where lane = sh));
   w := billing.history_take(pg_temp.t(0.11));
-  perform pg_temp.eq('R5 then the first account again', (pg_temp.fetch_row(e1, 990030502)).status, 'running');
+  perform pg_temp.eq('R5 then the first account again', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).status, 'running');
   -- switched out while running: dropped at the next step
-  perform pg_temp.choose(e1, '{990030501}', pg_temp.t(0.12));
-  perform pg_temp.eq('R5 switched out: dropped', (pg_temp.fetch_row(e1, 990030502)).drop_reason, 'switched_out');
+  perform pg_temp.choose(e1, pg_temp.pids('{990030501}'), pg_temp.t(0.12));
+  perform pg_temp.eq('R5 switched out: dropped', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).drop_reason, 'switched_out');
   -- the share login breaks while a fetch runs: it waits, it is not dropped
-  perform pg_temp.choose(e1, '{990030501,990030502}', pg_temp.t(0.125));
-  update private.sunsynk_accounts set status = 'needs_relink' where id = sh;
+  perform pg_temp.choose(e1, pg_temp.pids('{990030501,990030502}'), pg_temp.t(0.125));
+  update plants.logins set status = 'needs_reconnect' where id = sh;
   w := billing.history_take(pg_temp.t(0.13));
-  f := pg_temp.fetch_row(e1, 990030502);
+  f := pg_temp.fetch_row(e1, pg_temp.pid(990030502));
   perform pg_temp.eq('R5 share login down: the new request waits', f.status, 'queued');
   perform pg_temp.ok('R5 nothing handed out without a working login', not exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'plant')::bigint = 990030502));
-  update private.sunsynk_accounts set status = 'active' where id = sh;
+    where (x->>'plant')::bigint = pg_temp.pid(990030502)));
+  update plants.logins set status = 'ok' where id = sh;
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2003,17 +2025,17 @@ do $$
 declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint; w int; w0 int; u uuid;
 begin
   l := pg_temp.link(g, 'r6', '{990030601,990030602}', pg_temp.t(0));
-  perform pg_temp.choose(g, '{990030601,990030602}', pg_temp.t(0));
-  r := billing.login_seen(l, '[{"id":990030601},{"id":990030603,"name":"New"}]', pg_temp.t(0.5));
-  perform pg_temp.eq('R6 new plant on the login added', r->>'new', '[990030603]');
+  perform pg_temp.choose(g, pg_temp.pids('{990030601,990030602}'), pg_temp.t(0));
+  r := plants.list_seen(l, '[{"id":990030601},{"id":990030603,"name":"New"}]', pg_temp.t(0.5));
+  perform pg_temp.eq('R6 new plant on the login added', r->>'new', ('[' || pg_temp.pid(990030603) || ']'));
   perform pg_temp.eq('R6 missing once: not gone yet', r->>'gone', '[]');
-  v := pg_temp.ver(990030602);
-  r := billing.login_seen(l, '[{"id":990030601},{"id":990030603}]', pg_temp.t(0.5) + interval '1 hour');
-  perform pg_temp.eq('R6 missing twice an hour apart: gone', r->>'gone', '[990030602]');
-  perform pg_temp.ok('R6 gone plant''s version moved', pg_temp.ver(990030602) = v + 1);
-  perform pg_temp.eq('R6 gone plant not read', pg_temp.pp(g, pg_temp.t(1), 990030602, 'read_now'), 'false');
-  perform pg_temp.eq('R6 new plant waits to be chosen', pg_temp.pp(g, pg_temp.t(1), 990030603, 'chosen'), 'false');
-  perform pg_temp.eq('R6 unknown login: nothing', billing.login_seen(gen_random_uuid(), '[]', pg_temp.t(1))::text, null);
+  v := pg_temp.ver(pg_temp.pid(990030602));
+  r := plants.list_seen(l, '[{"id":990030601},{"id":990030603}]', pg_temp.t(0.5) + interval '1 hour');
+  perform pg_temp.eq('R6 missing twice an hour apart: gone', r->>'gone', ('[' || pg_temp.pid(990030602) || ']'));
+  perform pg_temp.ok('R6 gone plant''s version moved', pg_temp.ver(pg_temp.pid(990030602)) = v + 1);
+  perform pg_temp.eq('R6 gone plant not read', pg_temp.pp(g, pg_temp.t(1), pg_temp.pid(990030602), 'read_now'), 'false');
+  perform pg_temp.eq('R6 new plant waits to be chosen', pg_temp.pp(g, pg_temp.t(1), pg_temp.pid(990030603), 'chosen'), 'false');
+  perform pg_temp.eq('R6 unknown login: nothing', plants.list_seen(gen_random_uuid(), '[]', pg_temp.t(1))::text, null);
 
   insert into billing.refunds (reference, reason, status, tries, last_error, created_at, updated_at)
   values ('R6-REF', 'stale', 'failed', 3, 'boom', pg_temp.t(1), pg_temp.t(1));
@@ -2052,8 +2074,8 @@ begin
   perform pg_temp.ok('R6 alerts through the door', jsonb_typeof(public.billing_jobs('alerts')) = 'array');
   perform pg_temp.fails('R6 unknown command refused', 'select public.billing_jobs(''alertz'')', 'unknown billing_jobs command');
   -- a write outside the guarded functions lands only on a plant read now
-  perform pg_temp.agg(990030699, now(), false);
-  perform pg_temp.ok('R6 unguarded write to a plant nobody reads dropped', not pg_temp.has_agg(990030699));
+  perform pg_temp.agg(pg_temp.pid(990030699), now(), false);
+  perform pg_temp.ok('R6 unguarded write to a plant nobody reads dropped', not pg_temp.has_agg(pg_temp.pid(990030699)));
   perform pg_temp.ok('R6 not callable by signed-in users',
     not has_function_privilege('authenticated', 'public.billing_jobs(text, jsonb)', 'execute')
     and not has_function_privilege('authenticated', 'public.poll_jobs_v2(int, int, uuid, timestamptz)', 'execute')
@@ -2074,9 +2096,9 @@ begin
   -- 14: only the run holding the claim moves the fetch; a run whose claim ran out is told so
   l := pg_temp.link(a, 'rq14', '{990061401}', pg_temp.t(30)); perform pg_temp.stored(l);
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(30));
-  perform pg_temp.choose(a, '{990061401}', pg_temp.t(30));
+  perform pg_temp.choose(a, pg_temp.pids('{990061401}'), pg_temp.t(30));
   w := billing.history_take(pg_temp.t(30.01));
-  f := pg_temp.fetch_row(a, 990061401);
+  f := pg_temp.fetch_row(a, pg_temp.pid(990061401));
   perform pg_temp.ok('RQ14 handed out with its claim', exists (select 1 from jsonb_array_elements(w) x
     where (x->>'id')::bigint = f.id and (x->>'claim')::uuid = f.claim));
   perform pg_temp.eq('RQ14 a step with another claim is refused',
@@ -2084,7 +2106,7 @@ begin
   perform pg_temp.ok('RQ14 the holder renews its claim', billing.history_renew(f.id, f.claim, pg_temp.t(30.01) + interval '60 seconds'));
   old := f.claim;
   w := billing.history_take(pg_temp.t(30.01) + interval '200 seconds');   -- the claim ran out: handed out again
-  f := pg_temp.fetch_row(a, 990061401);
+  f := pg_temp.fetch_row(a, pg_temp.pid(990061401));
   perform pg_temp.ok('RQ14 a new claim after it ran out', f.claim is not null and f.claim <> old);
   perform pg_temp.eq('RQ14 the old run cannot release it',
     billing.history_step(f.id, null, false, false, pg_temp.t(30.01) + interval '201 seconds', old)->>'status', 'not_yours');
@@ -2092,84 +2114,84 @@ begin
 
   -- 15: the share login breaks while a claimed plant's fetch runs: back to the queue, days kept
   update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31) where lane = sh and status = 'running';
-  insert into billing.plants (id, brand, external_id) values (990061501, 'sunsynk', '990061501');
-  insert into billing.plant_claims (plant, account, claimed_at) values (990061501, b, pg_temp.t(31));
+  perform pg_temp.pid(990061501);
+  insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990061501), b, pg_temp.t(31));
   perform pg_temp.pay(b, 'home', 'month', pg_temp.t(31));
-  perform pg_temp.choose(b, '{990061501}', pg_temp.t(31));
+  perform pg_temp.choose(b, pg_temp.pids('{990061501}'), pg_temp.t(31));
   w := billing.history_take(pg_temp.t(31.01));
-  f := pg_temp.fetch_row(b, 990061501);
+  f := pg_temp.fetch_row(b, pg_temp.pid(990061501));
   perform pg_temp.eq('RQ15 running on the share login', f.status || ':' || (f.lane = sh)::text, 'running:true');
   update billing.history_fetches set day_next = day_next - 5 where id = f.id;
-  update private.sunsynk_accounts set status = 'needs_relink' where id = sh;
+  update plants.logins set status = 'needs_reconnect' where id = sh;
   w := billing.history_take(pg_temp.t(31.02));
-  perform pg_temp.eq('RQ15 login broke mid-fetch: back to the queue', (pg_temp.fetch_row(b, 990061501)).status, 'queued');
-  perform pg_temp.ok('RQ15 ... its days kept', (pg_temp.fetch_row(b, 990061501)).day_next = f.day_next - 5);
-  update private.sunsynk_accounts set status = 'active' where id = sh;
+  perform pg_temp.eq('RQ15 login broke mid-fetch: back to the queue', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).status, 'queued');
+  perform pg_temp.ok('RQ15 ... its days kept', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next - 5);
+  update plants.logins set status = 'ok' where id = sh;
   w := billing.history_take(pg_temp.t(31.03));
-  perform pg_temp.ok('RQ15 login back: carries on from where it was', (pg_temp.fetch_row(b, 990061501)).status = 'running'
-    and (pg_temp.fetch_row(b, 990061501)).day_next = f.day_next - 5);
+  perform pg_temp.ok('RQ15 login back: carries on from where it was', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).status = 'running'
+    and (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next - 5);
   update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31.04) where account = b and status = 'running';
 
   -- 16: a slowed fetch waiting between days does not hold the shared login
-  insert into billing.plants (id, brand, external_id) values (990061601, 'sunsynk', '990061601'), (990061602, 'sunsynk', '990061602');
-  insert into billing.plant_claims (plant, account, claimed_at) values (990061601, c1, pg_temp.t(32)), (990061602, c2, pg_temp.t(32));
+  perform pg_temp.pid(990061601); perform pg_temp.pid(990061602);
+  insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990061601), c1, pg_temp.t(32)), (pg_temp.pid(990061602), c2, pg_temp.t(32));
   perform pg_temp.pay(c1, 'home', 'month', pg_temp.t(32));
   perform pg_temp.pay(c2, 'home', 'month', pg_temp.t(32));
-  perform pg_temp.choose(c1, '{990061601}', pg_temp.t(32));
+  perform pg_temp.choose(c1, pg_temp.pids('{990061601}'), pg_temp.t(32));
   w := billing.history_take(pg_temp.t(32.01));
-  f := pg_temp.fetch_row(c1, 990061601);
+  f := pg_temp.fetch_row(c1, pg_temp.pid(990061601));
   update billing.history_fetches set target_s = 86400 where id = f.id;       -- A's 10th switch: a day long
   s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(32.01) + interval '10 seconds', f.claim);
   perform pg_temp.ok('RQ16 the slowed fetch waits for its next day', (s->>'next_step_at')::timestamptz > pg_temp.t(32.02));
-  perform pg_temp.choose(c2, '{990061602}', pg_temp.t(32.02));
+  perform pg_temp.choose(c2, pg_temp.pids('{990061602}'), pg_temp.t(32.02));
   w := billing.history_take(pg_temp.t(32.02) + interval '1 second');
   perform pg_temp.ok('RQ16 another account''s first fetch starts on the same login at once',
-    exists (select 1 from jsonb_array_elements(w) x where (x->>'plant')::bigint = 990061602));
+    exists (select 1 from jsonb_array_elements(w) x where (x->>'plant')::bigint = pg_temp.pid(990061602)));
 
   -- 18: the plants the queue is fetching, for the old recovery schedule to leave alone
-  perform pg_temp.ok('RQ18 fetching lists a queued or running plant', public.billing_jobs('fetching') @> '[990061602]');
+  perform pg_temp.ok('RQ18 fetching lists a queued or running plant', public.billing_jobs('fetching') @> ('[' || pg_temp.pid(990061602) || ']')::jsonb);
 
   -- 20: readings never clear a delete; only a seat opening does
   perform pg_temp.ok('RQ20 no write path touches the plant row', to_regprocedure('billing.readings_arrived(bigint[])') is null);
 
   -- 21: the full delete clears five-minute history too
   l := pg_temp.link(d, 'rq21', '{990062101}', pg_temp.t(33));
-  insert into public.readings_5m (plant_id, sn, ts) values (990062101, 'SN_rq21', extract(epoch from pg_temp.t(33))::bigint);
+  insert into public.readings_5m (plant_id, sn, ts) values (pg_temp.pid(990062101), 'SN_rq21', extract(epoch from pg_temp.t(33))::bigint);
   perform billing.delete_due(pg_temp.t(33.1));
-  perform pg_temp.ok('RQ21 a plant with only 5-minute rows: deleted', not exists (select 1 from public.readings_5m where plant_id = 990062101));
-  perform pg_temp.ok('RQ21 ... and marked', (select history_purged_at is not null from billing.plants where id = 990062101));
+  perform pg_temp.ok('RQ21 a plant with only 5-minute rows: deleted', not exists (select 1 from public.readings_5m where plant_id = pg_temp.pid(990062101)));
+  perform pg_temp.ok('RQ21 ... and marked', (pg_temp.purged(pg_temp.pid(990062101)) is not null));
 
   -- 22: a seat chosen after the job started keeps the plant
   l := pg_temp.link(e, 'rq22', '{990062201}', pg_temp.t(34)); perform pg_temp.stored(l);
   perform pg_temp.pay(e, 'home', 'month', pg_temp.t(34));
-  perform pg_temp.agg(990062201, pg_temp.t(34));
-  insert into billing.seats (account, plant, chosen_at) values (e, 990062201, pg_temp.t(34.5));   -- chosen after the job's start
+  perform pg_temp.agg(pg_temp.pid(990062201), pg_temp.t(34));
+  insert into billing.seats (account, plant, chosen_at) values (e, pg_temp.pid(990062201), pg_temp.t(34.5));   -- chosen after the job's start
   perform billing.delete_due(pg_temp.t(34.2));
-  perform pg_temp.ok('RQ22 chosen after the job started: kept', pg_temp.has_agg(990062201));
+  perform pg_temp.ok('RQ22 chosen after the job started: kept', pg_temp.has_agg(pg_temp.pid(990062201)));
 
   -- 23: a switch deletes at once, so switching straight back finds it gone
   l := pg_temp.link(g, 'rq23', '{990062301,990062302}', pg_temp.t(35)); perform pg_temp.stored(l);
   perform pg_temp.pay(g, 'home', 'month', pg_temp.t(35));
-  perform pg_temp.choose(g, '{990062301}', pg_temp.t(35));
-  perform pg_temp.agg(990062301, pg_temp.t(35));
-  perform pg_temp.choose(g, '{990062302}', pg_temp.t(35.1));
-  perform pg_temp.ok('RQ23 switched out: deleted in the same step', not pg_temp.has_agg(990062301));
-  perform pg_temp.choose(g, '{990062301}', pg_temp.t(35.2));
-  perform pg_temp.ok('RQ23 switched straight back: still gone', not pg_temp.has_agg(990062301)
-    and (select history_purged_at is null from billing.plants where id = 990062301));
+  perform pg_temp.choose(g, pg_temp.pids('{990062301}'), pg_temp.t(35));
+  perform pg_temp.agg(pg_temp.pid(990062301), pg_temp.t(35));
+  perform pg_temp.choose(g, pg_temp.pids('{990062302}'), pg_temp.t(35.1));
+  perform pg_temp.ok('RQ23 switched out: deleted in the same step', not pg_temp.has_agg(pg_temp.pid(990062301)));
+  perform pg_temp.choose(g, pg_temp.pids('{990062301}'), pg_temp.t(35.2));
+  perform pg_temp.ok('RQ23 switched straight back: still gone', not pg_temp.has_agg(pg_temp.pid(990062301))
+    and (pg_temp.purged(pg_temp.pid(990062301)) is null));
 
   -- 24: history with no open seat for over an hour: alert
   l := pg_temp.link(h, 'rq24', '{990062401}', pg_temp.t(36));
   perform pg_temp.pay(h, 'home', 'month', pg_temp.t(36));
-  perform pg_temp.choose(h, '{990062401}', pg_temp.t(36));
-  perform pg_temp.agg(990062401, pg_temp.t(36));
-  perform billing.remove_login(h, l, pg_temp.t(36.1));
+  perform pg_temp.choose(h, pg_temp.pids('{990062401}'), pg_temp.t(36));
+  perform pg_temp.agg(pg_temp.pid(990062401), pg_temp.t(36));
+  perform plants.remove_login(h, l, pg_temp.t(36.1));
   -- remove_login deletes it now (final fix 7); here the delete is undone, as if it were missed
-  update billing.plants set history_purged_at = null where id = 990062401;
-  perform pg_temp.agg(990062401, pg_temp.t(36.1));
-  perform pg_temp.ok('RQ24 not within the hour', not pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '30 minutes'));
+  insert into billing.plant_facts (plant, history_purged_at) values (pg_temp.pid(990062401), null) on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
+  perform pg_temp.agg(pg_temp.pid(990062401), pg_temp.t(36.1));
+  perform pg_temp.ok('RQ24 not within the hour', not pg_temp.alert('history_unprotected', pg_temp.pid(990062401)::text, pg_temp.t(36.1) + interval '30 minutes'));
   perform pg_temp.ok('RQ24 history with no seat for over an hour: alert',
-    pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '2 hours'));
+    pg_temp.alert('history_unprotected', pg_temp.pid(990062401)::text, pg_temp.t(36.1) + interval '2 hours'));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2197,16 +2219,16 @@ begin
 
   -- 5: the same upgrade again gets the same bill
   pe := pg_temp.member(c, 'q5', 990050501);
-  perform billing.link_login(c, 'sunsynk', 'q5', null, '[{"id":990050501},{"id":990050502},{"id":990050503}]', pg_temp.t(1));
-  i1 := billing.upgrade(c, 'family', 0, '{990050501,990050502,990050503}', pg_temp.t(5));
+  perform pg_temp.link_login(c, 'sunsynk', 'q5', null, '[{"id":990050501},{"id":990050502},{"id":990050503}]', pg_temp.t(1));
+  i1 := billing.upgrade(c, 'family', 0, pg_temp.pids('{990050501,990050502,990050503}'), pg_temp.t(5));
   perform billing.begin_attempt((i1->>'invoice')::uuid, 'card_page', pg_temp.t(5));
-  i2 := billing.upgrade(c, 'family', 0, '{990050501,990050502,990050503}', pg_temp.t(5) + interval '10 minutes');
+  i2 := billing.upgrade(c, 'family', 0, pg_temp.pids('{990050501,990050502,990050503}'), pg_temp.t(5) + interval '10 minutes');
   perform pg_temp.eq('Q5 upgrade again: the same bill', i2->>'invoice', i1->>'invoice');
 
   -- 6: an upgrade paid before the period ended, answered after its renewal bill exists: refunded
   pe := pg_temp.member(d, 'q6', 990050601);
-  perform billing.link_login(d, 'sunsynk', 'q6', null, '[{"id":990050601},{"id":990050602},{"id":990050603}]', pg_temp.t(1));
-  inv := (billing.upgrade(d, 'family', 0, '{990050601,990050602,990050603}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.link_login(d, 'sunsynk', 'q6', null, '[{"id":990050601},{"id":990050602},{"id":990050603}]', pg_temp.t(1));
+  inv := (billing.upgrade(d, 'family', 0, pg_temp.pids('{990050601,990050602,990050603}'), pg_temp.t(5))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
   perform billing.run(pe);
   perform pg_temp.ok('Q6 the renewal bill was made', exists (select 1 from billing.invoices i join billing.subscriptions s on s.id = i.subscription
@@ -2246,9 +2268,9 @@ begin
 
   -- 11: a plant new on the login during a checkout does not refund it
   l := pg_temp.link(g, 'q11', '{990051101}', pg_temp.t(0));
-  inv := (billing.start_checkout(g, 'home', 'month', 0, '{990051101}', pg_temp.t(0))->>'invoice')::uuid;
+  inv := (billing.start_checkout(g, 'home', 'month', 0, pg_temp.pids('{990051101}'), pg_temp.t(0))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(0))->>'reference';
-  perform billing.login_seen(l, '[{"id":990051101},{"id":990051102}]', pg_temp.t(0) + interval '1 minute');
+  perform plants.list_seen(l, '[{"id":990051101},{"id":990051102}]', pg_temp.t(0) + interval '1 minute');
   perform pg_temp.eq('Q11 checkout paid after the login list changed: applied',
     pg_temp.answer(ref, 'ok', pg_temp.t(0) + interval '2 minutes')->>'action', 'applied');
 end $$;
@@ -2268,7 +2290,7 @@ do $$
 declare a uuid := pg_temp.acct('o1'); o billing.outbox; w jsonb; b jsonb;
 begin
   perform pg_temp.link(a, 'o1', '{990040101}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990040101}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990040101}'), pg_temp.t(0));
   o := pg_temp.ob(a, 'receipt');
   perform pg_temp.ok('O1 receipt queued for the paid bill', o.id is not null and o.invoice is not null);
   perform pg_temp.eq('O1 receipt sends', pg_temp.guard(a, 'receipt', pg_temp.t(0.01)), 'send');
@@ -2318,18 +2340,18 @@ do $$
 declare a uuid := pg_temp.acct('o4'); b uuid := pg_temp.acct('o4b');
 begin
   perform pg_temp.link(a, 'o4', '{990040401}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990040401}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990040401}'), pg_temp.t(0));
   perform billing.outbox_sweep(pg_temp.t(4));
   perform pg_temp.ok('O4 not before day 5', pg_temp.ob(a, 'trial_ends_soon') is null or (pg_temp.ob(a, 'trial_ends_soon')).id is null);
   perform billing.outbox_sweep(pg_temp.t(5.1));
   perform pg_temp.eq('O4 ends-soon queued on day 5', pg_temp.guard(a, 'trial_ends_soon', pg_temp.t(5.1)), 'send');
   perform billing.outbox_sweep(pg_temp.t(5.2));
   perform pg_temp.eq('O4 queued once', (select count(*)::text from billing.outbox where account = a and key = 'trial_ends_soon'), '1');
-  perform pg_temp.buy(a, 'home', 'month', '{990040401}', pg_temp.t(5.3));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990040401}'), pg_temp.t(5.3));
   perform pg_temp.eq('O4 paid: ends-soon dropped', pg_temp.guard(a, 'trial_ends_soon', pg_temp.t(5.4)), 'week over or paid');
   -- b: the week runs out unpaid
   perform pg_temp.link(b, 'o4b', '{990040402}', pg_temp.t(0));
-  perform pg_temp.choose(b, '{990040402}', pg_temp.t(0));
+  perform pg_temp.choose(b, pg_temp.pids('{990040402}'), pg_temp.t(0));
   perform billing.outbox_sweep(pg_temp.t(7.1));
   perform pg_temp.eq('O4 week over: ended email', pg_temp.guard(b, 'trial_ended', pg_temp.t(7.1)), 'send');
   -- reminders switched off: dropped
@@ -2350,9 +2372,9 @@ begin
   perform pg_temp.eq('O5 delete-soon on day 14', pg_temp.guard(a, 'history_delete_soon', pe + interval '14 days 2 hours'), 'send');
   perform pg_temp.eqt('O5 it names the delete date', to_timestamp((pg_temp.ob(a, 'history_delete_soon')).ref::bigint)::text,
     pe + interval '30 days');
-  update billing.plants set history_purged_at = pe + interval '30 days 1 hour' where id = 990040501;
+  insert into billing.plant_facts (plant, history_purged_at) values (pg_temp.pid(990040501), pe + interval '30 days 1 hour') on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
   perform pg_temp.eq('O5 history deleted email', pg_temp.guard(a, 'history_deleted', pe + interval '30 days 2 hours'), 'send');
-  perform pg_temp.buy(a, 'home', 'month', '{990040501}', pe + interval '30 days 3 hours');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990040501}'), pe + interval '30 days 3 hours');
   perform pg_temp.eq('O5 restarted: delete-soon dropped', pg_temp.guard(a, 'history_delete_soon', pe + interval '30 days 4 hours'), 'expired');
   perform pg_temp.eq('O5 restarted: deleted email dropped', pg_temp.guard(a, 'history_deleted', pe + interval '30 days 4 hours'), 'plan running again');
 end $$;
@@ -2363,8 +2385,8 @@ declare a uuid := pg_temp.acct('o6'); b uuid := pg_temp.acct('o6b'); s jsonb; q 
 begin
   perform pg_temp.link(a, 'o6', '{990040601,990040602,990040603}', pg_temp.t(0));
   perform pg_temp.link(b, 'o6b', '{990040601}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'month', '{990040601}', pg_temp.t(0), 'AUTH_o6b');
-  perform pg_temp.buy(a, 'home', 'month', '{990040601,990040602}', pg_temp.t(0), 'AUTH_o6a');
+  perform pg_temp.buy(b, 'home', 'month', pg_temp.pids('{990040601}'), pg_temp.t(0), 'AUTH_o6b');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990040601,990040602}'), pg_temp.t(0), 'AUTH_o6a');
   s := billing.screen_state(a, pg_temp.t(1));
   perform pg_temp.eq('O6 plan name', s->>'plan_name', 'Home');
   perform pg_temp.eq('O6 fits all three: Family', s->>'fit_all_name', 'Family');
@@ -2372,12 +2394,12 @@ begin
   perform pg_temp.eq('O6 the launch price kept', (select x->>'amount_minor' from jsonb_array_elements(s->'prices') x
     where x->>'plan' = 'family' and x->>'interval' = 'month'), '9900');
   perform pg_temp.eq('O6 shared plant kept by the other account', (select x->>'kept_elsewhere' from jsonb_array_elements(s->'plants') x
-    where (x->>'plant')::bigint = 990040601), 'true');
+    where (x->>'plant')::bigint = pg_temp.pid(990040601)), 'true');
   perform pg_temp.eq('O6 own plant not kept elsewhere', (select x->>'kept_elsewhere' from jsonb_array_elements(s->'plants') x
-    where (x->>'plant')::bigint = 990040602), 'false');
+    where (x->>'plant')::bigint = pg_temp.pid(990040602)), 'false');
   perform pg_temp.eqt('O6 history after a cancel', s->>'if_cancelled_delete_at', (pg_temp.sub(a)).period_end + interval '30 days');
   q := billing.quote(a, 'family', 'month', pg_temp.t(5));
-  inv := billing.upgrade(a, 'family', 0, '{990040601,990040602,990040603}', pg_temp.t(5));
+  inv := billing.upgrade(a, 'family', 0, pg_temp.pids('{990040601,990040602,990040603}'), pg_temp.t(5));
   perform pg_temp.eq('O6 quote is the upgrade bill', q->>'due_minor', inv->>'amount_minor');
   perform pg_temp.eq('O6 quote is an upgrade', q->>'kind', 'upgrade');
   perform pg_temp.eq('O6 downgrade quote: nothing to drop while the bill is unpaid', billing.quote(a, 'home', 'month', pg_temp.t(5))->>'drop', '0');
@@ -2387,11 +2409,11 @@ end $$;
 do $$
 declare a uuid := pg_temp.acct('o7'); b uuid := pg_temp.acct('o7b');
 begin
-  perform billing.claim_plant(a, 990040701, 'Shared', 'sunsynk', pg_temp.t(0));
-  perform pg_temp.fails('O7 second claim refused', format('select billing.claim_plant(%L, 990040701, ''x'', ''sunsynk'', %L)', b, pg_temp.t(0)), 'taken');
-  perform pg_temp.choose(a, '{990040701}', pg_temp.t(0));
-  perform pg_temp.eq('O7 a claim is a route', pg_temp.pp(a, pg_temp.t(0.1), 990040701, 'chosen'), 'true');
-  perform billing.unclaim(a, '{990040701}', pg_temp.t(1));
+  perform plants.claim(a, 'sunsynk', '990040701', 'Shared', pg_temp.t(0));
+  perform pg_temp.fails('O7 second claim refused', format('select plants.claim(%L, ''sunsynk'', ''990040701'', ''x'', %L)', b, pg_temp.t(0)), 'taken');
+  perform pg_temp.choose(a, pg_temp.pids('{990040701}'), pg_temp.t(0));
+  perform pg_temp.eq('O7 a claim is a route', pg_temp.pp(a, pg_temp.t(0.1), pg_temp.pid(990040701), 'chosen'), 'true');
+  perform plants.unclaim(a, pg_temp.pids('{990040701}'), pg_temp.t(1));
   perform pg_temp.ok('O7 unclaimed: seat closed', not exists (select 1 from billing.seats where account = a and closed_at is null));
 end $$;
 
@@ -2399,13 +2421,13 @@ end $$;
 do $$
 declare rows jsonb := '[{"bucket":"month","period":"2026-11-01","pv_kwh":1,"load_kwh":2,"imp_kwh":0,"exp_kwh":0,"chg_kwh":0,"dischg_kwh":0,"synced_at":"2026-12-01T10:00:00Z"}]';
 begin
-  perform pg_temp.stored((select id from billing.logins where username = 'o1'));
+  perform pg_temp.stored((select id from plants.logins where username = 'o1'));
   perform pg_temp.fails('O9 a plant nobody reads: refused',
-    format('select public.q_upsert_plant_energy_v2(990040701, %s, %L, %L)', pg_temp.ver(990040701), rows, pg_temp.t(1)), 'not read now');
+    format('select public.q_upsert_plant_energy_v2(pg_temp.pid(990040701), %s, %L, %L)', pg_temp.ver(pg_temp.pid(990040701)), rows, pg_temp.t(1)), 'not read now');
   perform pg_temp.fails('O9 a stale version: refused',
-    format('select public.q_upsert_plant_energy_v2(990040101, %s, %L, %L)', pg_temp.ver(990040101) - 1, rows, pg_temp.t(1)), 'not read now');
+    format('select public.q_upsert_plant_energy_v2(pg_temp.pid(990040101), %s, %L, %L)', pg_temp.ver(pg_temp.pid(990040101)) - 1, rows, pg_temp.t(1)), 'not read now');
   perform pg_temp.eq('O9 read now, its version: written',
-    public.q_upsert_plant_energy_v2(990040101, pg_temp.ver(990040101), rows, pg_temp.t(1))::text, '1');
+    public.q_upsert_plant_energy_v2(pg_temp.pid(990040101), pg_temp.ver(pg_temp.pid(990040101)), rows, pg_temp.t(1))::text, '1');
 end $$;
 
 -- O10 the old rules that still run follow the new state once live
@@ -2568,18 +2590,18 @@ begin
   r := billing.account_state(a, c + interval '1 minute');
   perform pg_temp.eq('U4 past the cutoff: still running, checking', r->>'state' || '/' || (r->>'past_due_reason'), 'past_due/checking');
   perform pg_temp.eq('U4 ... the page to re-check', r->>'held_reference', ref);
-  perform pg_temp.eq('U4 ... the plant is still read', pg_temp.ps(990160401, c + interval '1 minute', 'read_now'), 'true');
+  perform pg_temp.eq('U4 ... the plant is still read', pg_temp.ps(pg_temp.pid(990160401), c + interval '1 minute', 'read_now'), 'true');
   perform pg_temp.fails('U4 ... the bill is not paid twice',
     format('select billing.begin_attempt(%L, ''card_page'', %L, %L)', pg_temp.due(a), c + interval '1 minute', a), 'already in progress');
   perform pg_temp.job(a, c + interval '6 hours');
   perform pg_temp.eq('U4 the job leaves it running', (pg_temp.sub(a)).status, 'past_due');
   perform pg_temp.ok('U4 no ended email', pg_temp.ob(a, 'plan_ended') is null);
   perform pg_temp.fails('U4 no restart while it may land',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160401}'', %L)', a, c + interval '7 hours'), 'already running');
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, pg_temp.pids(''{990160401}''), %L)', a, c + interval '7 hours'), 'already running');
   r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_u4a') || jsonb_build_object('paid_at', c - interval '10 seconds'), c + interval '8 hours');
   perform pg_temp.eq('U4 paid at 23:59:59, answered 8 hours on: applied', r->>'action', 'applied');
   perform pg_temp.eq('U4 the plan carries on', pg_temp.st(a, c + interval '8 hours', 'state'), 'active');
-  perform pg_temp.eq('U4 ... still read', pg_temp.ps(990160401, c + interval '8 hours', 'read_now'), 'true');
+  perform pg_temp.eq('U4 ... still read', pg_temp.ps(pg_temp.pid(990160401), c + interval '8 hours', 'read_now'), 'true');
   perform pg_temp.ok('U4 ... never ended', not exists (select 1 from billing.account_events e where e.account = a and e.kind = 'plan_ended'));
   perform pg_temp.ok('U4 settled: verified cleared', not (select verified_processing from billing.payment_attempts where reference = ref));
 exception when others then perform pg_temp.ok('U4 runs', false, sqlerrm);
@@ -2595,10 +2617,10 @@ begin
   perform pg_temp.job(a, pe, 'fail');
   ref := billing.begin_attempt(pg_temp.due(a), 'card_page', c - interval '1 hour', a)->>'reference';
   perform pg_temp.eq('U5 not in flight (never answered as processing): ended', pg_temp.st(a, c + interval '1 minute', 'state'), 'ended');
-  perform pg_temp.eq('U5 ... not read', pg_temp.ps(990160501, c + interval '1 minute', 'read_now'), 'false');
+  perform pg_temp.eq('U5 ... not read', pg_temp.ps(pg_temp.pid(990160501), c + interval '1 minute', 'read_now'), 'false');
   perform pg_temp.job(a, c + interval '6 hours');
   perform pg_temp.eq('U5 the job waits for the page''s verify', (pg_temp.sub(a)).status, 'past_due');
-  perform pg_temp.ok('U5 a restart is not held', billing.start_checkout(a, 'home', 'month', 0, '{990160501}', c + interval '6 hours') ? 'invoice');
+  perform pg_temp.ok('U5 a restart is not held', billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990160501}'), c + interval '6 hours') ? 'invoice');
   perform pg_temp.answer(ref, 'abandoned', c + interval '6 hours 1 minute');
   perform pg_temp.job(a, c + interval '6 hours 2 minutes');
   perform pg_temp.eq('U5 answered: the next run ends it on the cutoff', (pg_temp.sub(a)).status || '/' || ((pg_temp.sub(a)).ended_at = c)::text, 'ended/true');
@@ -2627,13 +2649,13 @@ begin
   r := billing.account_state(a, c + interval '6 hours');
   perform pg_temp.eq('U6 running on, checking', r->>'state' || '/' || (r->>'past_due_reason'), 'past_due/checking');
   perform pg_temp.eq('U6 ... with the page to re-check', r->>'held_reference', pref);
-  perform pg_temp.eq('U6 ... read', pg_temp.ps(990160601, c + interval '6 hours', 'read_now'), 'true');
+  perform pg_temp.eq('U6 ... read', pg_temp.ps(pg_temp.pid(990160601), c + interval '6 hours', 'read_now'), 'true');
   perform pg_temp.fails('U6 restart refused, as the screen says',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160601}'', %L)', a, c + interval '6 hours'), 'already running');
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, pg_temp.pids(''{990160601}''), %L)', a, c + interval '6 hours'), 'already running');
   r := billing.account_state(a, c + interval '24 hours 1 minute');
   perform pg_temp.eq('U6 a day on: ended', r->>'state' || '/' || (r->>'renewal_in_flight'), 'ended/false');
   perform pg_temp.eqt('U6 ... on the cutoff', r->>'access_ended_at', c);
-  perform pg_temp.eq('U6 ... not read', pg_temp.ps(990160601, c + interval '24 hours 1 minute', 'read_now'), 'false');
+  perform pg_temp.eq('U6 ... not read', pg_temp.ps(pg_temp.pid(990160601), c + interval '24 hours 1 minute', 'read_now'), 'false');
   perform pg_temp.eq('U6 still no answer after 24 hours: the page fails', billing.verify_unanswered(pref, c + interval '25 hours')->>'action', 'failed');
   perform pg_temp.ok('U6 ... marked as a timeout', (select status = 'failed' and gateway_response like 'timeout: %' and not hard_decline
     from billing.payment_attempts where reference = pref));
@@ -2643,7 +2665,7 @@ begin
   perform pg_temp.eq('U6 the job ends it on the cutoff', (pg_temp.sub(a)).status || '/' || ((pg_temp.sub(a)).ended_at = c)::text, 'ended/true');
   o := pg_temp.ob(a, 'plan_ended');
   perform pg_temp.eq('U6 the ended email does not say it wasn''t paid', billing.plan_ended_facts(o)->>'paid_unknown', 'true');
-  perform pg_temp.ok('U6 a restart goes ahead', billing.start_checkout(a, 'home', 'month', 0, '{990160601}', c + interval '25 hours') ? 'invoice');
+  perform pg_temp.ok('U6 a restart goes ahead', billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990160601}'), c + interval '25 hours') ? 'invoice');
 exception when others then perform pg_temp.ok('U6 runs', false, sqlerrm);
 end $$;
 
@@ -2659,7 +2681,7 @@ begin
   ref := pg_temp.job(a, billing.next_run_at(pe + interval '14 days'));
   perform pg_temp.eq('U9 past the cutoff, no answer yet: running, checking',
     pg_temp.st(a, c + interval '2 hours', 'state') || '/' || pg_temp.st(a, c + interval '2 hours', 'past_due_reason'), 'past_due/checking');
-  perform pg_temp.eq('U9 ... read', pg_temp.ps(990160901, c + interval '2 hours', 'read_now'), 'true');
+  perform pg_temp.eq('U9 ... read', pg_temp.ps(pg_temp.pid(990160901), c + interval '2 hours', 'read_now'), 'true');
   perform pg_temp.job(a, c + interval '6 hours');
   perform pg_temp.eq('U9 the job leaves it', (pg_temp.sub(a)).status, 'past_due');
   perform pg_temp.eq('U9 ... no pay email past the pay-by date', pg_temp.guard(a, 'payment_failed', c + interval '6 hours'), 'past the pay-by date');
@@ -2736,8 +2758,8 @@ begin
   u := (select user_id from billing.accounts where id = a);
   perform pg_temp.link(a, 'p402', '{990070201,990070202}', pg_temp.t(0));
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990070201}', pg_temp.t(0));
-  perform pg_temp.eq('P4-2 chosen plants once live: the open seats', public.chosen_plant_ids(u)::text, '{990070201}');
+  perform pg_temp.choose(a, pg_temp.pids('{990070201}'), pg_temp.t(0));
+  perform pg_temp.eq('P4-2 chosen plants once live: the open seats', public.chosen_plant_ids(u)::text, pg_temp.pids('{990070201}')::text);
   perform pg_temp.ok('P4-2 ... for the service role only', not has_function_privilege('authenticated', 'public.chosen_plant_ids(uuid)', 'execute')
     and has_function_privilege('service_role', 'public.chosen_plant_ids(uuid)', 'execute'));
 exception when others then perform pg_temp.ok('P4-2 runs', false, sqlerrm);
@@ -2762,9 +2784,9 @@ do $$
 declare a uuid := pg_temp.acct('p406'); u uuid;
 begin
   u := (select user_id from billing.accounts where id = a);
-  perform billing.link_login(a, 'sunsynk', 'P406@Mail.test', null, '[{"id":990070601}]', pg_temp.t(0));
-  perform billing.link_login(a, 'sunsynk', 'p406@mail.TEST', null, '[{"id":990070601},{"id":990070602}]', pg_temp.t(0.1));
-  perform pg_temp.eq('P4-6 the same login in another case: still one login', (select count(*)::text from billing.logins where account = a), '1');
+  perform pg_temp.link_login(a, 'sunsynk', 'P406@Mail.test', null, '[{"id":990070601}]', pg_temp.t(0));
+  perform pg_temp.link_login(a, 'sunsynk', 'p406@mail.TEST', null, '[{"id":990070601},{"id":990070602}]', pg_temp.t(0.1));
+  perform pg_temp.eq('P4-6 the same login in another case: still one login', (select count(*)::text from plants.logins where account = a), '1');
   perform pg_temp.ok('P4-6 ... and the state knows it', (public.billing_links('state',
     jsonb_build_object('user', u, 'username', 'P406@MAIL.TEST'))->>'login_known')::boolean);
 exception when others then perform pg_temp.ok('P4-6 runs', false, sqlerrm);
@@ -2791,8 +2813,8 @@ do $$
 declare a uuid := pg_temp.acct('p408'); inv uuid; ref text;
 begin
   perform pg_temp.member(a, 'p408', 990070801);
-  perform billing.link_login(a, 'sunsynk', 'p408', null, '[{"id":990070801},{"id":990070802},{"id":990070803}]', pg_temp.t(1));
-  inv := (billing.upgrade(a, 'family', 0, '{990070801,990070802,990070803}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.link_login(a, 'sunsynk', 'p408', null, '[{"id":990070801},{"id":990070802},{"id":990070803}]', pg_temp.t(1));
+  inv := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990070801,990070802,990070803}'), pg_temp.t(5))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'saved_card', pg_temp.t(5))->>'reference';
   perform pg_temp.answer(ref, 'hard', pg_temp.t(5));
   perform pg_temp.ok('P4-8 a hard decline on an upgrade: no card email', not exists (select 1 from billing.outbox where account = a and key = 'card_update'));
@@ -2826,7 +2848,7 @@ do $$
 declare a uuid := pg_temp.acct('p411'); o billing.outbox; b jsonb;
 begin
   perform pg_temp.link(a, 'p411', '{990071101}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990071101}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990071101}'), pg_temp.t(0));
   update billing.plans set name = 'Home Plus' where code = 'home';
   perform pg_temp.eq('P4-11 Payments: the name the bill was made with', billing.screen_state(a, pg_temp.t(1))->'bills'->0->>'plan_name', 'Home');
   o := pg_temp.ob(a, 'receipt');
@@ -2842,8 +2864,8 @@ declare a uuid := pg_temp.acct('p414a'); b uuid := pg_temp.acct('p414b'); c uuid
 begin
   perform pg_temp.link(a, 'p414a', '{990071401}', pg_temp.t(0));
   perform pg_temp.link(b, 'p414b', '{990071401}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'month', '{990071401}', pg_temp.t(0), 'AUTH_p414b');
-  perform pg_temp.buy(a, 'home', 'month', '{990071401}', pg_temp.t(0), 'AUTH_p414a');
+  perform pg_temp.buy(b, 'home', 'month', pg_temp.pids('{990071401}'), pg_temp.t(0), 'AUTH_p414b');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990071401}'), pg_temp.t(0), 'AUTH_p414a');
   perform pg_temp.eq('P4-14 every chosen plant kept by another account: no delete date',
     billing.screen_state(a, pg_temp.t(1))->>'if_cancelled_delete_at', null);
   pe := pg_temp.member(c, 'p414c', 990071402);
@@ -2858,9 +2880,9 @@ do $$
 declare a uuid := pg_temp.acct('p415a'); b uuid := pg_temp.acct('p415b');
 begin
   perform pg_temp.link(a, 'p415a', '{990071501,990071502}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990071501}', pg_temp.t(0));                -- week ends day 7
+  perform pg_temp.choose(a, pg_temp.pids('{990071501}'), pg_temp.t(0));                -- week ends day 7
   perform pg_temp.link(b, 'p415b', '{990071502}', pg_temp.t(3));
-  perform pg_temp.choose(b, '{990071502}', pg_temp.t(3));                -- week ends day 10: kept later
+  perform pg_temp.choose(b, pg_temp.pids('{990071502}'), pg_temp.t(3));                -- week ends day 10: kept later
   perform pg_temp.eqt('P4-15 kept until: the chosen plant''s date', billing.screen_state(a, pg_temp.t(11))->>'history_kept_until',
     pg_temp.t(37));
   perform billing.outbox_sweep(pg_temp.t(21) + interval '1 hour');
@@ -2873,7 +2895,7 @@ do $$
 declare a uuid := pg_temp.acct('p416');
 begin
   perform pg_temp.link(a, 'p416', '{990071601}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990071601}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990071601}'), pg_temp.t(0));
   perform billing.outbox_sweep(pg_temp.t(20));
   perform pg_temp.ok('P4-16 week over 13 days ago: no week-ended email', (pg_temp.ob(a, 'trial_ended')).id is null);
 exception when others then perform pg_temp.ok('P4-16 runs', false, sqlerrm);
@@ -2883,8 +2905,8 @@ end $$;
 do $$
 declare a uuid := pg_temp.acct('p417');
 begin
-  perform billing.claim_plant(a, 990071701, 'Gran''s house', 'sunsynk', pg_temp.t(0));
-  perform pg_temp.eq('P4-17 a claimed plant is named', pg_temp.pp(a, pg_temp.t(0.1), 990071701, 'name'), 'Gran''s house');
+  perform plants.claim(a, 'sunsynk', '990071701', 'Gran''s house', pg_temp.t(0));
+  perform pg_temp.eq('P4-17 a claimed plant is named', pg_temp.pp(a, pg_temp.t(0.1), pg_temp.pid(990071701), 'name'), 'Gran''s house');
 exception when others then perform pg_temp.ok('P4-17 runs', false, sqlerrm);
 end $$;
 
@@ -2894,13 +2916,13 @@ do $$
 declare a uuid := pg_temp.acct('p419'); t0 timestamptz := now() - interval '60 days'; inv uuid;
 begin
   perform pg_temp.link(a, 'p419', '{990071901}', t0);
-  perform pg_temp.choose(a, '{990071901}', t0);                          -- kept until 23 days ago
-  perform pg_temp.agg(990071901, t0 + interval '1 day');
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990071901}', clock_timestamp())->>'invoice')::uuid;
+  perform pg_temp.choose(a, pg_temp.pids('{990071901}'), t0);                          -- kept until 23 days ago
+  perform pg_temp.agg(pg_temp.pid(990071901), t0 + interval '1 day');
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990071901}'), clock_timestamp())->>'invoice')::uuid;
   perform billing.begin_attempt(inv, 'card_page', clock_timestamp());
   perform billing.delete_due(now() - interval '1 hour');
-  perform pg_temp.ok('P4-19 a payment after the job''s start: the history waits', pg_temp.has_agg(990071901)
-    and (select history_purged_at is null from billing.plants where id = 990071901));
+  perform pg_temp.ok('P4-19 a payment after the job''s start: the history waits', pg_temp.has_agg(pg_temp.pid(990071901))
+    and (pg_temp.purged(pg_temp.pid(990071901)) is null));
 exception when others then perform pg_temp.ok('P4-19 runs', false, sqlerrm);
 end $$;
 
@@ -2921,10 +2943,10 @@ do $$
 declare a uuid := pg_temp.acct('fr1'); b uuid := pg_temp.acct('fr1b'); pe timestamptz; inv uuid; inv2 uuid; ref text; r jsonb;
 begin
   perform pg_temp.member(a, 'fr1', 990090101);
-  perform billing.link_login(a, 'sunsynk', 'fr1', null, '[{"id":990090101},{"id":990090102},{"id":990090103}]', pg_temp.t(1));
-  inv := (billing.upgrade(a, 'family', 0, '{990090101,990090102}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.link_login(a, 'sunsynk', 'fr1', null, '[{"id":990090101},{"id":990090102},{"id":990090103}]', pg_temp.t(1));
+  inv := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990090101,990090102}'), pg_temp.t(5))->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
-  inv2 := (billing.upgrade(a, 'family', 0, '{990090101,990090102,990090103}', pg_temp.t(5) + interval '1 minute')->>'invoice')::uuid;
+  inv2 := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990090101,990090102,990090103}'), pg_temp.t(5) + interval '1 minute')->>'invoice')::uuid;
   perform pg_temp.ok('FR1 the old page is never handed back', inv2 <> inv
     and (select replaced_at is not null and status = 'pending' from billing.payment_attempts where reference = ref));
   r := billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5) + interval '2 minutes');
@@ -2939,10 +2961,10 @@ begin
 
   -- the renewal job waits too
   pe := pg_temp.member(b, 'fr1b', 990090111);
-  perform billing.link_login(b, 'sunsynk', 'fr1b', null, '[{"id":990090111},{"id":990090112},{"id":990090113}]', pg_temp.t(1));
-  inv := (billing.upgrade(b, 'family', 0, '{990090111,990090112}', pe - interval '2 days')->>'invoice')::uuid;
+  perform pg_temp.link_login(b, 'sunsynk', 'fr1b', null, '[{"id":990090111},{"id":990090112},{"id":990090113}]', pg_temp.t(1));
+  inv := (billing.upgrade(b, 'family', 0, pg_temp.pids('{990090111,990090112}'), pe - interval '2 days')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pe - interval '2 days')->>'reference';
-  perform billing.upgrade(b, 'family', 0, '{990090111,990090112,990090113}', pe - interval '2 days' + interval '1 minute');
+  perform billing.upgrade(b, 'family', 0, pg_temp.pids('{990090111,990090112,990090113}'), pe - interval '2 days' + interval '1 minute');
   perform pg_temp.ok('FR1 renewal: a replaced page still payable holds the charge', pg_temp.job(b, pe) is null);
   perform pg_temp.answer(ref, 'abandoned', pe + interval '1 hour');
   perform pg_temp.ok('FR1 renewal: charged once Paystack says it cannot pay', pg_temp.job(b, pe + interval '1 hour') is not null);
@@ -2968,8 +2990,8 @@ begin
   l1 := public.account_upsert(u, 'FR3@Mail.test', 'tok1', 1);
   l2 := public.account_upsert(u, 'fr3@mail.TEST', 'tok2', 2);
   perform pg_temp.ok('FR3 another case: the same stored login, updated in place', l1 = l2
-    and (select count(*) = 1 from private.sunsynk_accounts where user_id = u)
-    and (select access_token = 'tok2' from private.sunsynk_accounts where id = l1));
+    and (select count(*) = 1 from plants.logins where user_id = u)
+    and (select access_token = 'tok2' from plants.logins where id = l1));
 exception when others then perform pg_temp.ok('FR3 runs', false, sqlerrm);
 end $$;
 
@@ -2980,14 +3002,14 @@ begin
   u := (select user_id from billing.accounts where id = a);
   l := public.link_login_live(u, 'fr4@mail.test', 'tok', 1, 'refresh-fr4', '[{"id":990090401,"name":"A"}]');
   perform pg_temp.ok('FR4 a new login: stored, its secret kept, in billing under the same id',
-    exists (select 1 from billing.logins where id = l and account = a)
-    and (select refresh_secret_id is not null from private.sunsynk_accounts where id = l));
-  perform pg_temp.choose(a, '{990090401}', now());                       -- the week starts: one login only
+    exists (select 1 from plants.logins where id = l and account = a)
+    and (select refresh_secret_id is not null from plants.logins where id = l));
+  perform pg_temp.choose(a, pg_temp.pids('{990090401}'), now());                       -- the week starts: one login only
   secrets := (select count(*) from vault.secrets);
   perform pg_temp.fails('FR4 a second login in the week: refused',
     format('select public.link_login_live(%L, ''fr4-other@mail.test'', ''tok'', 1, ''refresh-x'', ''[{"id":990090402}]'')', u), 'one login');
   perform pg_temp.ok('FR4 ... no login row and no secret left behind',
-    not exists (select 1 from private.sunsynk_accounts where user_id = u and sunsynk_username = 'fr4-other@mail.test')
+    not exists (select 1 from plants.logins where user_id = u and username = 'fr4-other@mail.test')
     and (select count(*) from vault.secrets) = secrets);
 exception when others then perform pg_temp.ok('FR4 runs', false, sqlerrm);
 end $$;
@@ -3004,27 +3026,26 @@ begin
   sh := pg_temp.share_login();
   -- A reads plant 990090501 through A's own login
   l := pg_temp.link(a, 'fr5a', '{990090501}', pg_temp.t(0)); perform pg_temp.stored(l);
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (990090501, ua, l, 'Mine');
   perform pg_temp.eq('FR5 another user''s own-login row does not block the claim',
-    public.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
+    pg_temp.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
   perform pg_temp.ok('FR5 ... billing and the link row agree',
-    (select account = b from billing.plant_claims where plant = 990090501)
-    and exists (select 1 from public.plant_users where plant_id = 990090501 and user_id = ub and via_share));
+    (select account = b from plants.claims where plant = pg_temp.pid(990090501))
+    and exists (select 1 from plants.user_plants where plant_id = pg_temp.pid(990090501) and user_id = ub and via_share));
   perform pg_temp.fails('FR5 a second claimant: taken',
-    format('select public.share_claim_live(%L, %L, 990090501, ''x'')', uc, sh), 'taken');
-  perform pg_temp.ok('FR5 ... and no link row for it', not exists (select 1 from public.plant_users where plant_id = 990090501 and user_id = uc));
+    format('select pg_temp.share_claim_live(%L, %L, 990090501, ''x'')', uc, sh), 'taken');
+  perform pg_temp.ok('FR5 ... and no link row for it', not exists (select 1 from plants.user_plants where plant_id = pg_temp.pid(990090501) and user_id = uc));
   -- B's week over unpaid: ended. A claim B holds is repaired; a new plant is refused.
   update billing.accounts set trial_started_at = now() - interval '10 days', trial_ends_at = now() - interval '3 days' where id = b;
-  delete from public.plant_users where plant_id = 990090501 and user_id = ub;
-  perform pg_temp.eq('FR5 ended: the claim it holds is repaired', public.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
+  delete from plants.login_plants where login = sh and plant = pg_temp.pid(990090501);
+  perform pg_temp.eq('FR5 ended: the claim it holds is repaired', pg_temp.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
   perform pg_temp.fails('FR5 ended: a new plant is refused',
-    format('select public.share_claim_live(%L, %L, 990090502, ''x'')', ub, sh), 'without a plan');
+    format('select pg_temp.share_claim_live(%L, %L, 990090502, ''x'')', ub, sh), 'without a plan');
 
   -- FR6: gone from the share login's list for over 50 minutes
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990090501 and user_id = ub;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.ok('FR6 the share removed: the billing claim goes', not exists (select 1 from billing.plant_claims where plant = 990090501));
-  perform pg_temp.eq('FR6 ... and someone else may claim it', public.share_claim_live(uc, sh, 990090501, 'Shared'), 'claimed');
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990090501);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.ok('FR6 the share removed: the billing claim goes', not exists (select 1 from plants.claims where plant = pg_temp.pid(990090501)));
+  perform pg_temp.eq('FR6 ... and someone else may claim it', pg_temp.share_claim_live(uc, sh, 990090501, 'Shared'), 'claimed');
 exception when others then perform pg_temp.ok('FR5 runs', false, sqlerrm);
 end $$;
 
@@ -3040,49 +3061,49 @@ begin
   select user_id into ua from billing.accounts where id = a;
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
-  perform pg_temp.eq('SH1 claimed', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
+  perform pg_temp.eq('SH1 claimed', pg_temp.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990092001}', now() - interval '1 day');
-  perform pg_temp.eq('SH1 read through the share login', pg_temp.lane_of(990092001, now()), sh::text);
+  perform pg_temp.choose(b, pg_temp.pids('{990092001}'), now() - interval '1 day');
+  perform pg_temp.eq('SH1 read through the share login', pg_temp.lane_of(pg_temp.pid(990092001), now()), sh::text);
 
-  perform public.share_sync(sh, '{}');
+  perform pg_temp.share_sync(sh, '{}');
   perform pg_temp.ok('SH1 first miss: noted', (select share_missing_at is not null and share_gone_at is null
-                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
-  perform pg_temp.eq('SH1 ... and still read', pg_temp.lane_of(990092001, now()), sh::text);
-  perform public.share_sync(sh, '{}');
+                                                 from plants.user_plants where plant_id = pg_temp.pid(990092001) and user_id = ub));
+  perform pg_temp.eq('SH1 ... and still read', pg_temp.lane_of(pg_temp.pid(990092001), now()), sh::text);
+  perform pg_temp.share_sync(sh, '{}');
   perform pg_temp.ok('SH1 a second miss within the hour: still read', (select share_gone_at is null
-                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+                                                 from plants.user_plants where plant_id = pg_temp.pid(990092001) and user_id = ub));
 
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990092001 and user_id = ub;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.ok('SH1 missing an hour: stopped', (select share_gone_at is not null
-                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990092001);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.ok('SH1 missing an hour: stopped (the claim is released, R8)', not exists (select 1
+                                                 from plants.user_plants where plant_id = pg_temp.pid(990092001) and user_id = ub));
   perform pg_temp.eq('SH1 ... one share_removed queued',
-    (select count(*)::text from public.email_queue where kind = 'share_removed' and plant_id = 990092001 and user_id = ub), '1');
-  perform pg_temp.eq('SH1 ... and not read', pg_temp.lane_of(990092001, now()), '<not read>');
+    (select count(*)::text from public.email_queue where kind = 'share_removed' and plant_id = pg_temp.pid(990092001) and user_id = ub), '1');
+  perform pg_temp.eq('SH1 ... and not read', pg_temp.lane_of(pg_temp.pid(990092001), now()), '<not read>');
 
-  perform public.share_sync(sh, '{990092001}');
-  perform pg_temp.ok('SH1 back in the list: waits for a claim', (select share_gone_at is not null
-                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
-  perform pg_temp.eq('SH1 ... still not read', pg_temp.lane_of(990092001, now()), '<not read>');
-  perform pg_temp.eq('SH1 claimed again', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
+  perform pg_temp.share_sync(sh, '{990092001}');
+  perform pg_temp.ok('SH1 back in the list: waits for a claim', not exists (select 1
+                                                 from plants.user_plants where plant_id = pg_temp.pid(990092001) and user_id = ub));
+  perform pg_temp.eq('SH1 ... still not read', pg_temp.lane_of(pg_temp.pid(990092001), now()), '<not read>');
+  perform pg_temp.eq('SH1 claimed again', pg_temp.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
   perform pg_temp.ok('SH1 ... live again', (select share_gone_at is null and share_missing_at is null
-                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
-  perform pg_temp.eq('SH1 ... and read', pg_temp.lane_of(990092001, now()), sh::text);
-  perform pg_temp.eq('SH1 claiming it again while live: yours', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'yours');
+                                                 from plants.user_plants where plant_id = pg_temp.pid(990092001) and user_id = ub));
+  perform pg_temp.eq('SH1 ... and read', pg_temp.lane_of(pg_temp.pid(990092001), now()), sh::text);
+  perform pg_temp.eq('SH1 claiming it again while live: yours', pg_temp.share_claim_live(ub, sh, 990092001, 'Shared'), 'yours');
 
   -- SH2: A claims another plant on the same share login; B sees only B's
-  perform pg_temp.eq('SH2 A claims another plant', public.share_claim_live(ua, sh, 990092002, 'Other'), 'claimed');
+  perform pg_temp.eq('SH2 A claims another plant', pg_temp.share_claim_live(ua, sh, 990092002, 'Other'), 'claimed');
   perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('SH2 B''s Logins: the share login, B''s plant only',
     (select l.kind || ':' || (select string_agg(x->>'plant_id', ',') from jsonb_array_elements(l.plants) x)
-       from public.api_logins() l where l.account_id = sh), 'share:990092001');
+       from public.api_logins() l where l.account_id = sh), 'share:' || pg_temp.pid(990092001));
   perform public.api_link_remove(sh);
   perform pg_temp.eq('SH2 B removed it: B''s link row goes',
-    (select count(*)::text from public.plant_users where plant_id = 990092001), '0');
-  perform pg_temp.ok('SH2 ... the share login stays', exists (select 1 from private.sunsynk_accounts where id = sh));
+    (select count(*)::text from plants.user_plants where plant_id = pg_temp.pid(990092001)), '0');
+  perform pg_temp.ok('SH2 ... the share login stays', exists (select 1 from plants.logins where id = sh));
   perform pg_temp.eq('SH2 ... A''s claim stays',
-    (select count(*)::text from public.plant_users where plant_id = 990092002 and user_id = ua), '1');
+    (select count(*)::text from plants.user_plants where plant_id = pg_temp.pid(990092002) and user_id = ua), '1');
   -- B holds no claim on the share login now: removing it again is refused
   begin
     perform public.api_link_remove(sh);
@@ -3093,13 +3114,13 @@ begin
   perform set_config('request.jwt.claims', '', true);
 
   -- SH3 A's claim lapses (share removed); B takes it over: A's row goes, one live claim
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990092002 and user_id = ua;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.ok('SH3 A''s claim lapsed', (select share_gone_at is not null from public.plant_users where plant_id = 990092002 and user_id = ua));
-  perform pg_temp.eq('SH3 B claims the lapsed share', public.share_claim_live(ub, sh, 990092002, 'Other'), 'claimed');
-  perform pg_temp.eq('SH3 ... A''s row goes', (select count(*)::text from public.plant_users where plant_id = 990092002 and user_id = ua), '0');
-  perform pg_temp.eq('SH3 ... one live claim', (select count(*)::text from public.plant_users
-                                                  where plant_id = 990092002 and via_share and share_gone_at is null), '1');
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990092002);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.ok('SH3 A''s claim lapsed (released, R8)', not exists (select 1 from plants.user_plants where plant_id = pg_temp.pid(990092002) and user_id = ua));
+  perform pg_temp.eq('SH3 B claims the lapsed share', pg_temp.share_claim_live(ub, sh, 990092002, 'Other'), 'claimed');
+  perform pg_temp.eq('SH3 ... A''s row goes', (select count(*)::text from plants.user_plants where plant_id = pg_temp.pid(990092002) and user_id = ua), '0');
+  perform pg_temp.eq('SH3 ... one live claim', (select count(*)::text from plants.user_plants
+                                                  where plant_id = pg_temp.pid(990092002) and via_share and share_gone_at is null), '1');
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('SH1-SH3 runs', false, sqlerrm);
 end $$;
 
@@ -3109,18 +3130,18 @@ declare a uuid := pg_temp.acct('fr7'); b uuid := pg_temp.acct('fr7b'); l uuid;
 begin
   l := pg_temp.link(a, 'fr7', '{990090701}', pg_temp.t(0));
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990090701}', pg_temp.t(0));
-  perform pg_temp.agg(990090701, pg_temp.t(0));
-  perform billing.remove_login(a, l, pg_temp.t(1));
-  perform pg_temp.ok('FR7 remove_login: history deleted now', not pg_temp.has_agg(990090701)
-    and (select history_purged_at is not null from billing.plants where id = 990090701));
-  perform billing.claim_plant(b, 990090702, 'Shared', 'sunsynk', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990090701}'), pg_temp.t(0));
+  perform pg_temp.agg(pg_temp.pid(990090701), pg_temp.t(0));
+  perform plants.remove_login(a, l, pg_temp.t(1));
+  perform pg_temp.ok('FR7 remove_login: history deleted now', not pg_temp.has_agg(pg_temp.pid(990090701))
+    and (pg_temp.purged(pg_temp.pid(990090701)) is not null));
+  perform plants.claim(b, 'sunsynk', '990090702', 'Shared', pg_temp.t(0));
   perform pg_temp.pay(b, 'home', 'month', pg_temp.t(0));
-  perform pg_temp.choose(b, '{990090702}', pg_temp.t(0));
-  perform pg_temp.agg(990090702, pg_temp.t(0));
-  perform billing.unclaim(b, '{990090702}', pg_temp.t(1));
-  perform pg_temp.ok('FR7 unclaim: history deleted now', not pg_temp.has_agg(990090702)
-    and (select history_purged_at is not null from billing.plants where id = 990090702));
+  perform pg_temp.choose(b, pg_temp.pids('{990090702}'), pg_temp.t(0));
+  perform pg_temp.agg(pg_temp.pid(990090702), pg_temp.t(0));
+  perform plants.unclaim(b, pg_temp.pids('{990090702}'), pg_temp.t(1));
+  perform pg_temp.ok('FR7 unclaim: history deleted now', not pg_temp.has_agg(pg_temp.pid(990090702))
+    and (pg_temp.purged(pg_temp.pid(990090702)) is not null));
 exception when others then perform pg_temp.ok('FR7 runs', false, sqlerrm);
 end $$;
 
@@ -3129,9 +3150,9 @@ do $$
 declare a uuid := pg_temp.acct('fr9a'); b uuid := pg_temp.acct('fr9b');
 begin
   perform pg_temp.link(b, 'fr9b', '{990090901}', pg_temp.t(0));
-  perform pg_temp.choose(b, '{990090901}', pg_temp.t(0));                 -- b's free week, to day 7
+  perform pg_temp.choose(b, pg_temp.pids('{990090901}'), pg_temp.t(0));                 -- b's free week, to day 7
   perform pg_temp.link(a, 'fr9a', '{990090901}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990090901}', pg_temp.t(0), 'AUTH_fr9a');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990090901}'), pg_temp.t(0), 'AUTH_fr9a');
   perform pg_temp.eqt('FR9 kept by a free week that ends first: this plan''s date decides',
     billing.screen_state(a, pg_temp.t(1))->>'if_cancelled_delete_at', (pg_temp.sub(a)).period_end + interval '30 days');
 exception when others then perform pg_temp.ok('FR9 runs', false, sqlerrm);
@@ -3164,10 +3185,10 @@ do $$
 declare a uuid := pg_temp.acct('v1'); i1 uuid; i2 uuid; ref text; r jsonb;
 begin
   perform pg_temp.link(a, 'v1', '{990100101,990100102,990100103}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990100101}', pg_temp.t(0), 'AUTH_v1');
-  i1 := (billing.upgrade(a, 'family', 0, '{990100101,990100102}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990100101}'), pg_temp.t(0), 'AUTH_v1');
+  i1 := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990100101,990100102}'), pg_temp.t(5))->>'invoice')::uuid;
   ref := billing.begin_attempt(i1, 'card_page', pg_temp.t(5))->>'reference';
-  i2 := (billing.upgrade(a, 'family', 0, '{990100101,990100102,990100103}', pg_temp.t(5))->>'invoice')::uuid;
+  i2 := (billing.upgrade(a, 'family', 0, pg_temp.pids('{990100101,990100102,990100103}'), pg_temp.t(5))->>'invoice')::uuid;
   perform pg_temp.answer(ref, 'pending', pg_temp.t(5) + interval '25 hours');
   perform pg_temp.eq('V1 a card page still pending after 24 h: pending, not failed',
     (select status from billing.payment_attempts where reference = ref), 'pending');
@@ -3185,17 +3206,17 @@ declare b uuid := pg_temp.acct('v12'); ub uuid; sh uuid;
 begin
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
-  perform pg_temp.eq('V12 claimed', public.share_claim_live(ub, sh, 990101201, 'Shared'), 'claimed');
+  perform pg_temp.eq('V12 claimed', pg_temp.share_claim_live(ub, sh, 990101201, 'Shared'), 'claimed');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990101201}', now() - interval '1 day');
-  perform pg_temp.agg(990101201, now() - interval '1 hour');
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990101201 and user_id = ub;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.ok('V12 the claim goes', not exists (select 1 from billing.plant_claims where plant = 990101201));
-  perform pg_temp.eq('V12 reading stops', pg_temp.pp(b, now(), 990101201, 'read_now'), 'false');
-  perform pg_temp.ok('V12 the seat stays', exists (select 1 from billing.seats where account = b and plant = 990101201 and closed_at is null));
-  perform pg_temp.ok('V12 the history stays', pg_temp.has_agg(990101201)
-    and (select history_purged_at is null from billing.plants where id = 990101201));
+  perform pg_temp.choose(b, pg_temp.pids('{990101201}'), now() - interval '1 day');
+  perform pg_temp.agg(pg_temp.pid(990101201), now() - interval '1 hour');
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990101201);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.ok('V12 the claim goes', not exists (select 1 from plants.claims where plant = pg_temp.pid(990101201)));
+  perform pg_temp.eq('V12 reading stops', pg_temp.pp(b, now(), pg_temp.pid(990101201), 'read_now'), 'false');
+  perform pg_temp.ok('V12 the seat stays', exists (select 1 from billing.seats where account = b and plant = pg_temp.pid(990101201) and closed_at is null));
+  perform pg_temp.ok('V12 the history stays', pg_temp.has_agg(pg_temp.pid(990101201))
+    and (pg_temp.purged(pg_temp.pid(990101201)) is null));
   perform pg_temp.ok('V12 logged', exists (select 1 from billing.account_events where account = b and actor = 'share_gone' and kind = 'unclaim'));
 exception when others then perform pg_temp.ok('V12 runs', false, sqlerrm);
 end $$;
@@ -3207,9 +3228,8 @@ begin
   select user_id into ua from billing.accounts where id = a;
   sh := pg_temp.share_login();
   l := pg_temp.link(a, 'v13', '{990101301}', pg_temp.t(0)); perform pg_temp.stored(l);
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (990101301, ua, l, 'Mine');
-  perform pg_temp.eq('V13 own login: yours', public.share_claim_live(ua, sh, 990101301, 'Mine'), 'yours');
-  perform pg_temp.ok('V13 ... and no claim row without a share route', not exists (select 1 from billing.plant_claims where plant = 990101301));
+  perform pg_temp.eq('V13 own login: yours', pg_temp.share_claim_live(ua, sh, 990101301, 'Mine'), 'yours');
+  perform pg_temp.ok('V13 ... and no claim row without a share route', not exists (select 1 from plants.claims where plant = pg_temp.pid(990101301)));
 exception when others then perform pg_temp.ok('V13 runs', false, sqlerrm);
 end $$;
 
@@ -3218,7 +3238,7 @@ do $$
 declare a uuid := pg_temp.acct('v15');
 begin
   perform pg_temp.member(a, 'v15', 990101501);
-  update billing.plants set history_purged_at = pg_temp.t(1) where id = 990101501;
+  insert into billing.plant_facts (plant, history_purged_at) values (pg_temp.pid(990101501), pg_temp.t(1)) on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
   perform pg_temp.eq('V15 only a purged plant chosen: no cancel date',
     coalesce(billing.screen_state(a, pg_temp.t(2))->>'if_cancelled_delete_at', 'null'), 'null');
 exception when others then perform pg_temp.ok('V15 runs', false, sqlerrm);
@@ -3230,14 +3250,14 @@ do $$
 declare b uuid := pg_temp.acct('v16b'); c uuid := pg_temp.acct('v16c'); pe timestamptz;
 begin
   pe := pg_temp.member(b, 'v16b', 990101601);
-  update billing.seats set drop_at_period_end = true where account = b and plant = 990101601;
+  update billing.seats set drop_at_period_end = true where account = b and plant = pg_temp.pid(990101601);
   perform pg_temp.eqt('V16 a booked drop: its billing date, no days after',
-    billing.kept_by_others_until(gen_random_uuid(), 990101601, pg_temp.t(1))::text, pe);
+    billing.kept_by_others_until(gen_random_uuid(), pg_temp.pid(990101601), pg_temp.t(1))::text, pe);
   perform pg_temp.link(c, 'v16c', '{990101602}', pg_temp.t(0));
   insert into billing.grants (account, places, reason, starts_at, ends_at) values (c, 5, 'comped', pg_temp.t(0), pg_temp.t(40));
-  perform pg_temp.choose(c, '{990101602}', pg_temp.t(0));
+  perform pg_temp.choose(c, pg_temp.pids('{990101602}'), pg_temp.t(0));
   perform pg_temp.eqt('V16 grant only: its end, then the days kept',
-    billing.kept_by_others_until(gen_random_uuid(), 990101602, pg_temp.t(1))::text, pg_temp.t(70));
+    billing.kept_by_others_until(gen_random_uuid(), pg_temp.pid(990101602), pg_temp.t(1))::text, pg_temp.t(70));
 exception when others then perform pg_temp.ok('V16 runs', false, sqlerrm);
 end $$;
 
@@ -3267,20 +3287,20 @@ declare b uuid := pg_temp.acct('w3'); ub uuid; sh uuid; r jsonb;
 begin
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
-  perform public.share_claim_live(ub, sh, 990110301, 'Gran');
+  perform pg_temp.share_claim_live(ub, sh, 990110301, 'Gran');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990110301}', now() - interval '1 day');
+  perform pg_temp.choose(b, pg_temp.pids('{990110301}'), now() - interval '1 day');
   perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
-  perform pg_temp.ok('W3 shared and chosen: seen', 990110301 = any (public.chosen_plant_ids(ub))
-    and exists (select 1 from public.my_plant_ids() x where x = 990110301));
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990110301 and user_id = ub;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.ok('W3 share removed: the emails no longer read it', not 990110301 = any (public.chosen_plant_ids(ub)));
-  perform pg_temp.ok('W3 ... and the user no longer sees it', not exists (select 1 from public.my_plant_ids() x where x = 990110301));
-  perform pg_temp.eq('W4 ... it keeps its name', pg_temp.pp(b, now(), 990110301, 'name'), 'Gran');
-  insert into billing.plant_claims (plant, account, claimed_at, plant_name) values (990110301, b, now(), 'Gran');
-  perform pg_temp.ok('W3 the share back: seen again', 990110301 = any (public.chosen_plant_ids(ub))
-    and exists (select 1 from public.my_plant_ids() x where x = 990110301));
+  perform pg_temp.ok('W3 shared and chosen: seen', pg_temp.pid(990110301) = any (public.chosen_plant_ids(ub))
+    and exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990110301)));
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990110301);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.ok('W3 share removed: the emails no longer read it', not pg_temp.pid(990110301) = any (public.chosen_plant_ids(ub)));
+  perform pg_temp.ok('W3 ... and the user no longer sees it', not exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990110301)));
+  perform pg_temp.eq('W4 ... it keeps its name', pg_temp.pp(b, now(), pg_temp.pid(990110301), 'name'), 'Gran');
+  insert into plants.claims (plant, account, claimed_at, plant_name) values (pg_temp.pid(990110301), b, now(), 'Gran');
+  perform pg_temp.ok('W3 the share back: seen again', pg_temp.pid(990110301) = any (public.chosen_plant_ids(ub))
+    and exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990110301)));
   perform set_config('request.jwt.claims', '', true);
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('W3 runs', false, sqlerrm);
 end $$;
@@ -3290,18 +3310,18 @@ declare b uuid := pg_temp.acct('w4'); ub uuid; sh uuid; r jsonb;
 begin
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
-  perform public.share_claim_live(ub, sh, 990110401, 'Gran');
+  perform pg_temp.share_claim_live(ub, sh, 990110401, 'Gran');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990110401}', now() - interval '1 day');
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990110401 and user_id = ub;
-  perform public.share_sync(sh, '{}');
-  perform pg_temp.eq('W4 a share removed: it keeps its name', pg_temp.pp(b, now(), 990110401, 'name'), 'Gran');
-  perform pg_temp.ok('W4 ... and an upgrade may keep it', billing.final_choice(b, '{990110401}', 5) = '{990110401}');
+  perform pg_temp.choose(b, pg_temp.pids('{990110401}'), now() - interval '1 day');
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = pg_temp.pid(990110401);
+  perform pg_temp.share_sync(sh, '{}');
+  perform pg_temp.eq('W4 a share removed: it keeps its name', pg_temp.pp(b, now(), pg_temp.pid(990110401), 'name'), 'Gran');
+  perform pg_temp.ok('W4 ... and an upgrade may keep it', billing.final_choice(b, pg_temp.pids('{990110401}'), 5) = pg_temp.pids('{990110401}'));
   perform pg_temp.fails('W4 a plant never chosen still needs a route',
-    format('select billing.final_choice(%L, %L, 5)', b, '{990110499}'), 'not on this account');
-  r := billing.set_chosen_plants(b, '{990110401}', now());
+    format('select billing.final_choice(%L, %L, 5)', b, pg_temp.pids('{990110499}')), 'not on this account');
+  r := billing.set_chosen_plants(b, pg_temp.pids('{990110401}'), now());
   perform pg_temp.ok('W4 saving the pick with it still chosen is allowed',
-    exists (select 1 from billing.seats where account = b and plant = 990110401 and closed_at is null));
+    exists (select 1 from billing.seats where account = b and plant = pg_temp.pid(990110401) and closed_at is null));
 exception when others then perform pg_temp.ok('W4 runs', false, sqlerrm);
 end $$;
 
@@ -3312,7 +3332,7 @@ begin
   perform pg_temp.member(a, 'w5', 990110501);
   perform billing.cancel(a, pg_temp.t(2));
   perform pg_temp.fails('W5 upgrade on a cancelled plan refused',
-    format('select billing.upgrade(%L, %L, 0, %L, %L)', a, 'family', '{990110501}', pg_temp.t(3)), 'the plan is cancelled');
+    format('select billing.upgrade(%L, %L, 0, %L, %L)', a, 'family', pg_temp.pids('{990110501}'), pg_temp.t(3)), 'the plan is cancelled');
 exception when others then perform pg_temp.ok('W5 runs', false, sqlerrm);
 end $$;
 
@@ -3336,12 +3356,12 @@ declare a uuid := pg_temp.acct('w12'); l uuid; r jsonb;
 begin
   l := pg_temp.link(a, 'w12', '{990111201}', pg_temp.t(0));
   perform pg_temp.stored(l);
-  perform pg_temp.buy(a, 'home', 'month', '{990111201}', pg_temp.t(0), 'AUTH_w12');
-  update billing.plants set history_purged_at = pg_temp.t(1) where id = 990111201;
-  r := public.poll_commit_v2(jsonb_build_object('990111201', pg_temp.ver(990111201)), l, extract(epoch from pg_temp.t(2))::bigint,
-         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', 990111201, 'pv_w', 5)), '[]', '[]', null, null, pg_temp.t(2));
-  perform pg_temp.ok('W12 written', r->>'refused' = '[]' and pg_temp.has_agg(990111201), r::text);
-  perform pg_temp.ok('W12 no longer marked deleted', (select history_purged_at is null from billing.plants where id = 990111201));
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990111201}'), pg_temp.t(0), 'AUTH_w12');
+  insert into billing.plant_facts (plant, history_purged_at) values (pg_temp.pid(990111201), pg_temp.t(1)) on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
+  r := public.poll_commit_v2(jsonb_build_object(pg_temp.pid(990111201)::text, pg_temp.ver(pg_temp.pid(990111201))), l, extract(epoch from pg_temp.t(2))::bigint,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', pg_temp.pid(990111201), 'pv_w', 5)), '[]', '[]', null, null, pg_temp.t(2));
+  perform pg_temp.ok('W12 written', r->>'refused' = '[]' and pg_temp.has_agg(pg_temp.pid(990111201)), r::text);
+  perform pg_temp.ok('W12 no longer marked deleted', (pg_temp.purged(pg_temp.pid(990111201)) is null));
 exception when others then perform pg_temp.ok('W12 runs', false, sqlerrm);
 end $$;
 
@@ -3351,7 +3371,7 @@ declare c uuid := pg_temp.acct('w13');
 begin
   perform pg_temp.link(c, 'w13', '{990111301}', pg_temp.t(0));
   insert into billing.grants (account, places, reason, starts_at, ends_at) values (c, 2, 'comped', pg_temp.t(0), pg_temp.t(10));
-  perform pg_temp.choose(c, '{990111301}', pg_temp.t(0));
+  perform pg_temp.choose(c, pg_temp.pids('{990111301}'), pg_temp.t(0));
   perform pg_temp.eq('W13 grant ended', billing.screen_state(c, pg_temp.t(12))->>'grant_ended', 'true');
   perform pg_temp.eq('W13 ... while it runs: not ended', billing.screen_state(c, pg_temp.t(5))->>'grant_ended', 'false');
 exception when others then perform pg_temp.ok('W13 runs', false, sqlerrm);
@@ -3369,35 +3389,34 @@ begin
   select user_id into uc from billing.accounts where id = c;
   sh := pg_temp.share_login();
   -- 990120101: shared to A, who chooses it; B holds it through its own login and plan (no plant_users row of B's)
-  perform public.share_claim_live(ua, sh, 990120101, 'Gran');
-  perform pg_temp.choose(a, '{990120101}', now() - interval '2 days');
+  perform pg_temp.share_claim_live(ua, sh, 990120101, 'Gran');
+  perform pg_temp.choose(a, pg_temp.pids('{990120101}'), now() - interval '2 days');
   lb := pg_temp.link(b, 'x1b', '{990120101}', now() - interval '2 days');
   perform pg_temp.stored(lb);
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990120101}', now() - interval '1 day');
-  perform pg_temp.agg(990120101, now() - interval '1 hour');
+  perform pg_temp.choose(b, pg_temp.pids('{990120101}'), now() - interval '1 day');
+  perform pg_temp.agg(pg_temp.pid(990120101), now() - interval '1 hour');
   -- 990120102: shared to C, who chooses it and is paying for it now (card page open)
-  perform public.share_claim_live(uc, sh, 990120102, 'Aunt');
-  perform pg_temp.choose(c, '{990120102}', now() - interval '2 days');
-  perform pg_temp.agg(990120102, now() - interval '1 hour');
-  inv := (billing.start_checkout(c, 'home', 'month', 0, '{990120102}', now())->>'invoice')::uuid;
+  perform pg_temp.share_claim_live(uc, sh, 990120102, 'Aunt');
+  perform pg_temp.choose(c, pg_temp.pids('{990120102}'), now() - interval '2 days');
+  perform pg_temp.agg(pg_temp.pid(990120102), now() - interval '1 hour');
+  inv := (billing.start_checkout(c, 'home', 'month', 0, pg_temp.pids('{990120102}'), now())->>'invoice')::uuid;
   perform billing.begin_attempt(inv, 'card_page', now());
   perform pg_temp.ok('X1 A and C each hold a seat on their shared plant', (select count(*) = 2 from billing.seats
-    where (account, plant) in ((a, 990120101), (c, 990120102)) and closed_at is null));
+    where (account, plant) in ((a, pg_temp.pid(990120101)), (c, pg_temp.pid(990120102))) and closed_at is null));
 
   begin
-    perform private.share_release(sh, ua);
-    perform private.share_release(sh, uc);
+    perform plants.unclaim(a, array[pg_temp.pid(990120101)]);
+    perform plants.unclaim(c, array[pg_temp.pid(990120102)]);
     res := res || jsonb_build_object('l', 'X1 share release queues no old wipe',
-      'p', not exists (select 1 from private.plant_purge where plant_id in (990120101, 990120102)));
+      'p', not exists (select 1 from private.plant_purge where plant_id in (pg_temp.pid(990120101), pg_temp.pid(990120102))));
     -- a tombstone left from before the switch is not acted on either
-    insert into private.plant_purge (plant_id) values (990120101), (990120102) on conflict do nothing;
-    perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
-      '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
-    res := res || jsonb_build_object('l', 'X1 relink: B''s plant keeps its history', 'p', pg_temp.has_agg(990120101));
-    res := res || jsonb_build_object('l', 'X1 relink: the plant being paid for keeps its history', 'p', pg_temp.has_agg(990120102));
+    insert into private.plant_purge (plant_id) values (pg_temp.pid(990120101)), (pg_temp.pid(990120102)) on conflict do nothing;
+    perform plants.list_seen(lb, '[{"id": 990120101, "name": "Gran"}, {"id": 990120102, "name": "Aunt"}]', now(), 'relink');
+    res := res || jsonb_build_object('l', 'X1 relink: B''s plant keeps its history', 'p', pg_temp.has_agg(pg_temp.pid(990120101)));
+    res := res || jsonb_build_object('l', 'X1 relink: the plant being paid for keeps its history', 'p', pg_temp.has_agg(pg_temp.pid(990120102)));
     res := res || jsonb_build_object('l', 'X1 the old purge does nothing',
-      'p', private.purge_plant(990120102) is null and pg_temp.has_agg(990120102));
+      'p', private.purge_plant(pg_temp.pid(990120102)) is null and pg_temp.has_agg(pg_temp.pid(990120102)));
     raise exception 'x1 undo';
   exception when others then
     if sqlerrm <> 'x1 undo' then res := res || jsonb_build_object('l', 'X1 direct releases run', 'p', false, 'd', sqlerrm); end if;
@@ -3412,32 +3431,31 @@ begin
   perform public.api_link_remove(sh);
   perform set_config('request.jwt.claims', '', true);
   perform pg_temp.ok('X1 removed in the app: both seats closed as login_removed', (select count(*) = 2 from billing.seats
-    where (account, plant) in ((a, 990120101), (c, 990120102)) and close_reason = 'login_removed' and closed_at is not null));
-  perform pg_temp.ok('X1 ... B''s plant is still protected, by B alone', (billing.plant_state(990120101, now())->>'protected')::boolean);
-  perform pg_temp.ok('X1 ... B''s plant keeps its history', pg_temp.has_agg(990120101));
-  perform pg_temp.ok('X1 ... the plant being paid for keeps its history', pg_temp.has_agg(990120102));
-  perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
-    '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
-  perform pg_temp.ok('X1 ... B relinks both plants', (select count(*) = 2 from public.plant_users where account_id = lb
-    and user_id = (select user_id from billing.accounts where id = b) and plant_id in (990120101, 990120102)));
-  perform pg_temp.ok('X1 ... and both keep their history', pg_temp.has_agg(990120101) and pg_temp.has_agg(990120102));
+    where (account, plant) in ((a, pg_temp.pid(990120101)), (c, pg_temp.pid(990120102))) and close_reason = 'login_removed' and closed_at is not null));
+  perform pg_temp.ok('X1 ... B''s plant is still protected, by B alone', (billing.plant_state(pg_temp.pid(990120101), now())->>'protected')::boolean);
+  perform pg_temp.ok('X1 ... B''s plant keeps its history', pg_temp.has_agg(pg_temp.pid(990120101)));
+  perform pg_temp.ok('X1 ... the plant being paid for keeps its history', pg_temp.has_agg(pg_temp.pid(990120102)));
+  perform plants.list_seen(lb, '[{"id": 990120101, "name": "Gran"}, {"id": 990120102, "name": "Aunt"}]', now(), 'relink');
+  perform pg_temp.ok('X1 ... B relinks both plants', (select count(*) = 2 from plants.user_plants where account_id = lb
+    and user_id = (select user_id from billing.accounts where id = b) and plant_id in (pg_temp.pid(990120101), pg_temp.pid(990120102))));
+  perform pg_temp.ok('X1 ... and both keep their history', pg_temp.has_agg(pg_temp.pid(990120101)) and pg_temp.has_agg(pg_temp.pid(990120102)));
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('X1 runs', false, sqlerrm);
 end $$;
 
 -- X3 a report on a plant the account no longer reaches (share removed) is not queued; one it
 --    reaches is (verify 3 fix 3).
 create function pg_temp.x3(p_tag text) returns text language plpgsql as $$
-declare b uuid := pg_temp.acct('x3' || p_tag); ub uuid; sh uuid; p bigint := 990120300 + length(p_tag); out text := '';
+declare b uuid := pg_temp.acct('x3' || p_tag); ub uuid; sh uuid; p bigint := pg_temp.pid(990120300 + length(p_tag)); out text := '';
 begin
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
-  perform public.share_claim_live(ub, sh, p, 'Gran');
+  perform pg_temp.share_claim_live(ub, sh, (select vendor_id::bigint from plants.plants where id = p), 'Gran');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
   perform pg_temp.choose(b, array[p], now() - interval '1 day');
   insert into public.email_queue (user_id, plant_id, kind, key) values (ub, p, 'report_week', 'report_week:x3a' || p_tag);
   if not exists (select 1 from public.email_queue where key = 'report_week:x3a' || p_tag) then out := out || 'reachable plant: no report; '; end if;
-  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = p and user_id = ub;
-  perform public.share_sync(sh, '{}');
+  update plants.login_plants set missing_since = now() - interval '1 hour' where login = sh and plant = p;
+  perform pg_temp.share_sync(sh, '{}');
   insert into public.email_queue (user_id, plant_id, kind, key) values (ub, p, 'report_week', 'report_week:x3b' || p_tag);
   if exists (select 1 from public.email_queue where key = 'report_week:x3b' || p_tag) then out := out || 'share removed: report queued; '; end if;
   return nullif(out, '');
@@ -3486,17 +3504,17 @@ begin
   select user_id into ub from billing.accounts where id = b;
   sh := pg_temp.share_login();
   l := pg_temp.link(b, 'x9', '{990120901,990120902}', now() - interval '2 days');
-  perform public.share_claim_live(ub, sh, 990120903, 'Gran');
+  perform pg_temp.share_claim_live(ub, sh, 990120903, 'Gran');
   perform pg_temp.pay(b, 'family', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990120901,990120902,990120903}', now() - interval '1 day');
-  update billing.login_plants set gone_at = now() - interval '1 hour' where login = l and plant = 990120902;
+  perform pg_temp.choose(b, pg_temp.pids('{990120901,990120902,990120903}'), now() - interval '1 day');
+  update plants.login_plants set gone_at = now() - interval '1 hour' where login = l and plant = pg_temp.pid(990120902);
   ss := billing.screen_state(b, now());
   perform pg_temp.eq('X9 gone from L1: shown under L1', (select e->>'gone_logins' from jsonb_array_elements(ss->'plants') e
-    where (e->>'plant')::bigint = 990120902), jsonb_build_array(l)::text);
-  perform pg_temp.eq('X9 claimed plant: shared', pg_temp.pp(b, now(), 990120903, 'name') || ' ' || (select e->>'shared'
-    from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990120903), 'Gran true');
+    where (e->>'plant')::bigint = pg_temp.pid(990120902)), jsonb_build_array(l)::text);
+  perform pg_temp.eq('X9 claimed plant: shared', pg_temp.pp(b, now(), pg_temp.pid(990120903), 'name') || ' ' || (select e->>'shared'
+    from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = pg_temp.pid(990120903)), 'Gran true');
   perform pg_temp.eq('X9 a login''s plant: not shared', (select e->>'shared' from jsonb_array_elements(ss->'plants') e
-    where (e->>'plant')::bigint = 990120901), 'false');
+    where (e->>'plant')::bigint = pg_temp.pid(990120901)), 'false');
 exception when others then perform pg_temp.ok('X9 runs', false, sqlerrm);
 end $$;
 
@@ -3516,22 +3534,20 @@ begin
   select user_id into ub from billing.accounts where id = b;
   l := pg_temp.link(b, 'y2', '{990130201,990130202,990130203}', now() - interval '2 days');
   perform pg_temp.pay(b, 'family', 'month', now() - interval '1 day');
-  perform pg_temp.choose(b, '{990130201,990130202,990130203}', now() - interval '1 day');
-  insert into public.plant_users (plant_id, user_id, plant_name)
-  select x, ub, 'Plant ' || x from unnest('{990130201,990130202,990130203}'::bigint[]) x on conflict do nothing;
+  perform pg_temp.choose(b, pg_temp.pids('{990130201,990130202,990130203}'), now() - interval '1 day');
   insert into public.email_queue (user_id, plant_id, kind, key) values
-    (ub, 990130201, 'report_week', 'report_week:y2a'), (ub, 990130202, 'report_week', 'report_week:y2b'),
-    (ub, 990130203, 'report_week', 'report_week:y2c'), (ub, null, 'report_month', 'report_month:y2');
+    (ub, pg_temp.pid(990130201), 'report_week', 'report_week:y2a'), (ub, pg_temp.pid(990130202), 'report_week', 'report_week:y2b'),
+    (ub, pg_temp.pid(990130203), 'report_week', 'report_week:y2c'), (ub, null, 'report_month', 'report_month:y2');
   perform pg_temp.eq('Y2 the reports wait in the bulk lane', (select count(*)::text from msg.outbox o join public.email_queue q
     on q.id = o.event_id where q.user_id = ub and o.lane = 'bulk' and o.status = 'queued' and o.not_before <= now()), '4');
-  update billing.seats set closed_at = now(), close_reason = 'switched' where account = b and plant = 990130202;
-  update billing.login_plants set gone_at = now() where login = l and plant = 990130203;
+  update billing.seats set closed_at = now(), close_reason = 'switched' where account = b and plant = pg_temp.pid(990130202);
+  update plants.login_plants set gone_at = now() where login = l and plant = pg_temp.pid(990130203);
   select string_agg(t.key, ',' order by t.key) into got from public.msg_email_take(100000, 'bulk') t where t.user_id = ub;
   perform pg_temp.eq('Y2 let go and gone from its login: dropped when sent', got, 'report_month:y2,report_week:y2a');
   perform pg_temp.eq('Y2 ... each with its reason', pg_temp.dropped(ub, '{report_week:y2b,report_week:y2c}'),
     'report_week:y2b=report not wanted,report_week:y2c=report not wanted');
   insert into public.email_queue (user_id, plant_id, kind, key) values
-    (ub, 990130201, 'report_week', 'report_week:y2d'), (ub, null, 'report_month', 'report_month:y2e');
+    (ub, pg_temp.pid(990130201), 'report_week', 'report_week:y2d'), (ub, null, 'report_month', 'report_month:y2e');
   perform billing.end_sub((pg_temp.sub(b)).id, now(), 'test', now(), 'test');
   select string_agg(t.key, ',' order by t.key) into got from public.msg_email_take(100000, 'bulk') t where t.user_id = ub;
   perform pg_temp.eq('Y2 plan ended: no report sent', got, null);
@@ -3551,22 +3567,19 @@ begin
   perform pg_temp.pay(b, 'family', 'month', now() - interval '2 days');
   l1 := pg_temp.link(b, 'y3a', '{990130301,990130302}', now() - interval '2 days');
   l2 := pg_temp.link(b, 'y3b', '{990130301}', now() - interval '2 days');
-  perform pg_temp.choose(b, '{990130301,990130302}', now() - interval '1 day');
-  update billing.login_plants set gone_at = now() - interval '1 hour' where plant in (990130301, 990130302);
-  -- the old link row a plant gone from the user's own login keeps (share_gone_at set, 0203) (verify 5 fix 9)
-  insert into public.plant_users (plant_id, user_id, plant_name, share_gone_at)
-  values (990130302, ub, 'Gran', now() - interval '1 hour')
-  on conflict (plant_id, user_id) do update set via_share = false, share_gone_at = excluded.share_gone_at;
-  perform pg_temp.eq('Y3 a plant gone from the own login can be claimed', public.share_claim_live(ub, sh, 990130302, 'Gran'), 'claimed');
+  perform pg_temp.choose(b, pg_temp.pids('{990130301,990130302}'), now() - interval '1 day');
+  update plants.login_plants set gone_at = now() - interval '1 hour' where plant in (pg_temp.pid(990130301), pg_temp.pid(990130302));
+  -- the link row of a plant gone from the user's own login (gone_at set above) stays in plants.login_plants
+  perform pg_temp.eq('Y3 a plant gone from the own login can be claimed', pg_temp.share_claim_live(ub, sh, 990130302, 'Gran'), 'claimed');
   ss := billing.screen_state(b, now());
   perform pg_temp.eq('Y3 gone from two logins: no live login, both gone',
     (select (e->'logins')::text || ' ' || (e->'gone_logins')::text from jsonb_array_elements(ss->'plants') e
-      where (e->>'plant')::bigint = 990130301), '[] ' || jsonb_build_array(l1, l2)::text);
+      where (e->>'plant')::bigint = pg_temp.pid(990130301)), '[] ' || jsonb_build_array(l1, l2)::text);
   perform pg_temp.eq('Y3 gone from a login, then claimed: no live login, claimed',
     (select (e->'logins')::text || ' ' || (e->'gone_logins')::text || ' ' || (e->>'claimed') from jsonb_array_elements(ss->'plants') e
-      where (e->>'plant')::bigint = 990130302), '[] ' || jsonb_build_array(l1)::text || ' true');
+      where (e->>'plant')::bigint = pg_temp.pid(990130302)), '[] ' || jsonb_build_array(l1)::text || ' true');
   begin
-    r := billing.remove_login(b, l1, now());
+    r := plants.remove_login(b, l1, now());
     perform pg_temp.eq('Y3 removing L1 closes the plant gone from both, not the claimed one',
       (select string_agg(plant::text, ',' order by plant) from billing.seats where account = b and close_reason = 'login_removed'), '990130301');
     raise exception 'y3 undo';
@@ -3610,11 +3623,11 @@ do $$
 declare a uuid := pg_temp.acct('z6'); inv uuid; ss jsonb;
 begin
   perform pg_temp.link(a, 'z6', '{990130601}', now() - interval '1 hour');
-  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990130601}', now())->>'invoice')::uuid;
+  inv := (billing.start_checkout(a, 'home', 'month', 0, pg_temp.pids('{990130601}'), now())->>'invoice')::uuid;
   perform billing.begin_attempt(inv, 'card_page', now());
   ss := billing.screen_state(a, now());
   perform pg_temp.eq('Z6 a plant with a payment on its way: payment_hold',
-    (select e->>'payment_hold' from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990130601), 'true');
+    (select e->>'payment_hold' from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = pg_temp.pid(990130601)), 'true');
 exception when others then perform pg_temp.ok('Z6 runs', false, sqlerrm);
 end $$;
 
@@ -3638,21 +3651,21 @@ begin
   select user_id into ub from billing.accounts where id = b;
   perform pg_temp.link(b, 'z8b', '{990140001,990140002}', now() - interval '50 days');
   perform pg_temp.pay(b, 'home', 'month', now() - interval '41 days');
-  perform pg_temp.choose(b, '{990140001,990140002}', now() - interval '41 days');
+  perform pg_temp.choose(b, pg_temp.pids('{990140001,990140002}'), now() - interval '41 days');
   -- cancelled: the job ends the plan at its date, 10 days ago
   update billing.subscriptions set cancel_at_period_end = true where account = b;
   perform billing.run_one((select id from billing.subscriptions where account = b), now());
   perform pg_temp.link(a, 'z8a', '{990140001}', now() - interval '2 days');
   perform pg_temp.pay(a, 'home', 'month', now() - interval '1 day');
-  perform pg_temp.choose(a, '{990140001}', now() - interval '1 day');
+  perform pg_temp.choose(a, pg_temp.pids('{990140001}'), now() - interval '1 day');
   perform pg_temp.eq('Z8 b has ended', pg_temp.st(b, now(), 'state'), 'ended');
   perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
   perform pg_temp.ok('Z8 ended: the plant another account pays for is not seen',
-    not exists (select 1 from public.my_plant_ids() x where x = 990140001));
+    not exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990140001)));
   perform pg_temp.ok('Z8 ended: its own plant is seen while its history is kept',
-    exists (select 1 from public.my_plant_ids() x where x = 990140002));
+    exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990140002)));
   perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
-  perform pg_temp.ok('Z8 the payer sees it', exists (select 1 from public.my_plant_ids() x where x = 990140001));
+  perform pg_temp.ok('Z8 the payer sees it', exists (select 1 from public.my_plant_ids() x where x = pg_temp.pid(990140001)));
   perform set_config('request.jwt.claims', '', true);
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('Z8 runs', false, sqlerrm);
 end $$;
@@ -3663,7 +3676,7 @@ do $$
 declare a uuid := pg_temp.acct('z9'); x jsonb;
 begin
   perform pg_temp.link(a, 'z9', '{990140101}', pg_temp.t(0));
-  perform pg_temp.choose(a, '{990140101}', pg_temp.t(0));
+  perform pg_temp.choose(a, pg_temp.pids('{990140101}'), pg_temp.t(0));
   delete from public.email_prefs where user_id = (select user_id from billing.accounts where id = a);
   perform billing.outbox_sweep(pg_temp.t(7.1));
   select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(7.1))) e
@@ -3698,8 +3711,8 @@ end $$;
 do $$
 declare body text := pg_get_functiondef('public.api_account_delete()'::regprocedure); at int[]; l text;
 begin
-  foreach l in array array['pg_advisory_xact_lock_shared(3, 0)', 'union select account_id from public.plant_users',
-    'pg_advisory_xact_lock(1, hashtext(acc.id::text))', 'where user_id = uid order by plant_id for update', 'billing.delete_account('] loop
+  foreach l in array array['pg_advisory_xact_lock_shared(3, 0)', 'union select account_id from plants.user_plants',
+    'pg_advisory_xact_lock(1, hashtext(acc.id::text))', 'where l.user_id = uid order by lp.login, lp.plant for update of lp', 'billing.delete_account('] loop
     at := at || strpos(body, l);
   end loop;
   perform pg_temp.ok('Z11 api_account_delete takes each lock, in order, before the account',
@@ -3833,35 +3846,35 @@ begin
   select user_id into u from billing.accounts where id = a;
   l := pg_temp.link(a, 'h659', '{990065901,990065902}', pg_temp.t(40)); perform pg_temp.stored(l);
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(40));
-  perform pg_temp.choose(a, '{990065901}', pg_temp.t(40));
-  perform pg_temp.agg(990065901, pg_temp.t(40));
-  perform pg_temp.ok('H1 read before', (billing.plant_state(990065901, pg_temp.t(40))->>'read_now')::boolean);
-  r := pg_temp.choose(a, '{990065902}', pg_temp.t(40.1));
+  perform pg_temp.choose(a, pg_temp.pids('{990065901}'), pg_temp.t(40));
+  perform pg_temp.agg(pg_temp.pid(990065901), pg_temp.t(40));
+  perform pg_temp.ok('H1 read before', (billing.plant_state(pg_temp.pid(990065901), pg_temp.t(40))->>'read_now')::boolean);
+  r := pg_temp.choose(a, pg_temp.pids('{990065902}'), pg_temp.t(40.1));
   perform pg_temp.ok('H1 switched out: listed, rows not gone in the request',
-    private.history_deleting(990065901) and pg_temp.has_agg(990065901));
-  perform pg_temp.ok('H1 ... marked deleted at once', (select history_purged_at is not null from billing.plants where id = 990065901));
+    private.history_deleting(pg_temp.pid(990065901)) and pg_temp.has_agg(pg_temp.pid(990065901)));
+  perform pg_temp.ok('H1 ... marked deleted at once', (pg_temp.purged(pg_temp.pid(990065901)) is not null));
   perform pg_temp.eq('H1 ... the account state says deleting',
-    (select x->>'deleting' from jsonb_array_elements(r->'plants') x where (x->>'plant')::bigint = 990065901), 'true');
+    (select x->>'deleting' from jsonb_array_elements(r->'plants') x where (x->>'plant')::bigint = pg_temp.pid(990065901)), 'true');
   perform pg_temp.fails('H2 switching straight back: refused',
-    format('select billing.set_chosen_plants(%L, ''{990065901}'', %L)', a, pg_temp.t(40.2)), 'still being deleted');
+    format('select billing.set_chosen_plants(%L, pg_temp.pids(''{990065901}''), %L)', a, pg_temp.t(40.2)), 'still being deleted');
   perform pg_temp.fails('H2 picking it for a bill: refused',
-    format('select billing.final_choice(%L, ''{990065901}'', 2)', a), 'still being deleted');
+    format('select billing.final_choice(%L, pg_temp.pids(''{990065901}''), 2)', a), 'still being deleted');
   -- a paid restart reopens the seat (write_seats): not refused, but not read, written or shown
-  insert into billing.seats (account, plant, chosen_at) values (a, 990065901, pg_temp.t(40.3));
-  update billing.plants set history_purged_at = null where id = 990065901;
-  perform pg_temp.ok('H3 seat open while listed: not read', not (billing.plant_state(990065901, pg_temp.t(40.4))->>'read_now')::boolean);
-  perform pg_temp.ok('H3 ... no history fetch step', not billing.reads_plant(a, 990065901, pg_temp.t(40.4)));
+  insert into billing.seats (account, plant, chosen_at) values (a, pg_temp.pid(990065901), pg_temp.t(40.3));
+  insert into billing.plant_facts (plant, history_purged_at) values (pg_temp.pid(990065901), null) on conflict (plant) do update set history_purged_at = excluded.history_purged_at;
+  perform pg_temp.ok('H3 seat open while listed: not read', not (billing.plant_state(pg_temp.pid(990065901), pg_temp.t(40.4))->>'read_now')::boolean);
+  perform pg_temp.ok('H3 ... no history fetch step', not billing.reads_plant(a, pg_temp.pid(990065901), pg_temp.t(40.4)));
   perform pg_temp.ok('H3 ... a poll write refused', cardinality(billing.write_allowed_set(
-    jsonb_build_object('990065901', (select version from billing.plants where id = 990065901)), pg_temp.t(40.4))) = 0);
-  perform pg_temp.ok('H3 ... not read by the poller', not exists (select 1 from billing.plants_read_now('{990065901}', pg_temp.t(40.4))));
-  perform pg_temp.ok('H3 ... the inverter prune skips it', public.q_prune_inverter_history(990065901) = 0);
+    jsonb_build_object(pg_temp.pid(990065901)::text, (select version from plants.plants where id = pg_temp.pid(990065901))), pg_temp.t(40.4))) = 0);
+  perform pg_temp.ok('H3 ... not read by the poller', not exists (select 1 from billing.plants_read_now(pg_temp.pids('{990065901}'), pg_temp.t(40.4))));
+  perform pg_temp.ok('H3 ... the inverter prune skips it', public.q_prune_inverter_history(pg_temp.pid(990065901)) = 0);
   perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
-  perform pg_temp.ok('H3 ... its old rows not shown', 990065901 not in (select public.my_plant_ids()));
+  perform pg_temp.ok('H3 ... its old rows not shown', pg_temp.pid(990065901) not in (select public.my_plant_ids()));
   -- the run finishes
-  perform private.plant_readings_delete(990065901);
-  delete from private.history_delete_queue where plant_id = 990065901;
-  perform pg_temp.ok('H4 off the list: read again', (billing.plant_state(990065901, pg_temp.t(40.5))->>'read_now')::boolean);
-  perform pg_temp.ok('H4 ... shown again', 990065901 in (select public.my_plant_ids()));
+  perform private.plant_readings_delete(pg_temp.pid(990065901));
+  delete from private.history_delete_queue where plant_id = pg_temp.pid(990065901);
+  perform pg_temp.ok('H4 off the list: read again', (billing.plant_state(pg_temp.pid(990065901), pg_temp.t(40.5))->>'read_now')::boolean);
+  perform pg_temp.ok('H4 ... shown again', pg_temp.pid(990065901) in (select public.my_plant_ids()));
   perform set_config('request.jwt.claims', '', true);
   alter table private.history_delete_queue enable trigger t659_drain;
 exception when others then perform pg_temp.ok('H runs', false, sqlerrm);
@@ -3874,8 +3887,8 @@ do $$
 declare a uuid := pg_temp.acct('z11'); b uuid := pg_temp.acct('z11b'); r jsonb; ref text; x jsonb;
 begin
   perform pg_temp.link(a, 'z11', '{990141101,990141102,990141103}', pg_temp.t(0));
-  perform pg_temp.buy(a, 'home', 'month', '{990141101,990141102}', pg_temp.t(0), 'AUTH_z11');
-  r := billing.upgrade(a, 'family', 0, '{990141101,990141102,990141103}', pg_temp.t(10), p_interval => 'year');
+  perform pg_temp.buy(a, 'home', 'month', pg_temp.pids('{990141101,990141102}'), pg_temp.t(0), 'AUTH_z11');
+  r := billing.upgrade(a, 'family', 0, pg_temp.pids('{990141101,990141102,990141103}'), pg_temp.t(10), p_interval => 'year');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
   perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_z11');
   select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(10.01))) e
@@ -3884,8 +3897,8 @@ begin
     and (x->'bill'->>'next_amount_minor')::int = 99000 and (x->'bill'->>'period_start')::timestamptz = pg_temp.t(10),
     coalesce(x->>'bill', 'none'));
   perform pg_temp.link(b, 'z11b', '{990141111,990141112,990141113}', pg_temp.t(0));
-  perform pg_temp.buy(b, 'home', 'year', '{990141111,990141112}', pg_temp.t(0), 'AUTH_z11b');
-  r := billing.upgrade(b, 'family', 0, '{990141111,990141112,990141113}', pg_temp.t(100), p_interval => 'month');
+  perform pg_temp.buy(b, 'home', 'year', pg_temp.pids('{990141111,990141112}'), pg_temp.t(0), 'AUTH_z11b');
+  r := billing.upgrade(b, 'family', 0, pg_temp.pids('{990141111,990141112,990141113}'), pg_temp.t(100), p_interval => 'month');
   ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(100))->>'reference';
   perform pg_temp.answer(ref, 'ok', pg_temp.t(100), 'AUTH_z11b');
   select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(100.01))) e

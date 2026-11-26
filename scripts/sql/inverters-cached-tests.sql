@@ -15,13 +15,13 @@ do $$
 declare
   ua uuid := '7a1e0c52-5750-4d5b-9b1e-000000000575';
   ub uuid := '7a1e0c52-5750-4d5b-9b1e-000000000576';
-  a uuid; b uuid; p bigint := 990575; other bigint := 990576;
+  a uuid; b uuid; p bigint := plants.plant_for('sunsynk', '990575'); other bigint := plants.plant_for('sunsynk', '990576');
   cached_a text; cached_b text;
 begin
   a := public.account_upsert(ua, 'cache-a@local.test', 'tok', 9999999999999);
   b := public.account_upsert(ub, 'cache-b@local.test', 'tok', 9999999999999);
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values
-    (p, ua, a, 'Two logins'), (p, ub, b, 'Two logins'), (other, ub, b, 'B only');
+  insert into plants.login_plants (login, plant, plant_name) values
+    (a, p, 'Two logins'), (b, p, 'Two logins'), (b, other, 'B only');
 
   -- A's minute commit files the serials under A
   perform public.inverters_seed(jsonb_build_array(
@@ -50,7 +50,7 @@ begin
   insert into t values ('B after A commit', cached_b, 'SOL575A,SOL575B,SOL575C');
 
   -- A login linked to no plant sees only what is filed under it
-  delete from public.plant_users where account_id = a;
+  delete from plants.login_plants where login = a;
   update private.inverters set account_id = b where plant_id = p;
   insert into t values ('A unlinked sees none', (select count(*)::text from public.inverters_cached(a)), '0');
 end $$;

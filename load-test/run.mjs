@@ -88,8 +88,8 @@ function sample() {
 }
 
 const ownerSql = (plant) => `begin;
-select set_config('request.jwt.claim.sub', (select user_id::text from public.plant_users where plant_id = ${plant}), true);
-select set_config('request.jwt.claims', json_build_object('sub', (select user_id from public.plant_users where plant_id = ${plant}), 'role', 'authenticated')::text, true);
+select set_config('request.jwt.claim.sub', (select user_id::text from plants.user_plants where plant_id = ${plant}), true);
+select set_config('request.jwt.claims', json_build_object('sub', (select user_id from plants.user_plants where plant_id = ${plant}), 'role', 'authenticated')::text, true);
 set local role authenticated;
 select 'PAGES ' || loadtest.time_pages(${plant})::text;
 commit;`;
@@ -97,7 +97,7 @@ commit;`;
 async function main() {
   const accounts = JSON.parse(sql(`select coalesce(json_agg(json_build_object('plant', pu.plant_id, 'account', pu.account_id,
       'sns', array['LT' || pu.plant_id || 'A', 'LT' || pu.plant_id || 'B']) order by pu.plant_id), '[]')
-    from public.plant_users pu where pu.plant_id between 900001 and ${900000 + INVERTERS / 2}`));
+    from plants.user_plants pu where pu.plant_id between 900001 and ${900000 + INVERTERS / 2}`));
   if (accounts.length * 2 !== INVERTERS) throw new Error(`fleet has ${accounts.length * 2} inverters, wanted ${INVERTERS}: run loadtest.add_fleet first`);
   const pool = Array.from({ length: WORKERS }, worker);
   let pageOut = "";

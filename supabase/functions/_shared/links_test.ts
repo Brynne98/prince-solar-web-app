@@ -14,7 +14,7 @@ const answering = (data: unknown): { rpc: Rpc; calls: string[] } => {
   const calls: string[] = [];
   return { calls, rpc: (fn) => { calls.push(fn); return Promise.resolve({ data, error: null }); } };
 };
-const plant = { id: 1, name: "A" };
+const plant = { vendorId: "1", name: "A" };
 Deno.test("live: claim_plant's refusal is the answer (fix 5)", async () => {
   const { rpc } = failing("taken");
   const e = await assertRejects(() => claimAny(rpc, note, "u", "sh", plant), Refused);
@@ -30,17 +30,11 @@ Deno.test("live: any other claim failure is an error, never a success (fix 5)", 
   await assertRejects(() => claimAny(rpc, note, "u", "sh", plant), Error, "share_claim_any");
 });
 Deno.test("a claim is one call, the switch read inside it (final re-score, Sol)", async () => {
-  const { rpc, calls } = answering({ result: "claimed", copy_error: null });
+  const { rpc, calls } = answering({ result: "claimed", plant: 1000000000001 });
   notes.length = 0;
-  assertEquals(await claimAny(rpc, note, "u", "sh", plant), "claimed");
+  assertEquals(await claimAny(rpc, note, "u", "sh", plant), { result: "claimed", plant: 1000000000001 });
   assertEquals(calls, ["share_claim_any"]);
   assertEquals(notes, []);
-});
-Deno.test("before the switch: a failed copy is only noted", async () => {
-  const { rpc } = answering({ result: "yours", copy_error: "whatever" });
-  notes.length = 0;
-  assertEquals(await claimAny(rpc, note, "u", "sh", plant), "yours");
-  assertEquals(notes, ["claim_plant_failed"]);
 });
 Deno.test("live: link_login's refusal stops the link (fix 6)", async () => {
   const { rpc, calls } = failing("one login during the free week");
@@ -85,7 +79,7 @@ Deno.test("live link: one call, a refusal is the answer (final fix 4)", async ()
 });
 Deno.test("live claim: one call, taken is the answer (final fix 5)", async () => {
   const { rpc, calls } = failing("taken");
-  const e = await assertRejects(() => claimAny(rpc, note, "u", "share", { id: 1, name: "A" }), Refused);
+  const e = await assertRejects(() => claimAny(rpc, note, "u", "share", { vendorId: "1", name: "A" }), Refused);
   assertEquals(e.answer, "taken");
   assertEquals(calls, ["share_claim_any:undefined"]);
 });

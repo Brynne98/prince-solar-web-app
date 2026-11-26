@@ -2687,7 +2687,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
   // Each plant once, with its state from the account: chosen and read, locked, reconnect, or
   // waiting to be deleted (its "kept until" only when it has a delete date).
   const plantOk = {};
-  live.forEach(a => (a.plants || []).forEach(p => { plantOk[p.plant_id] = plantOk[p.plant_id] || a.status === 'active'; }));
+  live.forEach(a => (a.plants || []).forEach(p => { plantOk[p.plant_id] = plantOk[p.plant_id] || a.status === 'ok'; }));
   const allPlants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   const stateOf = (id) => acct?.plants.find(x => x.plant === Number(id));
   const [choosing, setChoosing] = useState(false);
@@ -2754,7 +2754,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
         <>
           {choosing && <ChooseDialog acct={acct} from="plants" onDone={(ids) => { setChoosing(false); if (ids) { refresh(); onChanged && onChanged({ plants: ids.map(id => ({ id })) }, true); } }} />}
           {live.map(acc => {
-            const ok = acc.status === 'active';
+            const ok = acc.status === 'ok';
             const plants = acc.plants || [];
             // Plants shared to our login (SOLAR-310): the login is ours, so no password to change.
             const shared = acc.kind === 'share';
@@ -3414,7 +3414,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   // With no plan nothing is read, so none.
   const onPlants = acct?.state === 'ended' ? [] : plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
   // A dead login marks Plants, as a failed payment marks Billing.
-  const relink = live.some(a => a.status === 'needs_relink' && a.kind !== 'share');
+  const relink = live.some(a => a.status === 'needs_reconnect' && a.kind !== 'share');
   // a payment the bank is still answering needs nothing from the owner: no dot
   const dot = { billing: (acct?.state === 'past_due' && acct.past_due_reason !== 'checking') || !!acct?.must_choose, plants: relink };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? planFrom : page;

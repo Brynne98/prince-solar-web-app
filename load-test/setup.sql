@@ -11,25 +11,31 @@ create or replace function loadtest.add_fleet(p_inverters int)
 returns int language plpgsql as $$
 declare k int; pid bigint; uid uuid; aid uuid; have int;
 begin
-  select count(*) into have from public.plant_users where plant_id > 900000;
+  select count(*) into have from plants.user_plants where plant_id > 900000;
   for k in have + 1 .. p_inverters / 2 loop
     pid := 900000 + k;
     uid := gen_random_uuid();
     insert into auth.users (id, aud, role, email, email_confirmed_at)
       values (uid, 'authenticated', 'authenticated', 'lt' || k || '@loadtest.invalid', now());
-    insert into private.sunsynk_accounts (user_id, sunsynk_username, access_token, access_expires_at, status, provider)
-      values (uid, 'lt' || k, 'at:lt' || k, 4102444800000, 'active', 'sunsynk')  -- stack.mjs's token
+    insert into plants.logins (user_id, account, brand, username, access_token, access_expires_at, status, kind)
+      values (uid, billing.account_of(uid, true), 'sunsynk', 'lt' || k, 'at:lt' || k, 4102444800000, 'ok', 'login')  -- stack.mjs's token
       returning id into aid;
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name)
-      values (pid, uid, aid, 'Load test ' || k);
-    insert into public.plant_config (plant_id, timezone, has_grid, has_battery, batt_positive_means)
-      values (pid, 'Africa/Johannesburg', true, true, 'charging')
+    -- the fake plants keep the ids 900001.. (the page and poll scripts use them): the way a plant
+    -- gets its own id (plants.plant_for, 1e12 up) is switched off for these rows, as for legacy ones
+    alter table plants.plants disable trigger plants_new_guard;
+    insert into plants.plants (id, brand, vendor_id, time_zone, legacy)
+      values (pid, 'sunsynk', pid::text, 'Africa/Johannesburg', true) on conflict do nothing;
+    alter table plants.plants enable trigger plants_new_guard;
+    insert into plants.login_plants (login, plant, plant_name)
+      values (aid, pid, 'Load test ' || k);
+    insert into public.plant_config (plant_id, has_grid, has_battery, batt_positive_means)
+      values (pid, true, true, 'charging')
       on conflict (plant_id) do nothing;
     insert into private.inverters (sn, plant_id, account_id)
       values ('LT' || pid || 'A', pid, aid), ('LT' || pid || 'B', pid, aid)
       on conflict do nothing;
   end loop;
-  return (select count(*) from public.plant_users where plant_id > 900000) * 2;
+  return (select count(*) from plants.user_plants where plant_id > 900000) * 2;
 end $$;
 
 -- Bulk minute rows for plants [p_lo, p_hi] from p_from to p_to (epoch s), the
@@ -98,6 +104,7 @@ begin
   delete from private.meta where plant_id > 900000;
   delete from private.inverters where plant_id > 900000;
   delete from public.plant_config where plant_id > 900000;
-  delete from public.plant_users where plant_id > 900000;
-  delete from auth.users where email like '%@loadtest.invalid';
+  delete from plants.login_plants where plant > 900000 and plant < 1000000;
+  delete from auth.users where email like '%@loadtest.invalid';   -- its logins and accounts go with it
+  delete from plants.plants where id > 900000 and id < 1000000;
 end $$;

@@ -33,7 +33,9 @@ begin
                             (select c.plant_name from plants.claims c where c.account = p_account and c.plant = x.plant),
                             -- a share removed (no claim left): the name it had
                             (select pu.plant_name from plants.user_plants pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
-                                and pu.plant_id = x.plant and pu.plant_name is not null limit 1)),
+                                and pu.plant_id = x.plant and pu.plant_name is not null limit 1),
+                            (select lp.plant_name from plants.login_plants lp join plants.logins s on s.id = lp.login and s.kind = 'share'
+                              where lp.plant = x.plant and lp.plant_name is not null limit 1)),
            'chosen', x.chosen,
            'locked', not x.chosen,
            'read_now', x.chosen and live and not st.must_choose and billing.has_route(p_account, x.plant, true)

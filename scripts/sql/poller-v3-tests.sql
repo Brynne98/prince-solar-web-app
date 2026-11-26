@@ -24,15 +24,25 @@ begin
   raise notice 'PASS  %', label;
 end $$;
 
+-- Plants keep fixed ids here, as the 23 older plants do (legacy rows below 1e12): plants.plant_for
+-- only makes new ids, and the guard that says so is a trigger, off in this one statement.
+create function pg_temp.mkplants(p_ids bigint[], p_zones text[] default null) returns void language plpgsql as $$
+begin
+  set local session_replication_role = replica;
+  insert into plants.plants (id, brand, vendor_id, time_zone, legacy)
+  select x, 'sunsynk', x::text, coalesce(p_zones[o], 'Africa/Johannesburg'), true from unnest(p_ids) with ordinality t(x, o);
+  set local session_replication_role = origin;
+end $$;
+
 -- the share login (if the database has none yet)
 do $$
 declare s uuid; o uuid := gen_random_uuid();
 begin
-  select id into s from private.sunsynk_accounts where kind = 'share';
+  select id into s from plants.logins where kind = 'share';
   if s is null then
     insert into auth.users (id, email) values (o, 'v3-share@t.test');
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind)
-    values (gen_random_uuid(), o, 'v3-share', 'active', 'share');
+    insert into plants.logins (id, user_id, brand, username, status, kind)
+    values (gen_random_uuid(), o, 'sunsynk', 'v3-share', 'ok', 'share');
   end if;
 end $$;
 
@@ -47,10 +57,10 @@ declare
   st text; t0 timestamptz := now();
   pool constant bigint := 971000000;
 begin
-  insert into billing.plants (id, brand, external_id)
-  select pool + x, 'sunsynk', (pool + x)::text from generate_series(0, 299) x;
-  insert into public.plant_config (plant_id, timezone, has_grid, batt_positive_means)
-  select pool + x, case when x % 5 = 0 then 'Africa/Cairo' else 'Africa/Johannesburg' end, x % 2 = 0, case when x % 3 = 0 then 'discharging' end
+  perform pg_temp.mkplants(array(select pool + x from generate_series(0, 299) x order by x),
+    array(select case when x % 5 = 0 and x % 11 <> 0 then 'Africa/Cairo' else 'Africa/Johannesburg' end from generate_series(0, 299) x order by x));
+  insert into public.plant_config (plant_id, has_grid, batt_positive_means)
+  select pool + x, x % 2 = 0, case when x % 3 = 0 then 'discharging' end
     from generate_series(0, 299) x where x % 11 <> 0;
   insert into private.inverters (sn, plant_id)
   select 'RV' || (pool + x) || '-' || y, pool + x from generate_series(0, 299) x, generate_series(1, 1 + x % 3) y;
@@ -90,18 +100,16 @@ begin
              case when random() < 0.5 then null else greatest(s + interval '1 hour', t0 + (random() * 30 - 5) * interval '1 day') end
         from (select t0 - random() * interval '10 days' as s) x;
     end if;
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind)
-    values (l, u, 'v3-r' || k, case when random() < 0.9 then 'active' else 'needs_relink' end, 'login');
-    insert into billing.logins (id, account, brand, username, status, created_at)
-    values (l, a, 'sunsynk', 'v3-r' || k, case when random() < 0.85 then 'ok' else 'needs_reconnect' end,
+    insert into plants.logins (id, account, user_id, brand, username, status, kind, linked_at)
+    values (l, a, u, 'sunsynk', 'v3-r' || k, case when random() < 0.85 then 'ok' else 'needs_reconnect' end, 'login',
             t0 - random() * interval '30 days');
     for j in 1 .. floor(random() * 7)::int loop
       p := pool + floor(random() * 300)::int;
       if random() < 0.85 then
-        insert into billing.login_plants (login, plant, last_seen_at, gone_at)
+        insert into plants.login_plants (login, plant, last_seen_at, gone_at)
         values (l, p, t0, case when random() < 0.1 then t0 - interval '1 day' end) on conflict do nothing;
       else
-        insert into billing.plant_claims (plant, account, claimed_at) values (p, a, t0 - random() * interval '30 days')
+        insert into plants.claims (plant, account, claimed_at) values (p, a, t0 - random() * interval '30 days')
         on conflict do nothing;
       end if;
       if random() < 0.9 and not exists (select 1 from billing.seats s where s.account = a and s.plant = p) then
@@ -172,7 +180,7 @@ select pg_temp.ok('ends_at early for under half of the accounts that end in the 
 -- ---------------------------------------------------------------------------
 -- b. read_now, write_allowed, routes, the poll pick
 -- ---------------------------------------------------------------------------
-create temp table pool as select id from billing.plants where id between 971000000 and 971000299;
+create temp table pool as select id from plants.plants where id between 971000000 and 971000299;
 create temp table rn as
   select g.t, p.id,
          p.id in (select billing.plants_read_now(array(select id from pool), g.t)) as got,
@@ -183,7 +191,7 @@ select pg_temp.eq('plants_read_now = plant_state read_now (300 plants x 25 times
 select pg_temp.ok('some plants read now, some not', (select bool_or(got) and not bool_and(got) from rn));
 
 create temp table vers as
-  select bp.id, case when bp.id % 4 = 0 then bp.version + 1 else bp.version end as v from billing.plants bp
+  select bp.id, case when bp.id % 4 = 0 then bp.version + 1 else bp.version end as v from plants.plants bp
    where bp.id in (select id from pool);
 select pg_temp.eq('write_allowed_set = write_allowed, versions right and stale, at 9 times',
   (select count(*) from (select t from grid where t between now() - interval '1 day' and now() + interval '1 day') g
@@ -212,12 +220,10 @@ begin
     insert into auth.users (id, email) values (u, 'v3-h' || k || '@t.test');
     insert into billing.accounts (id, user_id, market, trial_started_at, trial_ends_at)
     values (a, u, 'ZA', now() - interval '1 day', now() + interval '6 days');
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (l, u, 'v3-h' || k, 'active', 'login');
-    insert into billing.logins (id, account, brand, username) values (l, a, 'sunsynk', 'v3-h' || k);
+    insert into plants.logins (id, account, user_id, brand, username, status, kind) values (l, a, u, 'sunsynk', 'v3-h' || k, 'ok', 'login');
     insert into billing.grants (account, places, reason, starts_at) values (a, 12, 'test', now() - interval '1 day');
-    insert into billing.plants (id, brand, external_id)
-    select 972000000 + k * 100 + x, 'sunsynk', (972000000 + k * 100 + x)::text from generate_series(1, n) x;
-    insert into billing.login_plants (login, plant, last_seen_at) select l, 972000000 + k * 100 + x, now() from generate_series(1, n) x;
+    perform pg_temp.mkplants(array(select 972000000 + k * 100 + x from generate_series(1, n) x order by x));
+    insert into plants.login_plants (login, plant, last_seen_at) select l, 972000000 + k * 100 + x, now() from generate_series(1, n) x;
     insert into billing.seats (account, plant, chosen_at) select a, 972000000 + k * 100 + x, now() - interval '1 hour' from generate_series(1, n) x;
     insert into private.inverters (sn, plant_id) select 'HV' || (972000000 + k * 100 + x), 972000000 + k * 100 + x from generate_series(1, n) x;
   end loop;
@@ -226,7 +232,7 @@ end $$;
 create temp table pr as select * from public.poll_routes(array(select generate_series(0, 59)), now());
 create temp table pj as select * from public.poll_jobs_v2(0, 1, null, now());
 select pg_temp.ok('the fleet has routes through logins and the share login',
-  (select count(*) > 50 from pr) and exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id where sa.kind = 'share'));
+  (select count(*) > 50 from pr) and exists (select 1 from pr join plants.logins sa on sa.id = pr.account_id where sa.kind = 'share'));
 select pg_temp.eq('poll_routes over all 60 seconds = poll_jobs_v2: plant, login, version, zone, sign, grid',
   (select count(*) from (
      (select plant_id, account_id, plant_version, timezone, batt_positive_means, has_grid from pr
@@ -240,10 +246,10 @@ select pg_temp.eq('poll_routes by second: each plant on exactly one second',
 create temp table lane_inv as
   select pr.account_id, count(i.sn) as n from pr left join private.inverters i on i.plant_id = pr.plant_id group by 1;
 select pg_temp.ok('a login reading up to 10 inverters reads on the second of its id',
-  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id join lane_inv li using (account_id)
+  not exists (select 1 from pr join plants.logins sa on sa.id = pr.account_id join lane_inv li using (account_id)
                where sa.kind = 'login' and li.n <= 10 and pr.read_second <> private.read_second(pr.account_id::text)));
 select pg_temp.ok('the share login and a login over 10 inverters: each plant on its own second',
-  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id join lane_inv li using (account_id)
+  not exists (select 1 from pr join plants.logins sa on sa.id = pr.account_id join lane_inv li using (account_id)
                where (sa.kind = 'share' or li.n > 10)
                  and pr.read_second <> private.read_second(pr.plant_id::text))
   and (select count(distinct read_second) > 3 from pr where plant_id between 972000101 and 972000112)
@@ -277,25 +283,22 @@ begin
     insert into billing.accounts (id, user_id, market, trial_started_at, trial_ends_at)
     values (a, u, 'ZA', now() - case when k = 3 then interval '10 days' else interval '1 day' end,
             now() + case when k = 3 then interval '-3 days' else interval '6 days' end);
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind, access_token, access_expires_at)
-    values (l, u, 'v3-c' || k, 'active', 'login', 'stored-' || k, 1900000000);
-    insert into billing.logins (id, account, brand, username) values (l, a, 'sunsynk', 'v3-c' || k);
+    insert into plants.logins (id, account, user_id, brand, username, status, kind, access_token, access_expires_at)
+    values (l, a, u, 'sunsynk', 'v3-c' || k, 'ok', 'login', 'stored-' || k, 1900000000);
   end loop;
 end $$;
 create temp table cp (plant bigint, login int);
 insert into cp values (973000001, 1), (973000002, 1), (973000007, 1), (973000003, 2), (973000004, 3),
                       (973000001, 4), (973000005, 5), (973000001, 9);
-insert into billing.plants (id, brand, external_id) select distinct plant, 'sunsynk', plant::text from cp;
+select pg_temp.mkplants(array(select distinct plant from cp order by plant));
 insert into public.plant_config (plant_id) select distinct plant from cp;
-insert into billing.login_plants (login, plant, last_seen_at)
+insert into plants.login_plants (login, plant, last_seen_at)
 select ('00000000-0000-4000-8000-00000000000' || login)::uuid, plant, now() from cp;
 insert into billing.seats (account, plant, chosen_at)
-select l.account, cp.plant, now() - interval '1 hour' from cp join billing.logins l on l.username = 'v3-c' || cp.login
+select l.account, cp.plant, now() - interval '1 hour' from cp join plants.logins l on l.username = 'v3-c' || cp.login
  where cp.login <> 9;
-insert into public.plant_users (plant_id, user_id, account_id)
-select 973000001, sa.user_id, sa.id from private.sunsynk_accounts sa where sa.sunsynk_username = 'v3-c9';
-update billing.plants set history_purged_at = now() - interval '2 days' where id = 973000003;
-update billing.plants set version = 5 where id = 973000007;
+insert into billing.plant_facts (plant, history_purged_at) values (973000003, now() - interval '2 days');
+update plants.plants set version = 5 where id = 973000007;
 insert into public.agg_minute (plant_id, ts, pv_w, source)
 values (973000003, extract(epoch from date_trunc('minute', now()))::bigint - 1200, 10, 'poller');
 insert into private.meta (sn, plant_id, used_strings, string_slots, ord) values ('S1', 973000001, '{3}', 5, 7);
@@ -308,8 +311,8 @@ create temp table inp (n int, row jsonb);
 insert into inp
 select 1, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000001',
-  'versions', jsonb_build_object('973000001', (select version from billing.plants where id = 973000001),
-                                 '973000002', (select version from billing.plants where id = 973000002),
+  'versions', jsonb_build_object('973000001', (select version from plants.plants where id = 973000001),
+                                 '973000002', (select version from plants.plants where id = 973000002),
                                  '973000007', 4, '973000099', 1),
   'readings', jsonb_build_array(
      jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 100, 'grid_relay_status', 'on'),
@@ -343,7 +346,7 @@ from k;
 insert into inp
 select 2, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000002',
-  'versions', jsonb_build_object('973000003', (select version from billing.plants where id = 973000003)),
+  'versions', jsonb_build_object('973000003', (select version from plants.plants where id = 973000003)),
   'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S3', 'plant_id', 973000003, 'pv_w', 300)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000003, 'pv_w', 300)),
   'access', 'new-2', 'expires', 1900000000)            -- same expiry: the new token is saved
@@ -351,7 +354,7 @@ from k;
 insert into inp
 select 3, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000003',
-  'versions', jsonb_build_object('973000004', (select version from billing.plants where id = 973000004)),
+  'versions', jsonb_build_object('973000004', (select version from plants.plants where id = 973000004)),
   'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S4', 'plant_id', 973000004, 'pv_w', 400)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000004, 'pv_w', 400)),
   'inverters', jsonb_build_array(jsonb_build_object('sn', 'S4', 'plant_id', 973000004)),
@@ -360,7 +363,7 @@ from k;
 insert into inp
 select 4, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000004',
-  'versions', jsonb_build_object('973000001', (select version from billing.plants where id = 973000001)),
+  'versions', jsonb_build_object('973000001', (select version from plants.plants where id = 973000001)),
   'readings', jsonb_build_array(
      jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 150),       -- a later row: wins
      jsonb_build_object('carried', false, 'ts', ts - 120, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 2)),
@@ -380,7 +383,7 @@ from k;
 insert into inp
 select 5, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000005',
-  'versions', jsonb_build_object('973000005', (select version from billing.plants where id = 973000005)),
+  'versions', jsonb_build_object('973000005', (select version from plants.plants where id = 973000005)),
   'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S5', 'plant_id', 973000005, 'pv_w', 500)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000005, 'pv_w', 500)),
   'access', 'new-5', 'expires', 1900000900)
@@ -389,7 +392,7 @@ from k;
 insert into inp
 select 6, jsonb_build_object(
   'account', '00000000-0000-4000-8000-000000000001',
-  'versions', jsonb_build_object('0973000001', (select version from billing.plants where id = 973000001)),
+  'versions', jsonb_build_object('0973000001', (select version from plants.plants where id = 973000001)),
   'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 777)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000001, 'pv_w', 777)))
 from k;
@@ -420,11 +423,11 @@ create function pg_temp.snap() returns jsonb language sql as $$
     'refill',   (select jsonb_agg(to_jsonb(q) order by q.plant_id) from private.refill_queue q where q.plant_id between 973000000 and 973000099),
     'meta',     (select jsonb_agg(to_jsonb(m) order by m.sn) from private.meta m where m.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
     'inverters',(select jsonb_agg(to_jsonb(i) order by i.sn) from private.inverters i where i.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
-    'logins',   (select jsonb_agg(jsonb_build_object('u', sa.sunsynk_username, 'tok', sa.access_token, 'exp', sa.access_expires_at,
-                                                     'ok', sa.last_ok_at, 'err', sa.last_error, 'st', sa.status) order by sa.sunsynk_username)
-                   from private.sunsynk_accounts sa where sa.sunsynk_username like 'v3-c%'),
-    'plants',   (select jsonb_agg(jsonb_build_object('id', bp.id, 'v', bp.version, 'purged', bp.history_purged_at) order by bp.id)
-                   from billing.plants bp where bp.id between 973000000 and 973000099))
+    'logins',   (select jsonb_agg(jsonb_build_object('u', sa.username, 'tok', sa.access_token, 'exp', sa.access_expires_at,
+                                                     'ok', sa.last_ok_at, 'err', sa.last_error, 'st', sa.status) order by sa.username)
+                   from plants.logins sa where sa.username like 'v3-c%'),
+    'plants',   (select jsonb_agg(jsonb_build_object('id', bp.id, 'v', bp.version, 'purged', (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id)) order by bp.id)
+                   from plants.plants bp where bp.id between 973000000 and 973000099))
 $$;
 
 savepoint before_commit;
@@ -460,12 +463,12 @@ select pg_temp.eq('refused lists', (select jsonb_agg(e->'refused') from jsonb_ar
                   '[[973000007, 973000099], [], [973000004], [], [973000005], [973000001]]'::jsonb);
 select pg_temp.eq('gap and refill for plant 3', (select (count(*), max(to_ts - from_ts))::text from private.gaps where plant_id = 973000003), '(1,1200)');
 select pg_temp.ok('plant 3 queued for refill', exists (select 1 from private.refill_queue where plant_id = 973000003));
-select pg_temp.eq('history deleted mark cleared', (select history_purged_at from billing.plants where id = 973000003), null::timestamptz);
+select pg_temp.eq('history deleted mark cleared', (select history_purged_at from billing.plant_facts where plant = 973000003), null::timestamptz);
 select pg_temp.eq('tokens: newer saved, same expiry saved, older kept, kept for a refused login',
-  (select string_agg(access_token, ',' order by sunsynk_username) from private.sunsynk_accounts where sunsynk_username like 'v3-c%'),
+  (select string_agg(access_token, ',' order by username) from plants.logins where username like 'v3-c%'),
   'new-1,new-2,stored-3,new-4,new-5,stored-9');
 select pg_temp.ok('the other login that sees plant 1 was stamped',
-  (select last_ok_at = now() from private.sunsynk_accounts where sunsynk_username = 'v3-c9'));
+  (select last_ok_at = now() from plants.logins where username = 'v3-c9'));
 
 -- ---------------------------------------------------------------------------
 -- d. a poison row: the whole batch rolls back; login by login only that one fails
@@ -474,7 +477,7 @@ rollback to savepoint before_commit;
 create temp table poison as
   select (select r from rows_in) || jsonb_build_array(jsonb_build_object(
     'account', '00000000-0000-4000-8000-000000000002',
-    'versions', jsonb_build_object('973000003', (select version from billing.plants where id = 973000003)),
+    'versions', jsonb_build_object('973000003', (select version from plants.plants where id = 973000003)),
     'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', (select ts from k), 'sn', 'S3', 'plant_id', 973000003, 'pv_w', 'not a number')),
     'access', 'bad', 'expires', 1999999999)) as r;
 do $$
@@ -487,7 +490,7 @@ begin
 end $$;
 select pg_temp.ok('the poison batch wrote nothing',
   not exists (select 1 from public.readings where plant_id between 973000000 and 973000099 and ts = (select ts from k))
-  and not exists (select 1 from private.sunsynk_accounts where access_token in ('new-1', 'bad')));
+  and not exists (select 1 from plants.logins where access_token in ('new-1', 'bad')));
 create temp table split (i int, ok boolean);
 do $$
 declare e record;
@@ -531,11 +534,10 @@ begin
   insert into auth.users (id, email) values (u, 'v3-c6@t.test');
   insert into billing.accounts (id, user_id, market, trial_started_at, trial_ends_at)
   values (a, u, 'ZA', now() - interval '7 days' + interval '90 seconds', now() + interval '90 seconds');
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (l, u, 'v3-c6', 'active', 'login');
-  insert into billing.logins (id, account, brand, username) values (l, a, 'sunsynk', 'v3-c6');
-  insert into billing.plants (id, brand, external_id) values (973000006, 'sunsynk', '973000006');
+  insert into plants.logins (id, account, user_id, brand, username, status, kind) values (l, a, u, 'sunsynk', 'v3-c6', 'ok', 'login');
+  perform pg_temp.mkplants(array[973000006]);
   insert into public.plant_config (plant_id) values (973000006);
-  insert into billing.login_plants (login, plant, last_seen_at) values (l, 973000006, now());
+  insert into plants.login_plants (login, plant, last_seen_at) values (l, 973000006, now());
   insert into billing.seats (account, plant, chosen_at) values (a, 973000006, now() - interval '1 hour');
 end $$;
 select pg_temp.eq('route carries the week''s end',
@@ -546,7 +548,7 @@ select pg_temp.ok('no route after the week ends',
 select pg_temp.eq('a save after the end is refused',
   (select b.result->'refused' from public.poll_commit_batch((select ts from k) + 120, jsonb_build_array(jsonb_build_object(
      'account', '00000000-0000-4000-8000-000000000006',
-     'versions', jsonb_build_object('973000006', (select version from billing.plants where id = 973000006)),
+     'versions', jsonb_build_object('973000006', (select version from plants.plants where id = 973000006)),
      'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', (select ts from k) + 120, 'sn', 'S6', 'plant_id', 973000006, 'pv_w', 1)),
      'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000006, 'pv_w', 1)))), now() + interval '91 seconds') b),
   '[973000006]'::jsonb);
@@ -554,7 +556,7 @@ select pg_temp.ok('nothing written for it',
   not exists (select 1 from public.readings where plant_id = 973000006)
   and not exists (select 1 from public.agg_minute where plant_id = 973000006));
 select pg_temp.eq('poll_commit_v2 refuses it too',
-  public.poll_commit_v2(jsonb_build_object('973000006', (select version from billing.plants where id = 973000006)),
+  public.poll_commit_v2(jsonb_build_object('973000006', (select version from plants.plants where id = 973000006)),
     '00000000-0000-4000-8000-000000000006', (select ts from k) + 120, null, null,
     jsonb_build_array(jsonb_build_object('plant_id', 973000006, 'pv_w', 1)), null, null, null, null,
     now() + interval '91 seconds')->'refused', '[973000006]'::jsonb);
@@ -574,7 +576,7 @@ select pg_temp.eq('tally: poll_run row', (select (calls, ms_total, plants)::text
 -- ---------------------------------------------------------------------------
 -- give the random fleet's inverters a login and some readings (carried runs, upload gaps)
 update private.inverters i set account_id = lp.login
-  from (select distinct on (plant) plant, login from billing.login_plants order by plant, login) lp
+  from (select distinct on (plant) plant, login from plants.login_plants order by plant, login) lp
  where lp.plant = i.plant_id and i.account_id is null and i.sn like 'RV%';
 insert into public.readings (ts, sn, plant_id, device_time, carried)
 select (extract(epoch from now())::bigint / 60 - m) * 60, i.sn, i.plant_id,
@@ -628,22 +630,22 @@ begin
        where g.gap is not null
       having count(*) = 2) ug on true
    where i.account_id = p_account
-      or i.plant_id in (select pu.plant_id from public.plant_users pu where pu.account_id = p_account)
+      or i.plant_id in (select pu.plant_id from plants.user_plants pu where pu.account_id = p_account)
    order by coalesce(m.ord, 9999), i.sn;
 end $$;
 create temp table ic_one as
-  select a.id as account_id, c.* from private.sunsynk_accounts a cross join lateral pg_temp.ic_old(a.id) c;
+  select a.id as account_id, c.* from plants.logins a cross join lateral pg_temp.ic_old(a.id) c;
 create temp table ic_many as
-  select * from public.inverters_cached_many(array(select id from private.sunsynk_accounts));
+  select * from public.inverters_cached_many(array(select id from plants.logins));
 select pg_temp.ok('the fleet has cached inverters to compare', (select count(*) > 50 from ic_one));
 select pg_temp.eq('inverters_cached (0269) = 0230''s, per login',
-  (select count(*) from (select a.id, c.* from private.sunsynk_accounts a cross join lateral public.inverters_cached(a.id) c
+  (select count(*) from (select a.id, c.* from plants.logins a cross join lateral public.inverters_cached(a.id) c
                          except select * from ic_one) x), 0::bigint);
 select pg_temp.eq('inverters_cached_many = 0230''s inverters_cached per login',
   (select count(*) from (select * from ic_one except select * from ic_many) x)
   + (select count(*) from (select * from ic_many except select * from ic_one) x), 0::bigint);
 select pg_temp.eq('inverters_cached_many: only the plants asked',
-  (select count(*) from public.inverters_cached_many(array(select id from private.sunsynk_accounts), array[971000001, 971000002]::bigint[])),
+  (select count(*) from public.inverters_cached_many(array(select id from plants.logins), array[971000001, 971000002]::bigint[])),
   (select count(*) from ic_one where plant_id in (971000001, 971000002)));
 
 rollback;

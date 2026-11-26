@@ -14,6 +14,14 @@ create function pg_temp.ok(p_label text, p_cond boolean, p_detail text default n
 returns void language sql as $$
   insert into t_results (label, pass, detail) values (p_label, coalesce(p_cond, false), p_detail)
 $$;
+-- our plant id for a brand's id (SOLAR-681); the ids in the jsonb lists given to link_login are the brand's
+create function pg_temp.pid(v bigint) returns bigint language sql as $$ select plants.plant_for('sunsynk', v::text) $$;
+create function pg_temp.pids(v text) returns bigint[] language sql as $$
+  select coalesce(array_agg(plants.plant_for('sunsynk', x) order by o), '{}') from unnest(v::text[]) with ordinality t(x, o)
+$$;
+create function pg_temp.link_login(a uuid, b text, n text, s uuid, p jsonb, at timestamptz default now(),
+                                   actor text default 'owner', lid uuid default null) returns jsonb language plpgsql as $$
+begin perform plants.link_login(a, b, n, p, at, actor, lid); return billing.account_state(a, at); end $$;
 create function pg_temp.ep(p timestamptz) returns bigint language sql immutable as $$ select extract(epoch from p)::bigint $$;
 
 -- an owner with chosen plants and a stored login (as alert-queue-tests)
@@ -23,17 +31,15 @@ declare u uuid := gen_random_uuid(); a uuid; l uuid := gen_random_uuid(); i int;
 begin
   insert into auth.users (id, email, created_at) values (u, p_name || '@msg.test', p_at);
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', p_at) returning id into a;
-  insert into public.plant_config (plant_id, timezone) select x, 'Africa/Johannesburg' from unnest(p_plants) x
-  on conflict (plant_id) do nothing;
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, linked_at, last_ok_at, last_try, last_try_at)
-  values (l, u, p_name, 'active', p_at, now(), 'ok', now());
-  perform billing.link_login(a, 'sunsynk', p_name, null,
+  perform plants.link_login(a, 'sunsynk', p_name,
     (select jsonb_agg(jsonb_build_object('id', x, 'name', 'Plant ' || x)) from unnest(p_plants) x), p_at, 'owner', l);
+  update plants.logins set last_ok_at = now(), last_try = 'ok', last_try_at = now() where id = l;
   for i in 1 .. cardinality(p_plants) loop
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at)
-    values (p_plants[i], u, l, 'Plant ' || p_plants[i], p_at + (i - 1) * interval '1 hour');
+    update plants.login_plants set linked_at = p_at + (i - 1) * interval '1 hour'
+     where login = l and plant = pg_temp.pid(p_plants[i]);
   end loop;
-  perform billing.set_chosen_plants(a, p_plants, p_at);
+  insert into public.plant_config (plant_id) select pg_temp.pid(x) from unnest(p_plants) x on conflict (plant_id) do nothing;
+  perform billing.set_chosen_plants(a, pg_temp.pids(p_plants::text), p_at);
   return u;
 end $$;
 create function pg_temp.acc(p_user uuid) returns uuid language sql as $$ select id from billing.accounts where user_id = p_user $$;
@@ -80,7 +86,7 @@ $$;
 do $$
 declare u uuid := pg_temp.owner('r1', '{990065901}'); q bigint; s bigint; w bigint; o msg.outbox; got bigint[];
 begin
-  q := pg_temp.ev(u, 990065901, 'grid_down', 'r1:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065901), 'grid_down', 'r1:down');
   o := pg_temp.ob(q);
   perform pg_temp.ok('R1 alert: pop-up and email marked for the outbox',
     (select (push_skip, status) = ('outbox', 'outbox') and pushed_at is not null from public.email_queue where id = q),
@@ -92,7 +98,7 @@ begin
     and (select count(*) from msg.outbox where event_id = q) = 2, row_to_json(o)::text);
 
   insert into public.email_queue (user_id, plant_id, kind, key, priority, status, last_error)
-  values (u, 990065901, 'needs_relink', 'r1:copy', 0, 'skipped', 'one email per login') returning id into s;
+  values (u, pg_temp.pid(990065901), 'needs_relink', 'r1:copy', 0, 'skipped', 'one email per login') returning id into s;
   perform pg_temp.ok('R2 reconnect copy (skipped): no outbox row, pop-up marked "one per login"',
     pg_temp.ob(s) is null and (select push_skip from public.email_queue where id = s) = 'one per login');
 
@@ -102,7 +108,7 @@ begin
     and exists (select 1 from msg.outbox where dedupe_key = w || ':email'));
 
   -- a row the seat trigger drops is never routed
-  q := pg_temp.ev(u, 990065999, 'grid_down', 'r1:other-plant');
+  q := pg_temp.ev(u, pg_temp.pid(990065999), 'grid_down', 'r1:other-plant');
   perform pg_temp.ok('R5 dropped by the seat trigger: no row, no outbox row', q is null);
 end $$;
 
@@ -113,7 +119,7 @@ do $$
 declare u uuid := pg_temp.owner('t1', '{990065902}'); d1 bigint; d2 bigint; q bigint; o msg.outbox; n int; s msg.push_sends;
 begin
   d1 := pg_temp.dev(u, 't1a'); d2 := pg_temp.dev(u, 't1b');
-  q := pg_temp.ev(u, 990065902, 'grid_down', 't1:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065902), 'grid_down', 't1:down');
   n := pg_temp.take();
   perform pg_temp.ok('T1 take: one send per device, with the facts (words: alerts_test, push_test) and a claim',
     pg_temp.taken(q) = array[d1, d2]
@@ -131,7 +137,7 @@ do $$
 declare u uuid := pg_temp.owner('d1', '{990065903}'); d1 bigint; d2 bigint; q bigint; s msg.push_sends; o msg.outbox; n int; j jsonb;
 begin
   d1 := pg_temp.dev(u, 'd1a'); d2 := pg_temp.dev(u, 'd1b');
-  q := pg_temp.ev(u, 990065903, 'grid_down', 'd1:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065903), 'grid_down', 'd1:down');
   n := pg_temp.take();
   perform public.msg_push_done((select claim from t_take where event_id = q limit 1), jsonb_build_array(
     jsonb_build_object('id', (pg_temp.send(q, d1)).id, 'code', 201),
@@ -172,7 +178,7 @@ do $$
 declare u uuid := pg_temp.owner('d6', '{990065904}'); d1 bigint; d2 bigint; q bigint; o msg.outbox; n int;
 begin
   d1 := pg_temp.dev(u, 'd6a'); d2 := pg_temp.dev(u, 'd6b');
-  q := pg_temp.ev(u, 990065904, 'grid_down', 'd6:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065904), 'grid_down', 'd6:down');
   n := pg_temp.take();
   perform public.msg_push_done((select claim from t_take where event_id = q limit 1), jsonb_build_array(
     jsonb_build_object('id', (pg_temp.send(q, d1)).id, 'code', 410),
@@ -189,7 +195,7 @@ do $$
 declare u uuid := pg_temp.owner('d8', '{990065905}'); d1 bigint; q bigint; n int; s msg.push_sends;
 begin
   d1 := pg_temp.dev(u, 'd8a');
-  q := pg_temp.ev(u, 990065905, 'grid_down', 'd8:down', null, now() - interval '59 minutes');
+  q := pg_temp.ev(u, pg_temp.pid(990065905), 'grid_down', 'd8:down', null, now() - interval '59 minutes');
   n := pg_temp.take();
   perform pg_temp.done(q, 429, 120);
   s := pg_temp.send(q, d1);
@@ -206,7 +212,7 @@ do $$
 declare u uuid := pg_temp.owner('l1', '{990065906}'); d1 bigint; q bigint; n int; c1 uuid; sid bigint;
 begin
   d1 := pg_temp.dev(u, 'l1a');
-  q := pg_temp.ev(u, 990065906, 'grid_down', 'l1:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065906), 'grid_down', 'l1:down');
   n := pg_temp.take();
   c1 := (select claim from t_take where event_id = q); sid := (pg_temp.send(q, d1)).id;
   update msg.push_sends set claimed_until = now() - interval '1 second' where id = sid;
@@ -224,7 +230,7 @@ do $$
 declare u uuid := pg_temp.owner('l2', '{990065907}'); d1 bigint; q bigint; n int;
 begin
   d1 := pg_temp.dev(u, 'l2a');
-  q := pg_temp.ev(u, 990065907, 'grid_down', 'l2:down');
+  q := pg_temp.ev(u, pg_temp.pid(990065907), 'grid_down', 'l2:down');
   n := pg_temp.take();
   perform pg_temp.done(q, 503, 5);
   delete from public.push_subs where id = d1;
@@ -241,15 +247,15 @@ declare u uuid := pg_temp.owner('g1', '{990065911,990065912,990065913}'); a uuid
 begin
   a := pg_temp.acc(u);
   perform pg_temp.dev(u, 'g1a');
-  q1 := pg_temp.ev(u, 990065911, 'grid_down', 'g1:old', null, now() - interval '61 minutes');
-  q2 := pg_temp.ev(u, 990065912, 'grid_down', 'g1:removed');
-  q3 := pg_temp.ev(u, 990065913, 'grid_down', 'g1:unchosen');
-  q4 := pg_temp.ev(u, 990065911, 'batt_hot', 'g1:switch');
-  q5 := pg_temp.ev(u, 990065911, 'needs_relink', 'g1:relink');
-  q6 := pg_temp.ev(u, 990065911, 'grid_back', 'g1:back', 'g1:no-such-down');
+  q1 := pg_temp.ev(u, pg_temp.pid(990065911), 'grid_down', 'g1:old', null, now() - interval '61 minutes');
+  q2 := pg_temp.ev(u, pg_temp.pid(990065912), 'grid_down', 'g1:removed');
+  q3 := pg_temp.ev(u, pg_temp.pid(990065913), 'grid_down', 'g1:unchosen');
+  q4 := pg_temp.ev(u, pg_temp.pid(990065911), 'batt_hot', 'g1:switch');
+  q5 := pg_temp.ev(u, pg_temp.pid(990065911), 'needs_relink', 'g1:relink');
+  q6 := pg_temp.ev(u, pg_temp.pid(990065911), 'grid_back', 'g1:back', 'g1:no-such-down');
   -- after queueing: plant removed, plant switched out, battery switch off
-  delete from public.plant_users where user_id = u and plant_id = 990065912;
-  perform billing.set_chosen_plants(a, '{990065911,990065912}', now());
+  delete from plants.login_plants where login in (select id from plants.logins where user_id = u) and plant = pg_temp.pid(990065912);
+  perform billing.set_chosen_plants(a, pg_temp.pids('{990065911,990065912}'), now());
   insert into public.push_prefs (user_id, battery) values (u, false);
   n := pg_temp.take();
   perform pg_temp.ok('G1 over an hour old: dropped "too old"', (pg_temp.ob(q1)).drop_reason = 'too old', (pg_temp.ob(q1)).drop_reason);
@@ -265,7 +271,7 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('g7', '{990065914}'); q bigint; n int;
 begin
-  q := pg_temp.ev(u, 990065914, 'grid_down', 'g7:nodev');
+  q := pg_temp.ev(u, pg_temp.pid(990065914), 'grid_down', 'g7:nodev');
   n := pg_temp.take();
   perform pg_temp.ok('G7 no device: dropped "no device"', (pg_temp.ob(q)).drop_reason = 'no device', (pg_temp.ob(q)).drop_reason);
 end $$;
@@ -276,9 +282,9 @@ do $$
 declare u uuid := pg_temp.owner('g8', '{990065915}'); q bigint; r bigint; n int;
 begin
   perform pg_temp.dev(u, 'g8a');
-  q := pg_temp.ev(u, 990065915, 'grid_down', 'g8:down');
-  r := pg_temp.ev(u, 990065915, 'needs_relink', 'g8:relink');
-  update billing.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
+  q := pg_temp.ev(u, pg_temp.pid(990065915), 'grid_down', 'g8:down');
+  r := pg_temp.ev(u, pg_temp.pid(990065915), 'needs_relink', 'g8:relink');
+  update plants.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
   n := pg_temp.take();
   perform pg_temp.ok('G8 plant not read any more: dropped "plant not live"',
     (pg_temp.ob(q)).drop_reason = 'plant not live', (pg_temp.ob(q)).drop_reason);
@@ -293,8 +299,8 @@ do $$
 declare u uuid := pg_temp.owner('p1', '{990065921}'); da bigint; db bigint; dc bigint; down bigint; back bigint; n int;
 begin
   da := pg_temp.dev(u, 'p1a'); db := pg_temp.dev(u, 'p1b');
-  down := pg_temp.ev(u, 990065921, 'grid_down', 'p1:down');
-  back := pg_temp.ev(u, 990065921, 'grid_back', 'p1:back', 'p1:down');
+  down := pg_temp.ev(u, pg_temp.pid(990065921), 'grid_down', 'p1:down');
+  back := pg_temp.ev(u, pg_temp.pid(990065921), 'grid_back', 'p1:back', 'p1:down');
   n := pg_temp.take();
   perform pg_temp.ok('P1 "back" waits while its "down" is open',
     pg_temp.taken(down) = array[da, db] and pg_temp.taken(back) = '{}' and (pg_temp.ob(back)).status = 'queued'
@@ -314,10 +320,10 @@ declare u uuid := pg_temp.owner('p3', '{990065922}'); down bigint; back bigint; 
 begin
   perform pg_temp.dev(u, 'p3a');
   insert into public.push_prefs (user_id, grid) values (u, false);
-  down := pg_temp.ev(u, 990065922, 'grid_down', 'p3:down');
+  down := pg_temp.ev(u, pg_temp.pid(990065922), 'grid_down', 'p3:down');
   n := pg_temp.take();
   update public.push_prefs set grid = true where user_id = u;
-  back := pg_temp.ev(u, 990065922, 'grid_back', 'p3:back', 'p3:down');
+  back := pg_temp.ev(u, pg_temp.pid(990065922), 'grid_back', 'p3:back', 'p3:down');
   n := pg_temp.take();
   perform pg_temp.ok('P3 "down" dropped (switch off then): "back" dropped "down had no pop-up"',
     (pg_temp.ob(down)).drop_reason = 'switched off' and (pg_temp.ob(back)).drop_reason = 'down had no pop-up');
@@ -327,10 +333,10 @@ do $$
 declare u uuid := pg_temp.owner('p4', '{990065923}'); down bigint; back bigint; n int;
 begin
   perform pg_temp.dev(u, 'p4a');
-  down := pg_temp.ev(u, 990065923, 'grid_down', 'p4:down');
+  down := pg_temp.ev(u, pg_temp.pid(990065923), 'grid_down', 'p4:down');
   n := pg_temp.take();
   perform pg_temp.done(down, 400);
-  back := pg_temp.ev(u, 990065923, 'grid_back', 'p4:back', 'p4:down');
+  back := pg_temp.ev(u, pg_temp.pid(990065923), 'grid_back', 'p4:back', 'p4:down');
   n := pg_temp.take();
   perform pg_temp.ok('P4 "down" failed on every device: "back" dropped', (pg_temp.ob(back)).drop_reason = 'down had no pop-up');
 end $$;
@@ -359,11 +365,11 @@ declare u uuid := pg_temp.owner('x3', '{990065935}'); b1 bigint; b2 bigint; n in
 begin
   perform pg_temp.dev(u, 'x3a');
   insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, pushed_at)
-  values (u, 990065935, 'grid_down', 'x3:old', '{}', 0, 'sent', now() - interval '2 hours'),
-         (u, 990065935, 'batt_hot', 'x3:never', '{}', 0, 'sent', null);
+  values (u, pg_temp.pid(990065935), 'grid_down', 'x3:old', '{}', 0, 'sent', now() - interval '2 hours'),
+         (u, pg_temp.pid(990065935), 'batt_hot', 'x3:never', '{}', 0, 'sent', null);
   update public.email_queue set pushed_at = null, push_skip = null where user_id = u and key = 'x3:never';
-  b1 := pg_temp.ev(u, 990065935, 'grid_back', 'x3:b1', 'x3:old');
-  b2 := pg_temp.ev(u, 990065935, 'batt_hot_back', 'x3:b2', 'x3:never');
+  b1 := pg_temp.ev(u, pg_temp.pid(990065935), 'grid_back', 'x3:b1', 'x3:old');
+  b2 := pg_temp.ev(u, pg_temp.pid(990065935), 'batt_hot_back', 'x3:b2', 'x3:never');
   n := pg_temp.take();
   perform pg_temp.ok('X3 "back" whose "down" was pushed on the old path: goes', cardinality(pg_temp.taken(b1)) = 1);
   perform pg_temp.ok('X3 ... whose "down" was never handled: dropped, not left waiting',
@@ -378,7 +384,7 @@ do $$
 declare u uuid := pg_temp.owner('v1', '{990065941}'); d1 bigint; q bigint; n int; j jsonb;
 begin
   d1 := pg_temp.dev(u, 'v1a');
-  q := pg_temp.ev(u, 990065941, 'grid_down', 'v1:down', null, now() - interval '20 minutes');
+  q := pg_temp.ev(u, pg_temp.pid(990065941), 'grid_down', 'v1:down', null, now() - interval '20 minutes');
   update msg.outbox set not_before = now() - interval '20 minutes' where dedupe_key = q || ':push';
   n := pg_temp.take();
   perform pg_temp.done(q, 429, 0);
@@ -400,10 +406,10 @@ do $$
 declare u uuid := pg_temp.owner('v3', '{990065942,990065943}'); down bigint; back bigint; other bigint; n int;
 begin
   perform pg_temp.dev(u, 'v3a');
-  down := pg_temp.ev(u, 990065942, 'grid_down', 'v3:down');
+  down := pg_temp.ev(u, pg_temp.pid(990065942), 'grid_down', 'v3:down');
   n := pg_temp.take();                                                    -- down leased, its device send open
-  back := pg_temp.ev(u, 990065942, 'grid_back', 'v3:back', 'v3:down');   -- waits
-  other := pg_temp.ev(u, 990065943, 'grid_down', 'v3:other');
+  back := pg_temp.ev(u, pg_temp.pid(990065942), 'grid_back', 'v3:back', 'v3:down');   -- waits
+  other := pg_temp.ev(u, pg_temp.pid(990065943), 'grid_down', 'v3:other');
   update msg.outbox set not_before = now() - interval '1 minute' where dedupe_key = back || ':push';
   perform count(*) from public.msg_push_take(1);
   perform pg_temp.ok('V3 a waiting "back" first in line does not block the next row',
@@ -427,7 +433,7 @@ do $$
 declare u uuid := pg_temp.owner('v5', '{990065945}'); d1 bigint; d2 bigint; q bigint; n int;
 begin
   d1 := pg_temp.dev(u, 'v5a'); d2 := pg_temp.dev(u, 'v5b');
-  q := pg_temp.ev(u, 990065945, 'grid_down', 'v5:down', null, now() - interval '59 minutes');
+  q := pg_temp.ev(u, pg_temp.pid(990065945), 'grid_down', 'v5:down', null, now() - interval '59 minutes');
   n := pg_temp.take();
   perform public.msg_push_done((select claim from t_take where event_id = q limit 1), jsonb_build_array(
     jsonb_build_object('id', (pg_temp.send(q, d1)).id, 'code', 503, 'retry_s', 120),

@@ -302,6 +302,14 @@ begin
   listed := plants.list_ids(l.brand, p_plants);
   ids := array(select (x->>'id')::bigint from jsonb_array_elements(listed) x order by 1);
   old_live := array(select lp.plant from plants.login_plants lp where lp.login = l.id and lp.gone_at is null order by 1);
+  -- the share login: every account holding a claim on its plants, in id order, before the plants
+  -- (billing.run's order: a released claim must not lock its account after a plant)
+  if l.kind = 'share' then
+    perform 1 from billing.accounts a
+     where a.id in (select c.account from plants.claims c join plants.login_plants lp on lp.plant = c.plant
+                     where lp.login = l.id and lp.gone_at is null)
+     order by a.id for update;
+  end if;
   perform billing.lock_plants(ids || old_live);
 
   if l.kind = 'login' then
@@ -665,7 +673,9 @@ begin
                             (select c.plant_name from plants.claims c where c.account = p_account and c.plant = x.plant),
                             -- a share removed (no claim left): the name it had
                             (select pu.plant_name from plants.user_plants pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
-                                and pu.plant_id = x.plant and pu.plant_name is not null limit 1)),
+                                and pu.plant_id = x.plant and pu.plant_name is not null limit 1),
+                            (select lp.plant_name from plants.login_plants lp join plants.logins s on s.id = lp.login and s.kind = 'share'
+                              where lp.plant = x.plant and lp.plant_name is not null limit 1)),
            'chosen', x.chosen,
            'locked', not x.chosen,
            'read_now', x.chosen and live and not st.must_choose and billing.has_route(p_account, x.plant, true)
@@ -3686,12 +3696,52 @@ AS $function$
   on conflict (plant_id) do nothing
 $function$;
 
+CREATE OR REPLACE FUNCTION public.plant_link(p_user uuid, p_plant bigint)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select jsonb_build_object('linked_at', u.linked_at, 'plant_name', u.plant_name)
+    from plants.user_plants u
+   where u.plant_id = p_plant and (p_user is null or u.user_id = p_user)
+   order by u.share_gone_at is not null, u.linked_at limit 1
+$function$;
+
 CREATE OR REPLACE FUNCTION public.plant_tz(p_plant bigint)
  RETURNS text
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$ select plants.tz(p_plant) $function$;
+
+CREATE OR REPLACE FUNCTION public.plant_vendor(p_plant bigint)
+ RETURNS text
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select p.vendor_id from plants.plants p where p.id = p_plant
+$function$;
+
+CREATE OR REPLACE FUNCTION public.plants_list_seen(p_login uuid, p_plants jsonb, p_mode text DEFAULT 'sync'::text)
+ RETURNS jsonb
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select plants.list_seen(p_login, p_plants, now(), p_mode)
+$function$;
+
+CREATE OR REPLACE FUNCTION public.plants_of_login(p_login uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'vendor_id', p.vendor_id) order by p.id), '[]'::jsonb)
+    from plants.login_plants lp join plants.plants p on p.id = lp.plant where lp.login = p_login
+$function$;
 
 CREATE OR REPLACE FUNCTION public.plants_seen_before(p_user uuid, p_plants bigint[])
  RETURNS integer
@@ -4196,8 +4246,13 @@ begin
   if not found then raise exception 'share_claim: % is not the share login', p_account; end if;
   acc := billing.account_of(p_user);
   select p.id into pid from plants.plants p where p.brand = v_brand and p.vendor_id = vendor;
-  if pid is not null and exists (select 1 from plants.claims c where c.plant = pid and c.account = acc)
-     and exists (select 1 from plants.login_plants lp where lp.login = p_account and lp.plant = pid and lp.gone_at is null) then
+  -- the user reads it already: through their own login, or a claim whose share row is live (a
+  -- claim with its row missing is repaired below)
+  if pid is not null and (exists (select 1 from plants.user_plants u where u.plant_id = pid and u.user_id = p_user
+                                     and not u.via_share and u.share_gone_at is null)
+                          or (exists (select 1 from plants.claims c where c.plant = pid and c.account = acc)
+                              and exists (select 1 from plants.login_plants lp where lp.login = p_account and lp.plant = pid
+                                             and lp.gone_at is null))) then
     return jsonb_build_object('result', 'yours', 'plant', pid);
   end if;
   pid := plants.claim(acc, v_brand, vendor, p_plant_name);
@@ -4218,46 +4273,6 @@ AS $function$
    where a.kind = 'share' and a.status = 'needs_reconnect'
      and coalesce((select max(e.at) from plants.login_events e
                     where e.account_id = a.id and e.event = 'died'), '-infinity') < now() - interval '55 minutes'
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plant_link(p_user uuid, p_plant bigint)
- RETURNS jsonb
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select jsonb_build_object('linked_at', u.linked_at, 'plant_name', u.plant_name)
-    from plants.user_plants u
-   where u.plant_id = p_plant and (p_user is null or u.user_id = p_user)
-   order by u.share_gone_at is not null, u.linked_at limit 1
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plant_vendor(p_plant bigint)
- RETURNS text
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select p.vendor_id from plants.plants p where p.id = p_plant
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plants_list_seen(p_login uuid, p_plants jsonb, p_mode text DEFAULT 'sync'::text)
- RETURNS jsonb
- LANGUAGE sql
- SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select plants.list_seen(p_login, p_plants, now(), p_mode)
-$function$;
-
-CREATE OR REPLACE FUNCTION public.plants_of_login(p_login uuid)
- RETURNS jsonb
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'vendor_id', p.vendor_id) order by p.id), '[]'::jsonb)
-    from plants.login_plants lp join plants.plants p on p.id = lp.plant where lp.login = p_login
 $function$;
 
 -- ---------------------------------------------------------------------------

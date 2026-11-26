@@ -13,7 +13,7 @@
 // connection waits until pg_blocking_pids shows the delete blocked on the writer; only then
 // does the writer take its second lock. A race that never overlaps fails. Every wait is bounded.
 import { spawn } from 'node:child_process';
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { DB_ARGS, ENV, PSQL, psql } from './local-db.mjs';
 
 const sql = (q) => psql(q, ['-At']);
@@ -46,23 +46,26 @@ async function said(s, key) {
 }
 
 const u = randomUUID(), login = randomUUID(), acc = randomUUID();
-// a plant id no real plant (6–9 digits) or other test (990xxxxxx) uses; a clash fails setup
-const plant = randomInt(1e12, 9e12), tag = `lock-${u}`;
+// the plant gets our own id from plants.plant_for (SOLAR-681), under a vendor id only this run uses
+const tag = `lock-${u}`;
+const made0 = sql(`select plants.plant_for('sunsynk', '${tag}')`);
+if (made0.status !== 0) { console.error('setup failed:', made0.stderr); process.exit(1); }
+const plant = Number(made0.stdout.trim());
 // the one share login: the database's own, else one made here (owner) and removed at the end
-const look = sql(`select id from private.sunsynk_accounts where kind = 'share'`);
+const look = sql(`select id from plants.logins where kind = 'share'`);
 if (look.status !== 0) { console.error('setup failed:', look.stderr); process.exit(1); }
 const found = look.stdout.trim();
 const owner = found ? null : randomUUID(), share = found || randomUUID();
 const made = sql(`begin;
   insert into auth.users (id, email, created_at) values ('${u}', 'lock-${u}@state.test', now());
   ${owner ? `insert into auth.users (id, email, created_at) values ('${owner}', 'lock-share-${owner}@state.test', now());
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values ('${share}', '${owner}', 'lock-share-${owner}', 'active', 'share');` : ''}
+  insert into plants.logins (id, user_id, brand, username, status, kind) values ('${share}', '${owner}', 'sunsynk', 'lock-share-${owner}', 'ok', 'share');` : ''}
   insert into billing.accounts (id, user_id, market, created_at) values ('${acc}', '${u}', 'ZA', now());
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values ('${login}', '${u}', 'lock-${u}', 'active', 'login');
-  -- a share that lapsed: its link row and seat stay, through the share login
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share, share_gone_at)
-  values (${plant}, '${u}', '${share}', 'Lock', true, now());
-  insert into billing.plants (id, brand, external_id) values (${plant}, 'sunsynk', '${tag}');
+  insert into plants.logins (id, account, user_id, brand, username, status, kind) values ('${login}', '${acc}', '${u}', 'sunsynk', 'lock-${u}', 'ok', 'login');
+  -- a share that dropped off the share login's list over an hour ago: its claim, its list row and its seat
+  insert into plants.claims (plant, account, plant_name) values (${plant}, '${acc}', 'Lock');
+  insert into plants.login_plants (login, plant, plant_name, last_seen_at, missing_since)
+  values ('${share}', ${plant}, 'Lock', now() - interval '3 hours', now() - interval '2 hours');
   insert into billing.seats (account, plant, chosen_at) values ('${acc}', ${plant}, now());
 commit;`);
 if (made.status !== 0) { console.error('setup failed:', made.stderr); process.exit(1); }
@@ -75,20 +78,20 @@ const del = `${LIMITS} begin;
 rollback;`;
 // each writer: [its first lock, what it does after]; the handshake sits between the two
 const races = {
-  // share_sync's order: the link row, then the account
+  // plants.list_seen's order on the share login: its lock, then (the share gone over an hour: the claim
+  // released) the owner's account
   'share update vs account delete': [
-    `update public.plant_users set share_missing_at = now() where user_id = '${u}';`,
-    `select billing.lock_account('${acc}');`],
-  // a claim of the lapsed plant (share_claim_live): the share login's lock, the plant, then
-  // the lapsed link row goes
+    `select pg_advisory_xact_lock(1, hashtext('${share}'));`,
+    `select plants.list_seen('${share}', '[]'::jsonb);`],
+  // a claim of the plant (plants.claim): the share login's lock, the account, then the plant
   'claim of a lapsed share vs account delete': [
-    `select pg_advisory_xact_lock(1, hashtext('${share}'));
-     select billing.lock_plants(array[${plant}]::bigint[]);`,
-    `delete from public.plant_users where plant_id = ${plant} and user_id = '${u}' and share_gone_at is not null;`],
+    `select pg_advisory_xact_lock(1, hashtext('${share}'));`,
+    `select billing.lock_account('${acc}');
+     select billing.lock_plants(array[${plant}]::bigint[]);`],
   // the poller marking the login (account_mark): its row, then, through the status trigger
-  // (billing.login_status_follow), the login's plants
+  // (plants.login_status_changed), the login's plants
   'login marked by the poller vs account delete': [
-    `select public.account_mark('${login}', 'active', null);`,
+    `select public.account_mark('${login}', 'ok', null);`,
     `select billing.lock_plants(array[${plant}]::bigint[]);`],
   // a reconnect's order: the login's lock, then the account
   'reconnect vs account delete': [
@@ -142,9 +145,10 @@ try {
   }
 } finally {
   const clean = sql(`begin;
-    delete from public.plant_users where user_id = '${u}'; delete from billing.seats where account = '${acc}';
-    delete from billing.plants where id = ${plant} and external_id = '${tag}';
-    delete from private.sunsynk_accounts where user_id in ('${u}', '${owner ?? u}');
+    delete from plants.claims where plant = ${plant}; delete from plants.login_plants where plant = ${plant};
+    delete from billing.seats where account = '${acc}';
+    delete from plants.plants where id = ${plant} and vendor_id = '${tag}';
+    delete from plants.logins where user_id in ('${u}', '${owner ?? u}');
     delete from billing.accounts where id = '${acc}'; delete from auth.users where id in ('${u}', '${owner ?? u}');
   commit;`);
   if (clean.status !== 0) {

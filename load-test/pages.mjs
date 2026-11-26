@@ -21,7 +21,7 @@ const jwt = (sub) => {
 };
 
 const owners = JSON.parse(execFileSync("docker", ["exec", "solar-loadtest-client", "psql", "-h", "solar-loadtest-db", "-U", "postgres", "-Atq", "-c",
-  "select json_agg(json_build_object('plant', plant_id, 'user', user_id) order by plant_id) from public.plant_users where plant_id > 900000"], { encoding: "utf8" }));
+  "select json_agg(json_build_object('plant', plant_id, 'user', user_id) order by plant_id) from plants.user_plants where plant_id > 900000"], { encoding: "utf8" }));
 
 const CALLS = [
   ["api_overview", {}], ["api_history", { p_date: null }], ["api_energy", { p_period: "week" }], ["api_trends_daily", { p_days: 30 }],

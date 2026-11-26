@@ -1296,8 +1296,8 @@ function Setup({ links, acct }) {
     wallShown.current = true;
     window.track('pay_wall_shown', { plants: acct.chosen, after: acct.had_plan ? 'plan' : 'free_week' });
   }, [!!wall?.button]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
-  const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
+  const dead = links.accounts.filter(a => a.status === 'needs_reconnect' && a.kind !== 'share');
+  const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'ok');
   // no plan: the plants are still yours, paused, as Settings > Plants lists them (SOLAR-631)
   const account = { user, plantCount: wall ? acct.chosen : 0, paused: !!wall, alert: AT.accountAlert(acct, dead.length > 0), onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
@@ -1399,7 +1399,7 @@ function App({ links }) {
   // a plant whose every login stopped working reads Reconnect in the menu
   const loginsCut = (id) => {
     const ls = loginsFor(id);
-    return ls.length > 0 && !ls.some(a => a.status === 'active');
+    return ls.length > 0 && !ls.some(a => a.status === 'ok');
   };
   const loginCut = !!rawSnap && plantStatus(rawSnap, Date.now()).status !== 'live' && loginsCut(plantId);
   const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
@@ -1720,7 +1720,7 @@ function App({ links }) {
   const wasCutOff = useRef(null);
   useEffect(() => {
     const was = wasCutOff.current;
-    if (was && was.plantId === plantId && was.cut && !plantCutOff && plantLogins.some(a => a.status === 'active')) setRelinked({ plantId, at: Date.now() });
+    if (was && was.plantId === plantId && was.cut && !plantCutOff && plantLogins.some(a => a.status === 'ok')) setRelinked({ plantId, at: Date.now() });
     wasCutOff.current = { plantId, cut: plantCutOff };
   }, [plantCutOff, plantId]);
 
@@ -1753,7 +1753,7 @@ function App({ links }) {
   };
   const bell = <NotifBell data={notifs} pinned={notices} multi={multi} onOpenAlert={openAlert} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSettings={() => openSettings('notifications')} />;
-  const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
+  const loginDead = links.accounts.some(a => a.status === 'needs_reconnect' && a.kind !== 'share');
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: AT.accountAlert(acct, loginDead), onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')}

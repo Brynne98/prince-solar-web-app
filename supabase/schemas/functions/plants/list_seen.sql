@@ -25,6 +25,14 @@ begin
   listed := plants.list_ids(l.brand, p_plants);
   ids := array(select (x->>'id')::bigint from jsonb_array_elements(listed) x order by 1);
   old_live := array(select lp.plant from plants.login_plants lp where lp.login = l.id and lp.gone_at is null order by 1);
+  -- the share login: every account holding a claim on its plants, in id order, before the plants
+  -- (billing.run's order: a released claim must not lock its account after a plant)
+  if l.kind = 'share' then
+    perform 1 from billing.accounts a
+     where a.id in (select c.account from plants.claims c join plants.login_plants lp on lp.plant = c.plant
+                     where lp.login = l.id and lp.gone_at is null)
+     order by a.id for update;
+  end if;
   perform billing.lock_plants(ids || old_live);
 
   if l.kind = 'login' then

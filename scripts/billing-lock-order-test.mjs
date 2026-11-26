@@ -26,10 +26,14 @@ const u1 = randomUUID(), u2 = randomUUID(), u3 = randomUUID(), u4 = randomUUID()
 const a1 = randomUUID(), a2 = randomUUID(), a3 = hi(), a4 = lo();
 const l1 = randomUUID(), l2 = randomUUID();
 // the one share login: the database's own, else one made here (u5's) and removed at the end
-const found = sql(`select id from private.sunsynk_accounts where kind = 'share' order by id limit 1`).stdout.trim();
+const found = sql(`select id from plants.logins where kind = 'share' order by id limit 1`).stdout.trim();
 const share = found || randomUUID();
 const name = `lock-${u1}`;                    // l1 and l2 are copies of one login
-const P1 = 990160001, P2 = 990160002, P3 = 990160003, P4 = 990160004;
+// the brand's ids for four plants; our own ids come from plants.plant_for (SOLAR-681)
+const V1 = 990160001, V2 = 990160002, V3 = 990160003, V4 = 990160004;
+const ours = sql(`select string_agg(plants.plant_for('sunsynk', x::text)::text, ',' order by x) from unnest(array[${V1}, ${V2}, ${V3}, ${V4}]) x`);
+if (ours.status !== 0) { console.error('setup failed:', ours.stderr); process.exit(1); }
+const [P1, P2, P3, P4] = ours.stdout.trim().split(',').map(Number);
 const users = [u1, u2, u3, u4, u5].map((x) => `'${x}'`).join(',');
 const plants = [P1, P2, P3, P4].join(',');
 
@@ -40,24 +44,18 @@ must(sql(`begin;
   insert into billing.accounts (id, user_id, market, created_at, trial_started_at, trial_ends_at) values
     ('${a1}', '${u1}', 'ZA', now(), now(), now() + interval '7 days'), ('${a2}', '${u2}', 'ZA', now(), now(), now() + interval '7 days'),
     ('${a3}', '${u3}', 'ZA', now(), null, null), ('${a4}', '${u4}', 'ZA', now(), null, null);
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
-    ('${l1}', '${u1}', '${name}', 'active', 'login'), ('${l2}', '${u2}', '${name}', 'active', 'login');
-  ${found ? '' : `insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values ('${share}', '${u5}', 'lock-share-${u5}', 'active', 'share');`}
-  insert into billing.plants (id, brand, external_id) select x, 'sunsynk', x::text from unnest(array[${plants}]) x;
-  insert into billing.logins (id, account, brand, username, status) values
-    ('${l1}', '${a1}', 'sunsynk', '${name}', 'ok'), ('${l2}', '${a2}', 'sunsynk', '${name}', 'ok');
+  ${found ? '' : `insert into plants.logins (id, user_id, brand, username, status, kind) values ('${share}', '${u5}', 'sunsynk', 'lock-share-${u5}', 'ok', 'share');`}
+  insert into plants.logins (id, account, user_id, brand, username, status, kind) values
+    ('${l1}', '${a1}', '${u1}', 'sunsynk', '${name}', 'ok', 'login'), ('${l2}', '${a2}', '${u2}', 'sunsynk', '${name}', 'ok', 'login');
   -- l1 reaches P2, its copy l2 reaches P1 and P2: a status change on both locks P2, then P1
-  insert into billing.login_plants (login, plant, last_seen_at) values
-    ('${l1}', ${P2}, now()), ('${l2}', ${P1}, now()), ('${l2}', ${P2}, now());
+  insert into plants.login_plants (login, plant, plant_name, last_seen_at) values
+    ('${l1}', ${P2}, 'Lock', now()), ('${l2}', ${P1}, null, now()), ('${l2}', ${P2}, 'Lock', now());
   insert into billing.seats (account, plant, chosen_at) values ('${a1}', ${P2}, now()), ('${a2}', ${P2}, now());
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values
-    (${P2}, '${u1}', '${l1}', 'Lock'), (${P2}, '${u2}', '${l2}', 'Lock');
   -- two shares that ended an hour ago, P3 (the later account) first
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share, share_missing_at) values
-    (${P3}, '${u3}', '${share}', 'Lock 3', true, now() - interval '2 hours');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share, share_missing_at) values
-    (${P4}, '${u4}', '${share}', 'Lock 4', true, now() - interval '2 hours');
-  insert into billing.plant_claims (plant, account) values (${P3}, '${a3}'), (${P4}, '${a4}');
+  insert into plants.login_plants (login, plant, plant_name, last_seen_at, missing_since) values
+    ('${share}', ${P3}, 'Lock 3', now() - interval '3 hours', now() - interval '2 hours'),
+    ('${share}', ${P4}, 'Lock 4', now() - interval '3 hours', now() - interval '2 hours');
+  insert into plants.claims (plant, account, plant_name) values (${P3}, '${a3}', 'Lock 3'), (${P4}, '${a4}', 'Lock 4');
   insert into billing.subscriptions (account, plan, currency, interval, amount_minor, status, started_at, billing_day,
                                      period_start, period_end)
   select x, (select min(code) from billing.plans), 'ZAR', 'month', 0, 'active', now(), 1, now(), now() + interval '20 days'
@@ -67,20 +65,18 @@ select public.account_refresh_set('${l1}', 'lock-refresh');`), 'setup');
 if (must(sql(`select (billing.plant_state(${P2})->>'read_now')::boolean`), 'read_now') !== 't') {
   console.error('setup: P2 is not read now'); clean(); process.exit(1);
 }
-const version = must(sql(`select version from billing.plants where id = ${P2}`), 'version');
+const version = must(sql(`select version from plants.plants where id = ${P2}`), 'version');
 
 function clean() {
   sql(`delete from billing.subscriptions where account in ('${a3}', '${a4}');
-       delete from billing.plant_claims where plant in (${plants});
-       delete from public.plant_users where user_id in (${users});
+       delete from plants.claims where plant in (${plants});
+       delete from plants.login_plants where plant in (${plants}) or login in ('${l1}', '${l2}');
        delete from billing.seats where account in ('${a1}', '${a2}');
-       delete from billing.login_plants where login in ('${l1}', '${l2}');
-       delete from billing.logins where id in ('${l1}', '${l2}');
        delete from billing.account_events where account in ('${a1}', '${a2}', '${a3}', '${a4}');
-       delete from billing.plants where id in (${plants});
-       delete from vault.secrets where id in (select refresh_secret_id from private.sunsynk_accounts where user_id in (${users}));
-       delete from private.sunsynk_login_events where account_id in ('${l1}', '${l2}'${found ? '' : `, '${share}'`});
-       delete from private.sunsynk_accounts where user_id in (${users});
+       delete from vault.secrets where id in (select refresh_secret_id from plants.logins where user_id in (${users}));
+       delete from plants.login_events where account_id in ('${l1}', '${l2}'${found ? '' : `, '${share}'`});
+       delete from plants.logins where user_id in (${users});
+       delete from plants.plants where id in (${plants});
        delete from billing.accounts where id in ('${a1}', '${a2}', '${a3}', '${a4}');
        delete from auth.users where id in (${users});`);
 }
@@ -88,7 +84,7 @@ function clean() {
 const as = (u) => `select set_config('request.jwt.claims', json_build_object('sub', '${u}', 'role', 'authenticated')::text, true);`;
 const poll = (login) => `select public.poll_commit_v2('{"${P2}": ${version}}'::jsonb, '${login}', extract(epoch from date_trunc('minute', now()))::bigint,
   '[]', '[]', '[{"plant_id": ${P2}, "pv_w": 1}]', '[]', '[]', 'lock-access', 4102444800);`;
-const reconnect = `select public.link_login_live('${u1}', '${name}', 'lock-access', 4102444800, 'lock-refresh', '[{"id": ${P2}}]');`;
+const reconnect = `select public.link_login_live('${u1}', '${name}', 'lock-access', 4102444800, 'lock-refresh', '[{"id": ${V2}}]');`;
 const tx = (body) => `begin;\n${body}\nrollback;`;
 
 // gate: what it holds for 2 s; first: starts at 0.3 s; second: at 0.8 s
@@ -98,28 +94,28 @@ const races = [
     first: tx(`${as(u1)} select public.api_account_delete();`),
     second: tx(reconnect) },
   { name: '2. login and its copy marked broken vs plant list',
-    gate: `select 1 from billing.plants where id = ${P1} for update;`,
-    first: tx(`select billing.login_seen('${l1}', '[{"id": ${P1}}, {"id": ${P2}}]');`),
-    second: tx(`select public.account_mark('${l1}', 'needs_relink', 'lock test');`) },
+    gate: `select 1 from plants.plants where id = ${P1} for update;`,
+    first: tx(`select plants.list_seen('${l1}', '[{"id": ${V1}}, {"id": ${V2}}]', now(), 'sync');`),
+    second: tx(`select public.account_mark('${l1}', 'needs_reconnect', 'lock test');`) },
   { name: '3a. poll save vs unlink of another login on the plant',
     gate: `select 1 from billing.accounts where id = '${a2}' for update;`,
     first: tx(`${as(u2)} select public.api_link_remove('${l2}');`),
     second: tx(poll(l1)) },
   { name: '3b. poll save vs reconnect of the same login',
-    gate: `select 1 from private.sunsynk_accounts where id = '${l1}' for no key update;`,  // the reconnect's event row still reads it
+    gate: `select 1 from plants.logins where id = '${l1}' for no key update;`,  // the reconnect's event row still reads it
     first: tx(reconnect),
     second: tx(poll(l1)) },
   { name: '3c. two polls on a plant whose history was deleted',
-    before: `update billing.plants set history_purged_at = now() where id = ${P2};`,
-    after: `update billing.plants set history_purged_at = null where id = ${P2};`,
-    gate: `select 1 from private.sunsynk_accounts where id in ('${l1}', '${l2}') for update;`,
+    before: `insert into billing.plant_facts (plant, history_purged_at) values (${P2}, now()) on conflict (plant) do update set history_purged_at = excluded.history_purged_at;`,
+    after: `update billing.plant_facts set history_purged_at = null where plant = ${P2};`,
+    gate: `select 1 from plants.logins where id in ('${l1}', '${l2}') for update;`,
     first: tx(poll(l1)),
     second: tx(poll(l2)) },
   { name: '4. two shares ending vs billing run',
     gate: `select pg_sleep(0);`,
     first: tx(`select billing.lock_account('${a4}'); select pg_sleep(1.5);
       do $$ begin if billing.run() ? 'busy' then raise exception 'billing.run is busy: nothing raced'; end if; end $$;`),
-    second: tx(`select public.share_sync('${share}', '{}');`),
+    second: tx(`select plants.list_seen('${share}', '[]'::jsonb, now(), 'sync');`),
     secondAt: 300 },
 ];
 

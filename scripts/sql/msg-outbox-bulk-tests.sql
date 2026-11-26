@@ -12,6 +12,14 @@ create function pg_temp.ok(p_label text, p_cond boolean, p_detail text default n
 returns void language sql as $$
   insert into t_results (label, pass, detail) values (p_label, coalesce(p_cond, false), p_detail)
 $$;
+-- our plant id for a brand's id (SOLAR-681); the ids in the jsonb lists given to link_login are the brand's
+create function pg_temp.pid(v bigint) returns bigint language sql as $$ select plants.plant_for('sunsynk', v::text) $$;
+create function pg_temp.pids(v text) returns bigint[] language sql as $$
+  select coalesce(array_agg(plants.plant_for('sunsynk', x) order by o), '{}') from unnest(v::text[]) with ordinality t(x, o)
+$$;
+create function pg_temp.link_login(a uuid, b text, n text, s uuid, p jsonb, at timestamptz default now(),
+                                   actor text default 'owner', lid uuid default null) returns jsonb language plpgsql as $$
+begin perform plants.link_login(a, b, n, p, at, actor, lid); return billing.account_state(a, at); end $$;
 create function pg_temp.ep(p timestamptz) returns bigint language sql immutable as $$ select extract(epoch from p)::bigint $$;
 
 -- an owner with chosen plants and a stored login (as msg-outbox-tests)
@@ -21,17 +29,15 @@ declare u uuid := gen_random_uuid(); a uuid; l uuid := gen_random_uuid(); i int;
 begin
   insert into auth.users (id, email, created_at) values (u, p_name || '@msgb.test', p_at);
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', p_at) returning id into a;
-  insert into public.plant_config (plant_id, timezone) select x, 'Africa/Johannesburg' from unnest(p_plants) x
-  on conflict (plant_id) do nothing;
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, linked_at, last_ok_at, last_try, last_try_at)
-  values (l, u, p_name, 'active', p_at, now(), 'ok', now());
-  perform billing.link_login(a, 'sunsynk', p_name, null,
+  perform plants.link_login(a, 'sunsynk', p_name,
     (select jsonb_agg(jsonb_build_object('id', x, 'name', 'Plant ' || x)) from unnest(p_plants) x), p_at, 'owner', l);
+  update plants.logins set last_ok_at = now(), last_try = 'ok', last_try_at = now() where id = l;
   for i in 1 .. cardinality(p_plants) loop
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at)
-    values (p_plants[i], u, l, 'Plant ' || p_plants[i], p_at + (i - 1) * interval '1 hour');
+    update plants.login_plants set linked_at = p_at + (i - 1) * interval '1 hour'
+     where login = l and plant = pg_temp.pid(p_plants[i]);
   end loop;
-  perform billing.set_chosen_plants(a, p_plants, p_at);
+  insert into public.plant_config (plant_id) select pg_temp.pid(x) from unnest(p_plants) x on conflict (plant_id) do nothing;
+  perform billing.set_chosen_plants(a, pg_temp.pids(p_plants::text), p_at);
   return u;
 end $$;
 create function pg_temp.acc(p_user uuid) returns uuid language sql as $$ select id from billing.accounts where user_id = p_user $$;
@@ -87,10 +93,9 @@ declare u uuid := gen_random_uuid(); a uuid; l uuid := gen_random_uuid();
 begin
   insert into auth.users (id, email, created_at) values (u, p_name || '@msgb.test', now() - interval '2 days');
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', now() - interval '2 days') returning id into a;
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, linked_at, last_ok_at, last_try, last_try_at)
-  values (l, u, p_name, 'active', now(), now(), 'ok', now());
-  perform billing.link_login(a, 'sunsynk', p_name, null,
+  perform plants.link_login(a, 'sunsynk', p_name,
     (select jsonb_agg(jsonb_build_object('id', x, 'name', 'Plant ' || x)) from unnest(p_plants) x), now(), 'owner', l);
+  update plants.logins set last_ok_at = now(), last_try = 'ok', last_try_at = now() where id = l;
   return u;
 end $$;
 -- ---------------------------------------------------------------------------
@@ -99,7 +104,7 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('r1', '{990068001}'); q bigint; o msg.outbox; f bigint; d bigint; s bigint;
 begin
-  q := pg_temp.bev(u, 990068001, 'report_week', 'r1:rep', jsonb_build_object('today', current_date));
+  q := pg_temp.bev(u, pg_temp.pid(990068001), 'report_week', 'r1:rep', jsonb_build_object('today', current_date));
   o := pg_temp.ob(q);
   perform pg_temp.ok('R1 report: event "outbox", one email row, bulk lane, 3-day expiry, address captured',
     (select status from public.email_queue where id = q) = 'outbox'
@@ -112,7 +117,7 @@ begin
   d := pg_temp.bev(null, null, 'account_deleted', 'account_deleted:r1', '{}', now(), 'gone@msgb.test');
   perform pg_temp.ok('R4 account deleted (no user): routed, address captured', (pg_temp.ob(d)).to_email = 'gone@msgb.test'
     and (pg_temp.ob(d)).user_id is null and (pg_temp.ob(d)).lane = 'bulk');
-  s := pg_temp.bev(u, 990068001, 'need_a_hand', 'r1:hand', '{}', now() + interval '24 hours');
+  s := pg_temp.bev(u, pg_temp.pid(990068001), 'need_a_hand', 'r1:hand', '{}', now() + interval '24 hours');
   perform pg_temp.ok('R5 need a hand: not before its due time, 2 days after it',
     (pg_temp.ob(s)).not_before = now() + interval '24 hours' and (pg_temp.ob(s)).expires_at = now() + interval '3 days');
   perform pg_temp.ok('R6 the bulk kinds, each with its expiry',
@@ -128,8 +133,8 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('k1', '{990068011}'); q bigint; h bigint; n int; t record;
 begin
-  q := pg_temp.bev(u, 990068011, 'report_week', 'k1:rep', jsonb_build_object('today', current_date, 'freeWeekEnds', true));
-  h := pg_temp.bev(u, 990068011, 'need_a_hand', 'k1:hand');
+  q := pg_temp.bev(u, pg_temp.pid(990068011), 'report_week', 'k1:rep', jsonb_build_object('today', current_date, 'freeWeekEnds', true));
+  h := pg_temp.bev(u, pg_temp.pid(990068011), 'need_a_hand', 'k1:hand');
   update public.email_prefs set reminders = true where user_id = u;  -- freeWeekEnds switch: reminders
   n := pg_temp.btake();
   select * into t from t_take where event_id = q;
@@ -151,17 +156,17 @@ begin
   insert into auth.users (id, email, created_at) values (v, 'g1v@msgb.test', now());
   w := pg_temp.bev(u, null, 'welcome', 'g1:welcome');
   w2 := pg_temp.bev(v, null, 'welcome', 'g1v:welcome');
-  h1 := pg_temp.bev(u, 990068021, 'history', 'g1:hist1');
-  h2 := pg_temp.bev(u, 990068022, 'history', 'g1:hist2');
-  r1 := pg_temp.bev(u, 990068021, 'report_week', 'g1:rep1', jsonb_build_object('today', current_date));
-  r2 := pg_temp.bev(u, 990068023, 'report_week', 'g1:rep2', jsonb_build_object('today', current_date));
-  r3 := pg_temp.bev(u, 990068021, 'report_month', 'g1:rep3', jsonb_build_object('today', current_date));
-  r4 := pg_temp.bev(u, 990068021, 'report_year', 'g1:rep4', jsonb_build_object('today', current_date), now() - interval '3 days');
-  s1 := pg_temp.bev(u, 990068023, 'share_removed', 'g1:share', '{"plants": ["Plant 990068023"]}');
-  s2 := pg_temp.bev(u, 990068023, 'plant_off_login', 'g1:off', '{"plants": ["Plant 990068023"]}');
+  h1 := pg_temp.bev(u, pg_temp.pid(990068021), 'history', 'g1:hist1');
+  h2 := pg_temp.bev(u, pg_temp.pid(990068022), 'history', 'g1:hist2');
+  r1 := pg_temp.bev(u, pg_temp.pid(990068021), 'report_week', 'g1:rep1', jsonb_build_object('today', current_date));
+  r2 := pg_temp.bev(u, pg_temp.pid(990068023), 'report_week', 'g1:rep2', jsonb_build_object('today', current_date));
+  r3 := pg_temp.bev(u, pg_temp.pid(990068021), 'report_month', 'g1:rep3', jsonb_build_object('today', current_date));
+  r4 := pg_temp.bev(u, pg_temp.pid(990068021), 'report_year', 'g1:rep4', jsonb_build_object('today', current_date), now() - interval '3 days');
+  s1 := pg_temp.bev(u, pg_temp.pid(990068023), 'share_removed', 'g1:share', '{"plants": ["Plant 990068023"]}');
+  s2 := pg_temp.bev(u, pg_temp.pid(990068023), 'plant_off_login', 'g1:off', '{"plants": ["Plant 990068023"]}');
   -- after queueing: plant 2 removed, plant 3 switched out, monthly reports off
-  delete from public.plant_users where user_id = u and plant_id = 990068022;
-  perform billing.set_chosen_plants(a, '{990068021,990068022}', now());
+  delete from plants.login_plants where login in (select id from plants.logins where user_id = u) and plant = pg_temp.pid(990068022);
+  perform billing.set_chosen_plants(a, pg_temp.pids('{990068021,990068022}'), now());
   insert into public.email_prefs (user_id, monthly) values (u, false) on conflict (user_id) do update set monthly = false;
   n := pg_temp.btake();
   perform pg_temp.ok('G1 welcome once a plant is linked: dropped', (pg_temp.ob(w)).drop_reason = 'plant linked', (pg_temp.ob(w)).drop_reason);
@@ -181,24 +186,24 @@ do $$
 declare u uuid := pg_temp.owner('g7', '{990068031}'); p uuid := pg_temp.picker('g8', '{990068032}'); v uuid := gen_random_uuid();
         h bigint; n1 bigint; n2 bigint; n3 bigint; n int;
 begin
-  h := pg_temp.bev(u, 990068031, 'history', 'g7:hist');
+  h := pg_temp.bev(u, pg_temp.pid(990068031), 'history', 'g7:hist');
   n1 := pg_temp.bev(u, null, 'need_a_hand', 'g7:hand');                  -- login added, plants chosen
   n2 := pg_temp.bev(p, null, 'need_a_hand', 'g8:hand');                  -- login added, plants wait to be chosen
   insert into auth.users (id, email, created_at) values (v, 'g9@msgb.test', now());
   n3 := pg_temp.bev(v, null, 'need_a_hand', 'g9:hand');                  -- no login
-  update billing.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
+  update plants.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
   n := pg_temp.btake();
   perform pg_temp.ok('G7 history on a plant not read: dropped', (pg_temp.ob(h)).drop_reason = 'plant not live', (pg_temp.ob(h)).drop_reason);
   perform pg_temp.ok('G7 ... its event row marked skipped "not read", as email_claim did',
     (select status || '/' || last_error from public.email_queue where id = h) = 'skipped/not read');
   -- read again, history finishes again: email_on_history's two steps (0217)
-  update billing.logins set status = 'ok' where account = pg_temp.acc(u);
-  delete from public.email_queue q where q.plant_id = 990068031 and q.kind = 'history' and q.status = 'skipped' and q.last_error = 'not read';
-  perform private.email_enqueue_plant(990068031, 'history', 'history:990068031', '{}'::jsonb, null, 1::smallint);
+  update plants.logins set status = 'ok' where account = pg_temp.acc(u);
+  delete from public.email_queue q where q.plant_id = pg_temp.pid(990068031) and q.kind = 'history' and q.status = 'skipped' and q.last_error = 'not read';
+  perform private.email_enqueue_plant(pg_temp.pid(990068031), 'history', 'history:990068031', '{}'::jsonb, null, 1::smallint);
   perform pg_temp.ok('G7 ... queued again through the outbox once the plant is read',
     exists (select 1 from public.email_queue q join msg.outbox o on o.dedupe_key = q.id || ':email'
              where q.user_id = u and q.key = 'history:990068031' and q.status = 'outbox' and o.status = 'queued'));
-  update billing.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
+  update plants.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
   perform pg_temp.ok('G8 need a hand once a login is added: dropped', (pg_temp.ob(n1)).drop_reason = 'login added', (pg_temp.ob(n1)).drop_reason);
   perform pg_temp.ok('G8 ... plants waiting to be chosen: goes, choose plants', pg_temp.taken(n2)
     and ((select data from t_take where event_id = n2)->>'choose')::boolean is true, (pg_temp.ob(n2)).drop_reason);
@@ -211,7 +216,7 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('h1', '{990068041}'); q bigint; o msg.outbox; n int; hist bigint;
 begin
-  q := pg_temp.bev(u, 990068041, 'report_week', 'h1:rep', jsonb_build_object('today', current_date));
+  q := pg_temp.bev(u, pg_temp.pid(990068041), 'report_week', 'h1:rep', jsonb_build_object('today', current_date));
   n := pg_temp.btake();
   update msg.outbox set batch_key = 'mb-h1' where id = (pg_temp.ob(q)).id;   -- as if bound, to see it cleared
   perform pg_temp.done(q, '{"hold_s": 600, "error": "waits for history"}');
@@ -230,12 +235,12 @@ begin
   perform pg_temp.ok('H2 a hold past the expiry: dropped with its reason, not "too old"',
     o.status = 'dropped' and o.drop_reason = 'nothing to say yet' and o.done_at is not null, row_to_json(o)::text);
   -- email_history_open: on the outbox
-  hist := pg_temp.bev(u, 990068041, 'history', 'h1:hist');
-  perform pg_temp.ok('H3 history on its way (outbox): open', public.email_history_open(u, 990068041));
+  hist := pg_temp.bev(u, pg_temp.pid(990068041), 'history', 'h1:hist');
+  perform pg_temp.ok('H3 history on its way (outbox): open', public.email_history_open(u, pg_temp.pid(990068041)));
   n := pg_temp.btake();
-  perform pg_temp.ok('H3 ... while leased: open', public.email_history_open(u, 990068041));
+  perform pg_temp.ok('H3 ... while leased: open', public.email_history_open(u, pg_temp.pid(990068041)));
   perform pg_temp.done(hist, '{"code": 200}');
-  perform pg_temp.ok('H3 ... once sent: not open', not public.email_history_open(u, 990068041));
+  perform pg_temp.ok('H3 ... once sent: not open', not public.email_history_open(u, pg_temp.pid(990068041)));
   perform pg_temp.ok('H5 service role only',
     has_function_privilege('service_role', 'public.email_history_open(uuid, bigint)', 'execute')
     and not has_function_privilege('authenticated', 'public.email_history_open(uuid, bigint)', 'execute'));
@@ -312,8 +317,8 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('l1', '{990068061}'); q bigint; q2 bigint; n int; c1 uuid; o msg.outbox; j jsonb;
 begin
-  q := pg_temp.bev(u, 990068061, 'history', 'l1:hist');
-  q2 := pg_temp.bev(u, 990068061, 'report_week', 'l1:rep', jsonb_build_object('today', current_date));
+  q := pg_temp.bev(u, pg_temp.pid(990068061), 'history', 'l1:hist');
+  q2 := pg_temp.bev(u, pg_temp.pid(990068061), 'report_week', 'l1:rep', jsonb_build_object('today', current_date));
   n := pg_temp.btake();
   c1 := (select claim from t_take where event_id = q);
   perform public.msg_email_bind(c1, 'mb-l1', array[(pg_temp.ob(q)).id, (pg_temp.ob(q2)).id]);
@@ -393,14 +398,13 @@ begin
    where dedupe_key = ev || ':email';
   -- a login linked by then; a claimed shared plant and no login of its own
   insert into auth.users (id, email, created_at) values (w, 'a3@msgb.test', now());
-  select id into sl from private.sunsynk_accounts where kind = 'share';
+  select id into sl from plants.logins where kind = 'share';
   if sl is null then
     insert into auth.users (id, email, created_at) values (y, 'share@msgb.test', now());
-    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (y, 'share@msgb.test', 'active', 'share')
+    insert into plants.logins (user_id, brand, username, status, kind) values (y, 'sunsynk', 'share@msgb.test', 'ok', 'share')
     returning id into sl;
   end if;
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share)
-  values (990068092, w, sl, 'Plant 990068092', true);
+  perform plants.claim(billing.account_of(w, true), 'sunsynk', '990068092', 'Plant 990068092');
   e2 := pg_temp.bev(u, null, 'add_plant_reminder', 'a2:add');
   e3 := pg_temp.bev(w, null, 'add_plant_reminder', 'a3:add');
   n := pg_temp.btake();

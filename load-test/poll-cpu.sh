@@ -12,7 +12,7 @@ poll() { curl -s -m 450 -X POST http://127.0.0.1:54402/poll -H "Authorization: B
 
 for N in "$@"; do
   q "select loadtest.add_fleet($((N * 2)))" >/dev/null
-  q "update private.sunsynk_accounts set status = case when sunsynk_username ~ '^lt' and substr(sunsynk_username, 3)::int <= $N then 'active' else 'disabled' end, last_error = null" >/dev/null
+  q "update plants.logins set status = case when username ~ '^lt' and substr(username, 3)::int <= $N then 'ok' else 'disabled' end, last_error = null" >/dev/null
   poll 2>/dev/null >/dev/null   # first call per login reads the inverter list
   # Wait for the next minute that is not a 10-minute list refresh.
   while :; do s=$(date +%s); next=$(( (s / 60 + 1) * 60 )); (( (next / 60) % 10 != 0 )) && break; sleep $(( next - s + 1 )); done

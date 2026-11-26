@@ -18,7 +18,7 @@ end $$;
 -- it is not listed.
 -- Yesterday at the same clock time: master 20.0, slave 15.0 kWh made.
 create temp table fx as
-  select '00000000-0000-0000-0000-000000000555'::uuid as u, 9555001::bigint as p,
+  select '00000000-0000-0000-0000-000000000555'::uuid as u, plants.plant_for('sunsynk', '9555001') as p,
          -- the newest minute: now, but at least 30 min into the local day
          greatest((extract(epoch from now())::bigint / 60) * 60,
                   public.day_start_epoch_tz(public.today_tz('Africa/Johannesburg'), 'Africa/Johannesburg') + 1800) as t;
@@ -29,9 +29,10 @@ grant select on fx to authenticated;
 create function pg_temp.owner(u uuid, p bigint, name text) returns void language plpgsql as $$
 declare at timestamptz := now() - interval '1 day'; a uuid; l uuid := gen_random_uuid(); pr billing.prices;
 begin
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, last_try, last_try_at) values (l, u, name, 'ok', now());
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', at) returning id into a;
-  perform billing.link_login(a, 'sunsynk', name, null, jsonb_build_array(jsonb_build_object('id', p, 'name', name)), at, 'owner', l);
+  perform plants.link_login(a, 'sunsynk', name,
+    jsonb_build_array(jsonb_build_object('id', (select vendor_id from plants.plants where id = p), 'name', name)), at, 'owner', l);
+  update plants.logins set last_try = 'ok', last_try_at = now() where id = l;
   perform billing.set_chosen_plants(a, array[p], at);
   select * into pr from billing.prices where plan = 'home' and market = 'ZA' and interval = 'month' and offer is null and active_until is null;
   insert into billing.subscriptions (account, price, plan, currency, interval, amount_minor, extra_place_minor,
@@ -39,7 +40,6 @@ begin
   values (a, pr.id, 'home', 'ZAR', 'month', pr.amount_minor, pr.extra_place_minor, 'active', at,
           extract(day from at at time zone 'Africa/Johannesburg'), at, at + interval '1 month');
   update billing.accounts set trial_ends_at = least(trial_ends_at, at) where id = a and trial_started_at is not null;
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (p, u, l, name);
 end $$;
 
 insert into auth.users (id, email) select u, 'silent@t.test' from fx;
@@ -68,7 +68,7 @@ select p, sn, t - d * 86400 - 60, false,
 -- Plant 9555002: Y555 silent since yesterday 23:00 local (30.0 kWh made yesterday),
 -- L555 in every minute today (12.0 kWh made so far).
 create temp table fy as
-  select '00000000-0000-0000-0000-000000000556'::uuid as u, 9555002::bigint as p, t,
+  select '00000000-0000-0000-0000-000000000556'::uuid as u, plants.plant_for('sunsynk', '9555002') as p, t,
          public.day_start_epoch_tz(public.today_tz('Africa/Johannesburg'), 'Africa/Johannesburg') - 3600 as y
     from fx;
 insert into auth.users (id, email) select u, 'silent2@t.test' from fy;
@@ -134,7 +134,7 @@ do $$
 declare t0 timestamptz := clock_timestamp(); x bigint; ms numeric;
 begin
   select rd.ts into x from public.readings rd
-   where rd.sn = 'Y555' and rd.plant_id = 9555002
+   where rd.sn = 'Y555' and rd.plant_id = (select p from fy)
      and rd.ts >= extract(epoch from now())::bigint - 2 * 86400 and rd.ts <= (select t from fx)
    order by rd.ts desc limit 1;
   ms := extract(epoch from clock_timestamp() - t0) * 1000;

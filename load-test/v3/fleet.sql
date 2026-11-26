@@ -12,15 +12,13 @@ begin
   delete from public.agg_minute where plant_id >= 980000000 and plant_id < 990000000;
   delete from private.meta where plant_id >= 980000000 and plant_id < 990000000;
   delete from private.inverters where plant_id >= 980000000 and plant_id < 990000000;
-  delete from public.plant_users where plant_id >= 980000000 and plant_id < 990000000;
   delete from public.plant_config where plant_id >= 980000000 and plant_id < 990000000;
   delete from billing.seats where plant >= 980000000 and plant < 990000000;
-  delete from billing.plant_claims where plant >= 980000000 and plant < 990000000;
-  delete from billing.login_plants where plant >= 980000000 and plant < 990000000;
-  delete from billing.plants where id >= 980000000 and id < 990000000;
+  delete from plants.claims where plant >= 980000000 and plant < 990000000;
+  delete from plants.login_plants where plant >= 980000000 and plant < 990000000;
+  delete from plants.plants where id >= 980000000 and id < 990000000;
   delete from billing.grants where reason = 'lt3';
-  delete from billing.logins where username like 'lt%';
-  delete from private.sunsynk_accounts where sunsynk_username like 'lt%';
+  delete from plants.logins where username like 'lt%';
   delete from billing.accounts where user_id in (select id from auth.users where email like '%@lt3.invalid');
   delete from auth.users where email like '%@lt3.invalid';
   delete from private.poll_runs;
@@ -44,17 +42,17 @@ begin
   insert into billing.accounts (id, user_id, market) select a, u, 'ZA' from _l;
   insert into billing.grants (account, places, reason, starts_at)
     select a, jsonb_array_length(plants), 'lt3', now() - interval '1 day' from _l;
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, access_token, access_expires_at, status, kind)
-    select l, u, username, 'at:' || username, far, 'active', 'login' from _l;
-  insert into billing.logins (id, account, brand, username, created_at)
-    select l, a, 'sunsynk', username, now() - interval '1 day' from _l;
-  insert into billing.plants (id, brand, external_id) select plant, 'sunsynk', plant::text from _p;
-  insert into billing.login_plants (login, plant, last_seen_at) select l, plant, now() from _p;
+  insert into plants.logins (id, account, user_id, brand, username, access_token, access_expires_at, status, kind, linked_at)
+    select l, a, u, 'sunsynk', username, 'at:' || username, far, 'ok', 'login', now() - interval '1 day' from _l;
+  -- the fake plants keep the ids the fleet file gives them (below 1e12, so legacy rows); the
+  -- plant_for guard is a trigger, off under session_replication_role = replica above
+  insert into plants.plants (id, brand, vendor_id, time_zone, legacy)
+    select plant, 'sunsynk', plant::text, 'Africa/Johannesburg', true from _p;
+  insert into plants.login_plants (login, plant, plant_name, last_seen_at, linked_at)
+    select l, plant, 'Load ' || plant, now(), now() - interval '1 day' from _p;
   insert into billing.seats (account, plant, chosen_at) select a, plant, now() - interval '1 day' from _p;
-  insert into public.plant_config (plant_id, timezone, has_grid, has_battery, batt_positive_means)
-    select plant, 'Africa/Johannesburg', true, true, 'discharging' from _p;
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name)
-    select plant, u, l, 'Load ' || plant from _p;
+  insert into public.plant_config (plant_id, has_grid, has_battery, batt_positive_means)
+    select plant, true, true, 'discharging' from _p;
   insert into private.inverters (sn, plant_id, account_id)
     select sn, plant, l from _p, jsonb_array_elements_text(sns) sn;
 
@@ -72,19 +70,19 @@ begin
     insert into auth.users (id, aud, role, email, email_confirmed_at)
       values ('00000000-0000-4000-8000-0000000003a3', 'authenticated', 'authenticated', 'ltshare@lt3.invalid', now())
       on conflict do nothing;
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, access_token, access_expires_at, status, kind)
-      values ('00000000-0000-4000-8000-0000000003a4', '00000000-0000-4000-8000-0000000003a3', p->'share'->>'username',
-              'at:' || (p->'share'->>'username'), far, 'active', 'share');
-    insert into billing.plants (id, brand, external_id) select plant, 'sunsynk', plant::text from _s;
-    insert into billing.plant_claims (plant, account, claimed_at)
-      select s.plant, c.a, now() - interval '1 day' from _s s join _c c on c.c = s.j % (select count(*) from _c);
+    insert into plants.logins (id, user_id, brand, username, access_token, access_expires_at, status, kind)
+      values ('00000000-0000-4000-8000-0000000003a4', '00000000-0000-4000-8000-0000000003a3', 'sunsynk', p->'share'->>'username',
+              'at:' || (p->'share'->>'username'), far, 'ok', 'share');
+    insert into plants.plants (id, brand, vendor_id, time_zone, legacy)
+      select plant, 'sunsynk', plant::text, 'Africa/Johannesburg', true from _s;
+    insert into plants.login_plants (login, plant, plant_name, last_seen_at)
+      select '00000000-0000-4000-8000-0000000003a4', plant, 'Shared ' || plant, now() from _s;
+    insert into plants.claims (plant, account, claimed_at, plant_name)
+      select s.plant, c.a, now() - interval '1 day', 'Shared ' || s.plant from _s s join _c c on c.c = s.j % (select count(*) from _c);
     insert into billing.seats (account, plant, chosen_at)
       select c.a, s.plant, now() - interval '1 day' from _s s join _c c on c.c = s.j % (select count(*) from _c);
-    insert into public.plant_config (plant_id, timezone, has_grid, has_battery, batt_positive_means)
-      select plant, 'Africa/Johannesburg', true, true, 'discharging' from _s;
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share)
-      select s.plant, c.u, '00000000-0000-4000-8000-0000000003a4', 'Shared ' || s.plant, true
-        from _s s join _c c on c.c = s.j % (select count(*) from _c);
+    insert into public.plant_config (plant_id, has_grid, has_battery, batt_positive_means)
+      select plant, true, true, 'discharging' from _s;
     insert into private.inverters (sn, plant_id, account_id)
       select sn, plant, '00000000-0000-4000-8000-0000000003a4' from _s, jsonb_array_elements_text(sns) sn;
   end if;

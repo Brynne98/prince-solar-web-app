@@ -29,7 +29,7 @@ const link = await fetch(`${API}/functions/v1/link-sunsynk`, { method: 'POST',
   headers: { apikey: ANON, Authorization: `Bearer ${su.access_token}`, 'Content-Type': 'application/json' },
   body: JSON.stringify({ username: 'solo@mock', password: 'anything1' }) });
 check(link.ok, `link a fake plant (${link.status})`);
-const plants = sql(`select count(*) from public.plant_users pu join auth.users u on u.id = pu.user_id where u.email = '${email}'`);
+const plants = sql(`select count(*) from plants.user_plants pu join auth.users u on u.id = pu.user_id where u.email = '${email}'`);
 check(Number(plants) > 0, `the plant is on the account (${plants})`);
 
 // cron calls this stack only

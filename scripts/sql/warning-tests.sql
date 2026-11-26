@@ -12,12 +12,16 @@ begin;
 -- in the last hour means a poller is running here. A local poller only reads the mock
 -- (name@mock) and our share login, so those don't count.
 do $$ begin
-  if exists (select 1 from private.sunsynk_accounts where last_ok_at > now() - interval '1 hour'
-               and sunsynk_username not like '%@mock' and sunsynk_username not like '%@princesolarhub.co.za')
+  if exists (select 1 from plants.logins where last_ok_at > now() - interval '1 hour'
+               and username not like '%@mock' and username not like '%@princesolarhub.co.za')
      or exists (select 1 from public.plant_config where plant_id between 9001 and 9007) then
     raise exception 'refused: this looks like a live database';
   end if;
 end $$;
+
+-- our id for a brand's plant number (SOLAR-681): plants.plant_for makes the plant the first time.
+-- The numbers 9001-9007 below are the brand's; readers, helpers and tables take our id.
+create function pg_temp.pid(v bigint) returns bigint language sql as $$ select plants.plant_for('sunsynk', v::text) $$;
 
 -- passed checks, counted for the closing "all N checks passed" (GAP lines are not checks)
 create temp table t_passed (n serial);
@@ -44,32 +48,29 @@ create function pg_temp.dt(ts bigint) returns text language sql as
 create function pg_temp.r(p bigint, k int, sn text, volt numeric, temp numeric default 25, soc numeric default 80, dev_lag int default 30)
 returns void language sql as $$
   insert into public.readings (ts, sn, plant_id, carried, device_time, grid_volt_v, batt_temp_c, batt_soc)
-  values (pg_temp.t(k), p || sn, p, false, case when dev_lag is not null then pg_temp.dt(pg_temp.t(k) - dev_lag) end, volt, temp, soc)
+  values (pg_temp.t(k), p || sn, pg_temp.pid(p), false, case when dev_lag is not null then pg_temp.dt(pg_temp.t(k) - dev_lag) end, volt, temp, soc)
 $$;
 -- One poll minute for every test plant; a rule that throws is a failure, not a quiet minute.
 create function pg_temp.step_at(ts bigint) returns void language plpgsql as $$
-declare res jsonb := public.email_poll_step(ts, '[]', array[9001, 9002, 9003, 9004, 9005, 9006, 9007]::bigint[]);
+declare res jsonb := public.email_poll_step(ts, '[]', array[pg_temp.pid(9001), pg_temp.pid(9002), pg_temp.pid(9003), pg_temp.pid(9004), pg_temp.pid(9005), pg_temp.pid(9006), pg_temp.pid(9007)]);
 begin
   if jsonb_array_length(res->'failed') > 0 then raise exception 'FAIL email_poll_step: %', res->'failed'; end if;
 end $$;
 create function pg_temp.step(k int) returns void language sql as $$ select pg_temp.step_at(pg_temp.t(k)) $$;
 create function pg_temp.sent(p bigint, k text) returns int language sql as
-  $$ select count(*)::int from public.email_queue where plant_id = p and kind = k $$;
+  $$ select count(*)::int from public.email_queue where plant_id = pg_temp.pid(p) and kind = k $$;
 -- Test logins only: the local database may hold others.
 create function pg_temp.logins(outcome text, at timestamptz, ok_at timestamptz default null, who text default 'w900%')
 returns void language sql as $$
-  update private.sunsynk_accounts set last_try = outcome, last_try_at = at, last_ok_at = ok_at where sunsynk_username like who
+  update plants.logins set last_try = outcome, last_try_at = at, last_ok_at = ok_at where username like who
 $$;
 
 -- One owner and login per plant: a plant not chosen or not paid for gets no email (0252).
 -- Users first: plant_row_guard drops rows of an ownerless plant.
 insert into auth.users (id, email)
   select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
-insert into private.sunsynk_accounts (id, user_id, sunsynk_username, last_try, last_try_at)
-  select ('00000000-0000-0000-0000-0000000a' || p)::uuid, ('00000000-0000-0000-0000-00000000' || p)::uuid, 'w' || p, 'ok', now()
-    from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 insert into public.plant_config (plant_id, has_battery, battery_banks)
-  select p, true, 'shared' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
+  select pg_temp.pid(p), true, 'shared' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 -- The billing account: login linked, plant chosen and a Home plan paid, all a day back, so
 -- the 30 minutes "No readings" waits after reading starts (0256) are long over.
 create function pg_temp.owner(p bigint) returns uuid language plpgsql as $$
@@ -78,8 +79,9 @@ declare
   at timestamptz := now() - interval '1 day'; a uuid; pr billing.prices;
 begin
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', at) returning id into a;
-  perform billing.link_login(a, 'sunsynk', 'w' || p, null, jsonb_build_array(jsonb_build_object('id', p, 'name', 'Plant ' || p)), at, 'owner', l);
-  perform billing.set_chosen_plants(a, array[p], at);
+  perform plants.link_login(a, 'sunsynk', 'w' || p, jsonb_build_array(jsonb_build_object('id', p, 'name', 'Plant ' || p)), at, 'owner', l);
+  update plants.logins set last_try = 'ok', last_try_at = now() where id = l;
+  perform billing.set_chosen_plants(a, array[pg_temp.pid(p)], at);
   select * into pr from billing.prices where plan = 'home' and market = 'ZA' and interval = 'month' and offer is null and active_until is null;
   insert into billing.subscriptions (account, price, plan, currency, interval, amount_minor, extra_place_minor,
                                      status, started_at, billing_day, period_start, period_end)
@@ -89,9 +91,6 @@ begin
   return a;
 end $$;
 select pg_temp.owner(p) from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p \g /dev/null
-insert into public.plant_users (plant_id, user_id, account_id, linked_at)
-  select p, ('00000000-0000-0000-0000-00000000' || p)::uuid, ('00000000-0000-0000-0000-0000000a' || p)::uuid, now() - interval '1 day'
-    from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 
 -- ---- Grid (plant 9001: master M, slave S, both sense mains) ----------------------------
 -- Minutes 0-4 grid on (the first state is taken silently), 5-6 off (a 2-minute dip,
@@ -124,7 +123,7 @@ end $$;
 select pg_temp.eq('grid: on for 5 minutes after flapping sends one Grid back', pg_temp.sent(9001, 'grid_back'), 2);
 select pg_temp.eq('grid: the Grid back covers the whole flapping outage',
   (select (data->>'since')::bigint = pg_temp.t(20) and (data->>'at')::bigint = pg_temp.t(47) from public.email_queue
-    where plant_id = 9001 and kind = 'grid_back' order by id desc limit 1), true);
+    where plant_id = pg_temp.pid(9001) and kind = 'grid_back' order by id desc limit 1), true);
 
 -- Plant 9002: the 18 Sep lesson. The slave's logger froze at 240.1 V with an old
 -- device_time while the master, newest, read 0 V. Off for 4 minutes: Grid off.
@@ -150,7 +149,7 @@ select pg_temp.gap('grid: an inverter that cannot see mains does not decide Grid
 -- ---- Uneven charge (plant 9003, now with a battery on each inverter) -----------------------
 -- 12 points apart for an hour: one email. Then 30 minutes bouncing between 12 and 7
 -- points apart, then 3 apart: one Batteries charging evenly, 15 minutes after the bounce.
-update public.plant_config set battery_banks = 'per-inverter' where plant_id = 9003;
+update public.plant_config set battery_banks = 'per-inverter' where plant_id = pg_temp.pid(9003);
 do $$ begin
   for k in 7..113 loop
     perform pg_temp.r(9003, k, 'M', 239.0, 25, 80);
@@ -208,8 +207,8 @@ end $$;
 select pg_temp.eq('hot: 15 minutes at 30 °C send one Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 1);
 select pg_temp.eq('hot: Battery cooled says when it cooled, 30 °C, paired to its alert',
   (select (data->>'at')::bigint = pg_temp.t(22) and (data->>'tempC')::int = 30 and (data->>'since')::bigint = pg_temp.t(11)
-          and pair_key = 'batt_hot:9004:' || pg_temp.t(11) || ':1'
-     from public.email_queue where plant_id = 9004 and kind = 'batt_hot_back'), true);
+          and pair_key = 'batt_hot:' || pg_temp.pid(9004) || ':' || pg_temp.t(11) || ':1'
+     from public.email_queue where plant_id = pg_temp.pid(9004) and kind = 'batt_hot_back'), true);
 -- 45.3 °C is hot in the app (over 45), so in the email too: not rounded down to 45.
 do $$ begin
   for k in 38..40 loop perform pg_temp.r(9004, k, 'M', 239, 45.3); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
@@ -240,7 +239,7 @@ select pg_temp.eq('hot bounce: 15 minutes at 40 °C after it send one Battery co
 -- ---- Strings (plant 9005: master M, inputs 1 and 2) -------------------------------------
 -- Input 1 as on 538820 since 25 Oct: about 1 V, 0 W, never made power. Input 2 makes power.
 create function pg_temp.s(k int, sn text, no int, volt numeric, w numeric) returns void language sql as $$
-  insert into public.strings (ts, sn, no, plant_id, volt_v, power_w) values (pg_temp.t(k), '9005' || sn, no, 9005, volt, w)
+  insert into public.strings (ts, sn, no, plant_id, volt_v, power_w) values (pg_temp.t(k), '9005' || sn, no, pg_temp.pid(9005), volt, w)
 $$;
 do $$ begin
   for k in 0..19 loop
@@ -282,9 +281,9 @@ end $$;
 select pg_temp.eq('strings bounce: 15 minutes with voltage send one Panels back', pg_temp.sent(9005, 'string_back'), 1);
 select pg_temp.eq('strings: Panels back says when the voltage came back',
   (select (data->>'at')::bigint = pg_temp.t(88) and data->>'string' = 'String 3' from public.email_queue
-    where plant_id = 9005 and kind = 'string_back'), true);
+    where plant_id = pg_temp.pid(9005) and kind = 'string_back'), true);
 select pg_temp.gap('strings: an input broken before it ever made power is reported',
-  exists (select 1 from public.email_queue where plant_id = 9005 and kind = 'string_dead' and key like 'string_dead:9005:9005M:1:%'),
+  exists (select 1 from public.email_queue where plant_id = pg_temp.pid(9005) and kind = 'string_dead' and key like 'string_dead:' || pg_temp.pid(9005) || ':9005M:1:%'),
   'by design since SOLAR-188: an input that never made 200 W is never checked');
 
 -- ---- No readings (logger_stale, email_sweep) --------------------------------------------
@@ -293,14 +292,14 @@ select pg_temp.gap('strings: an input broken before it ever made power is report
 update private.email_system_state set sunsynk_down = false, up_at = null, clear_since = null where id = 1;
 -- The inverters SunSynk lists for each plant (an inverter no longer listed is left alone).
 insert into private.inverters (sn, plant_id, account_id)
-  select p || x, p, ('00000000-0000-0000-0000-0000000a' || p)::uuid from unnest(array[9001, 9006, 9007]) p, unnest(array['M', 'S']) x;
+  select p || x, pg_temp.pid(p), ('00000000-0000-0000-0000-0000000a' || p)::uuid from unnest(array[9001, 9006, 9007]) p, unnest(array['M', 'S']) x;
 -- Plant 9001: the slave's logger stops 20 minutes before now while the master keeps
 -- uploading. One inverter has gone quiet.
 create function pg_temp.now_k(back_min int) returns bigint language sql as
   $$ select (extract(epoch from now())::bigint / 60) * 60 - back_min * 60 $$;
 create function pg_temp.r_at(p bigint, ts bigint, sn text, volt numeric, dev bigint) returns void language sql as $$
   insert into public.readings (ts, sn, plant_id, carried, device_time, grid_volt_v, batt_temp_c, batt_soc)
-  values (ts, p || sn, p, false, pg_temp.dt(dev), volt, 25, 80)
+  values (ts, p || sn, pg_temp.pid(p), false, pg_temp.dt(dev), volt, 25, 80)
 $$;
 -- Plant 9001: the slave's logger stops 61 minutes before now while the master keeps
 -- uploading. Plants 9006 and 9007: the whole logger stopped 29 and 31 minutes ago.
@@ -317,9 +316,9 @@ end $$;
 select pg_temp.logins('ok', now(), now());
 select public.email_sweep();
 select pg_temp.eq('no readings: an inverter quiet for 60 minutes beside a live one sends one email',
-  (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9001S'), 1);
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9001) and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9001S'), 1);
 select pg_temp.eq('no readings: a plant quiet 31 minutes sends no per-inverter email as well',
-  (select count(*)::int from public.email_queue where plant_id = 9007 and kind = 'logger_stale' and data ? 'inverter'), 0);
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9007) and kind = 'logger_stale' and data ? 'inverter'), 0);
 select pg_temp.eq('no readings: a plant quiet 29 minutes sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
 select pg_temp.eq('no readings: a plant quiet 31 minutes sends one email', pg_temp.sent(9007, 'logger_stale'), 1);
 -- 31 Oct on 495944: the slave sent one reading, went quiet 12 minutes, then came back.
@@ -334,21 +333,21 @@ do $$ declare ts bigint; begin
     perform pg_temp.r_at(9007, ts, 'M', 239.3, case when back > 0 then pg_temp.now_k(12) - 30 else ts - 30 end);
     perform pg_temp.step_at(ts);
     if back = 1 then perform pg_temp.eq('no readings: one lone reading sends no Readings back',
-      (select count(*)::int from public.email_queue where plant_id in (9001, 9007) and kind = 'logger_back'), 0); end if;
+      (select count(*)::int from public.email_queue where plant_id in (pg_temp.pid(9001), pg_temp.pid(9007)) and kind = 'logger_back'), 0); end if;
     if back = -14 then perform pg_temp.eq('no readings: 14 minutes of readings send no Readings back',
-      (select count(*)::int from public.email_queue where plant_id in (9001, 9007) and kind = 'logger_back'), 0); end if;
+      (select count(*)::int from public.email_queue where plant_id in (pg_temp.pid(9001), pg_temp.pid(9007)) and kind = 'logger_back'), 0); end if;
   end loop;
 end $$;
 select public.email_sweep();
 select pg_temp.eq('no readings: 15 minutes of readings send one Readings back',
-  (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_back' and data->>'inverter' = 'Inverter 9001S'), 1);
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9001) and kind = 'logger_back' and data->>'inverter' = 'Inverter 9001S'), 1);
 select pg_temp.eq('no readings: the quiet spell sends one No readings in all',
-  (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_stale'), 1);
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9001) and kind = 'logger_stale'), 1);
 select pg_temp.eq('no readings: a whole plant back for 15 minutes sends one Readings back, after one No readings',
   (select count(*) filter (where kind = 'logger_back' and not data ? 'inverter')::text || '/' || count(*) filter (where kind = 'logger_stale')
-     from public.email_queue where plant_id = 9007), '1/1');
+     from public.email_queue where plant_id = pg_temp.pid(9007)), '1/1');
 select pg_temp.eq('no readings: Readings back says when the readings came back',
-  (select (data->>'at')::bigint = pg_temp.now_k(0) - 20 from public.email_queue where plant_id = 9001 and kind = 'logger_back'), true);
+  (select (data->>'at')::bigint = pg_temp.now_k(0) - 20 from public.email_queue where plant_id = pg_temp.pid(9001) and kind = 'logger_back'), true);
 -- SOLAR-458: plant 9006 collected until 2 hours ago, then was stopped (no longer chosen).
 -- Stopping keeps its newest reading time. Chosen again, it waits 30 minutes from the start
 -- for readings, the same as a new link, before No readings (billing.readings_start, 0256).
@@ -356,31 +355,31 @@ select billing.set_chosen_plants((select id from billing.accounts where user_id 
                                  '{}', now() - interval '2 hours') \g /dev/null
 -- Since 0277 stopping queues its history for deletion and refuses a re-choose until it is done:
 -- the delete run has finished.
-delete from private.history_delete_queue where plant_id = 9006;
-update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = false where plant_id = 9006;
-insert into private.inverter_alert_state (plant_id, sn, last_dev) values (9006, '9006M', pg_temp.now_k(120)), (9006, '9006S', pg_temp.now_k(120))
+delete from private.history_delete_queue where plant_id = pg_temp.pid(9006);
+update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = false where plant_id = pg_temp.pid(9006);
+insert into private.inverter_alert_state (plant_id, sn, last_dev) values (pg_temp.pid(9006), '9006M', pg_temp.now_k(120)), (pg_temp.pid(9006), '9006S', pg_temp.now_k(120))
   on conflict (plant_id, sn) do update set last_dev = excluded.last_dev, stale = false;
 select billing.set_chosen_plants((select id from billing.accounts where user_id = '00000000-0000-0000-0000-000000009006'),
-                                 '{9006}', now()) \g /dev/null
+                                 array[pg_temp.pid(9006)], now()) \g /dev/null
 select pg_temp.eq('no readings: choosing the plant again starts its wait now',
-  (select started_at from private.plant_alert_state where plant_id = 9006), extract(epoch from now())::bigint);
+  (select started_at from private.plant_alert_state where plant_id = pg_temp.pid(9006)), extract(epoch from now())::bigint);
 select pg_temp.logins('ok', now(), now());
 select public.email_sweep();
 select pg_temp.eq('no readings: a plant started a minute ago sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
 -- The first reading lands from one inverter; the other has not sent yet.
-update private.plant_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = 9006;
-update private.inverter_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = 9006 and sn = '9006M';
+update private.plant_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = pg_temp.pid(9006);
+update private.inverter_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = pg_temp.pid(9006) and sn = '9006M';
 select public.email_sweep();
 select pg_temp.eq('no readings: an inverter not heard from since a minute-old start sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
 -- 31 minutes after the start (now() is fixed in a transaction, so the start is back-dated).
-update private.plant_alert_state set started_at = started_at - 1860 where plant_id = 9006;
+update private.plant_alert_state set started_at = started_at - 1860 where plant_id = pg_temp.pid(9006);
 select public.email_sweep();
 select pg_temp.eq('no readings: an inverter quiet 31 minutes after the start sends one email',
-  (select count(*)::int from public.email_queue where plant_id = 9006 and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9006S'), 1);
-update private.plant_alert_state set last_dev = pg_temp.now_k(31) where plant_id = 9006;
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9006) and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9006S'), 1);
+update private.plant_alert_state set last_dev = pg_temp.now_k(31) where plant_id = pg_temp.pid(9006);
 select public.email_sweep();
 select pg_temp.eq('no readings: a plant quiet 31 minutes after the start sends one email, with its last reading',
-  (select count(*)::int from public.email_queue where plant_id = 9006 and kind = 'logger_stale' and not data ? 'inverter'
+  (select count(*)::int from public.email_queue where plant_id = pg_temp.pid(9006) and kind = 'logger_stale' and not data ? 'inverter'
       and (data->>'since')::bigint = pg_temp.now_k(31)), 1);
 
 -- ---- SunSynk down -----------------------------------------------------------------------

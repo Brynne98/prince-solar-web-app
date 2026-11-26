@@ -15,8 +15,13 @@ begin
   if not found then raise exception 'share_claim: % is not the share login', p_account; end if;
   acc := billing.account_of(p_user);
   select p.id into pid from plants.plants p where p.brand = v_brand and p.vendor_id = vendor;
-  if pid is not null and exists (select 1 from plants.claims c where c.plant = pid and c.account = acc)
-     and exists (select 1 from plants.login_plants lp where lp.login = p_account and lp.plant = pid and lp.gone_at is null) then
+  -- the user reads it already: through their own login, or a claim whose share row is live (a
+  -- claim with its row missing is repaired below)
+  if pid is not null and (exists (select 1 from plants.user_plants u where u.plant_id = pid and u.user_id = p_user
+                                     and not u.via_share and u.share_gone_at is null)
+                          or (exists (select 1 from plants.claims c where c.plant = pid and c.account = acc)
+                              and exists (select 1 from plants.login_plants lp where lp.login = p_account and lp.plant = pid
+                                             and lp.gone_at is null))) then
     return jsonb_build_object('result', 'yours', 'plant', pid);
   end if;
   pid := plants.claim(acc, v_brand, vendor, p_plant_name);
