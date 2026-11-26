@@ -176,7 +176,9 @@ export function bookedChange(s: AccountState): { text: string; button: string } 
   if (s.next_plan && s.next_plan !== s.plan) {
     const going = s.plants.filter((p) => p.drop_at_period_end);
     return {
-      text: [`Moves to ${s.next_plan_name} on ${day(s, s.period_end)}.`, going.length ? dropLine(s, going) : null].filter(Boolean).join(" "),
+      // a move booked with the other interval says so (SOLAR-675)
+      text: [`Moves to ${s.next_plan_name}${s.next_interval && s.next_interval !== s.interval ? (s.next_interval === "year" ? " yearly" : " monthly") : ""} on ${day(s, s.period_end)}.`,
+        going.length ? dropLine(s, going) : null].filter(Boolean).join(" "),
       button: `Keep ${s.plan_name}`,
     };
   }

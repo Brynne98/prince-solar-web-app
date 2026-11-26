@@ -1165,7 +1165,7 @@ end $$;
 -- P9c review cases (SOLAR-675, Astra, Sol, Fable): a given interval wins over a switch booked
 --     earlier, none given carries it as before; a retry a day later is priced again
 do $$
-declare c uuid := pg_temp.acct('p9d'); d uuid := pg_temp.acct('p9e'); e uuid := pg_temp.acct('p9f');
+declare c uuid := pg_temp.acct('p9d'); d uuid := pg_temp.acct('p9e'); e uuid := pg_temp.acct('p9f'); f uuid := pg_temp.acct('p9g');
         r jsonb; r2 jsonb; ref text;
 begin
   -- Home monthly, yearly booked, then Family on the Monthly view: stays monthly
@@ -1197,6 +1197,14 @@ begin
     and (r2->>'amount_minor')::int < (r->>'amount_minor')::int
     and (r2->>'amount_minor')::int = (billing.quote(e, 'family', 'month', pg_temp.t(101))->>'due_minor')::int
     and (select status from billing.invoices where id = (r->>'invoice')::uuid) = 'void');
+  -- monthly to yearly opened on day 10, its card page paid on day 11: the credit was day 10's,
+  -- so it is refunded as stale and Home stays (review, Neon)
+  perform pg_temp.link(f, 'p9g', '{990010941,990010942,990010943}', pg_temp.t(0));
+  perform pg_temp.buy(f, 'home', 'month', '{990010941,990010942}', pg_temp.t(0), 'AUTH_p9g');
+  r := billing.upgrade(f, 'family', 0, '{990010941,990010942,990010943}', pg_temp.t(10), p_interval => 'year');
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'card_page', pg_temp.t(10))->>'reference';
+  perform pg_temp.eq('P9c paid a day later: stale', pg_temp.answer(ref, 'ok', pg_temp.t(11))->>'reason', 'stale');
+  perform pg_temp.ok('P9c ... Home monthly kept', (pg_temp.sub(f)).plan = 'home' and (pg_temp.sub(f)).interval = 'month');
 end $$;
 
 -- P10b a smaller plan on the other interval: both booked for the billing date in one call (SOLAR-675)

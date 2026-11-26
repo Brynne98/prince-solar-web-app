@@ -77,6 +77,12 @@ test('running monthly plan, yearly view: every plan yearly (SOLAR-675)', () => {
   const rows = ctx.planRows(acct(), 'year');
   eq(rows.map(r => r.plan + ':' + r.interval), ['home:year', 'family:year']);
 });
+test('a booked move to a smaller plan on the other interval names it (SOLAR-675)', () => {
+  const s = { ...acct({ plan: 'family', plan_name: 'Family', interval: 'month' }), time_zone: 'Africa/Johannesburg', locale: 'en-ZA',
+    next_plan: 'home', next_plan_name: 'Home', next_interval: 'year', period_end: '2026-12-31T08:00:00Z', plants: [] };
+  eq(ctx.AccountText.bookedChange(s).text, 'Moves to Home yearly on 31 Dec 2026.');
+  eq(ctx.AccountText.bookedChange({ ...s, next_interval: 'month' }).text, 'Moves to Home on 31 Dec 2026.');
+});
 test('a move monthly to yearly says the year starts now; yearly to monthly says monthly later (SOLAR-675)', () => {
   const s = { ...acct(), time_zone: 'Africa/Johannesburg', locale: 'en-ZA' };
   const q = { kind: 'upgrade', plan: 'family', plan_name: 'Family', places: 5, currency: 'ZAR', offer: 'launch' };

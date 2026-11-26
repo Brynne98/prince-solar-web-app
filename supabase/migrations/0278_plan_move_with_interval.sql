@@ -31,7 +31,8 @@ returns int language sql stable set search_path = billing, pg_temp as $$
   ), l as (
     -- a paid year copied from the old billing starts on its billing date, maybe still ahead:
     -- the days left are that year's
-    select days_all, least(days_to_end, days_all) as days_left, old_amt from d
+    -- (past the end, as a quote may be asked: none left, review Neon)
+    select days_all, greatest(least(days_to_end, days_all), 0) as days_left, old_amt from d
   )
   select greatest(case when p_interval = s.interval
                        then round((p_new_amt - old_amt)::numeric * days_left / greatest(days_all, 1))
@@ -318,6 +319,22 @@ begin
   if position(old in d) = 0 then raise exception 'record_dispute changed since 0245: edit it by hand'; end if;
   d := replace(d, old, old || $n$  select * into inv from billing.invoices where id = att.invoice;
 $n$);
+  execute d;
+end $$;
+
+-- apply_payment: a move monthly to yearly is priced on its day (the credit is the days left
+-- then): one paid on a later day is stale and refunded, and the move is asked again (review, Neon)
+do $$
+declare
+  d text := pg_get_functiondef('billing.apply_payment(text, jsonb, timestamptz)'::regprocedure);
+  old text := $o$      when inv.kind = 'upgrade' and (s.period_start <> inv.period_start or inv.period_end <= paid$o$;
+begin
+  if position(old in d) = 0 then raise exception 'apply_payment changed since 0256: edit it by hand'; end if;
+  d := replace(d, old, $n$      when inv.kind = 'upgrade' and inv.period_key like '%@%'
+           and (paid at time zone (select mk.default_time_zone from billing.markets mk where mk.code = a.market))::date
+               <> (inv.created_at at time zone (select mk.default_time_zone from billing.markets mk where mk.code = a.market))::date
+        then 'stale'
+$n$ || old);
   execute d;
 end $$;
 
