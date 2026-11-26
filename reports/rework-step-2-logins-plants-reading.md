@@ -58,11 +58,14 @@ Each rule has the check that proves it. The step is done when every check passes
 
 **Ownership**
 
-- **R1. Every table has one owner part, and only that part writes it.** `supabase/owners.json`
-  maps each table to a part, and each part to its files (SQL function files and edge folders).
-  CI fails on an `insert`, `update` or `delete` into a table another part owns, in `SF/` or in
-  `EF/` (`.from(...)`, `rpc` to a writer).
-  *Check:* a test function in `SF/billing/` that updates `plants.logins` fails `npm test`.
+- **R1. Every table has one owner part, and only listed files write it.** `supabase/owners.json`
+  gives each table its owner part and the files that write it (SQL function files, edge
+  files, `public/*.jsx`). `scripts/owners-check.mjs` (in `npm test`) fails on a write by a file
+  not listed; `scripts/db-files.mjs` fails on a table with no owner. Lists only shrink. At the
+  end of this step every writer of this part's tables is in this part's files
+  (`SF/plants/`, `EF/_shared/brands/` and the plants edge code).
+  *Check:* a new `update billing.logins` in any other file fails `npm test`; a new table
+  without an owner fails `test:state`.
 - **R2. Other parts read this part's tables only through `plants.*` functions.** The scan finds
   `from`, `join` and `using` on a table, qualified or found through `search_path`, in `SF/`,
   `EF/` and `public/`. Known readers today: 34 files read `plant_users` (including

@@ -82,6 +82,19 @@ if (live) {
   process.exit(0);
 }
 
+// ---- every table has an owner (SOLAR-681 R1) ----
+{
+  const { psql } = await import('./local-db.mjs');
+  const r = psql(`select coalesce(json_agg(n.nspname || '.' || c.relname order by 1), '[]') from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace where c.relkind in ('r', 'p') and not c.relispartition
+     and n.nspname in (${SCHEMAS.map((s) => `'${s}'`).join(', ')})`, ['-At']);
+  if (r.status !== 0) { console.error(r.stderr.trim()); process.exit(1); }
+  const dbt = new Set(JSON.parse(r.stdout));
+  const owned = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(REPO, 'supabase/owners.json'), 'utf8')).tables));
+  for (const t of dbt) if (!owned.has(t)) problems.push(`supabase/owners.json: table ${t} has no owner part`);
+  for (const t of owned) if (!dbt.has(t)) problems.push(`supabase/owners.json: ${t} is not a table in the database`);
+}
+
 // ---- types ----
 // supabase gen types reads the database by address; local-db.mjs has already refused anything
 // that is not a local database at the newest migration.

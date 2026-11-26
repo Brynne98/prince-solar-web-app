@@ -1,0 +1,877 @@
+{
+ "note": "SOLAR-681 R1, R2. See scripts/owners-check.mjs.",
+ "tables": {
+  "billing.account_events": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/log_event.sql"
+   ]
+  },
+  "billing.accounts": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/account_of.sql",
+    "supabase/schemas/functions/billing/apply_purchase.sql",
+    "supabase/schemas/functions/billing/bump.sql",
+    "supabase/schemas/functions/billing/claim_plant.sql",
+    "supabase/schemas/functions/billing/delete_account.sql",
+    "supabase/schemas/functions/billing/link_login.sql",
+    "supabase/schemas/functions/billing/remove_login.sql",
+    "supabase/schemas/functions/billing/set_chosen_plants.sql",
+    "supabase/schemas/functions/billing/unclaim.sql",
+    "supabase/schemas/functions/public/billing_v2.sql",
+    "supabase/schemas/functions/public/share_sync.sql"
+   ]
+  },
+  "billing.grants": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.history_fetches": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/billing/history_renew.sql",
+    "supabase/schemas/functions/billing/history_step.sql",
+    "supabase/schemas/functions/billing/history_take.sql",
+    "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/billing/request_history.sql",
+    "supabase/schemas/functions/billing/write_seats.sql"
+   ]
+  },
+  "billing.history_lanes": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/billing/history_step.sql"
+   ]
+  },
+  "billing.invoices": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/apply_purchase.sql",
+    "supabase/schemas/functions/billing/apply_upgrade.sql",
+    "supabase/schemas/functions/billing/delete_account.sql",
+    "supabase/schemas/functions/billing/end_sub.sql",
+    "supabase/schemas/functions/billing/ensure_renewal.sql",
+    "supabase/schemas/functions/billing/money_back.sql",
+    "supabase/schemas/functions/billing/record_dispute.sql",
+    "supabase/schemas/functions/billing/start_card_check.sql",
+    "supabase/schemas/functions/billing/start_checkout.sql",
+    "supabase/schemas/functions/billing/upgrade.sql"
+   ]
+  },
+  "billing.job_heartbeats": {
+   "part": "system",
+   "writers": [
+    "supabase/schemas/functions/billing/heartbeat.sql"
+   ]
+  },
+  "billing.login_plants": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/billing/link_login.sql",
+    "supabase/schemas/functions/billing/login_seen.sql"
+   ]
+  },
+  "billing.logins": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/billing/link_login.sql",
+    "supabase/schemas/functions/billing/login_status_follow.sql",
+    "supabase/schemas/functions/billing/remove_login.sql"
+   ]
+  },
+  "billing.markets": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.offers": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.old_references": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.outbox": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/outbox_done.sql",
+    "supabase/schemas/functions/billing/outbox_on_sub.sql",
+    "supabase/schemas/functions/billing/outbox_put.sql",
+    "supabase/schemas/functions/billing/outbox_take.sql"
+   ]
+  },
+  "billing.outbox_kinds": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.payment_attempts": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/attempt_page.sql",
+    "supabase/schemas/functions/billing/begin_attempt.sql",
+    "supabase/schemas/functions/billing/record_dispute.sql",
+    "supabase/schemas/functions/billing/replace_card_pages.sql",
+    "supabase/schemas/functions/billing/run_one.sql",
+    "supabase/schemas/functions/billing/verify_unanswered.sql"
+   ]
+  },
+  "billing.payment_events": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/event_begin.sql",
+    "supabase/schemas/functions/billing/event_done.sql"
+   ]
+  },
+  "billing.payment_methods": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/money_back.sql",
+    "supabase/schemas/functions/billing/save_method.sql"
+   ]
+  },
+  "billing.payments_pause": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.plans": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.plant_claims": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/billing/claim_plant.sql",
+    "supabase/schemas/functions/billing/unclaim.sql",
+    "supabase/schemas/functions/public/share_sync.sql"
+   ]
+  },
+  "billing.plants": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_renewal.sql",
+    "supabase/schemas/functions/billing/claim_plant.sql",
+    "supabase/schemas/functions/billing/delete_account.sql",
+    "supabase/schemas/functions/billing/link_login.sql",
+    "supabase/schemas/functions/billing/login_seen.sql",
+    "supabase/schemas/functions/billing/login_status_follow.sql",
+    "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/billing/remove_login.sql",
+    "supabase/schemas/functions/billing/unclaim.sql",
+    "supabase/schemas/functions/billing/write_seats.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql",
+    "supabase/schemas/functions/public/poll_commit_v2.sql",
+    "supabase/schemas/functions/public/share_sync.sql"
+   ]
+  },
+  "billing.prices": {
+   "part": "billing",
+   "writers": []
+  },
+  "billing.refunds": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/record_refund.sql",
+    "supabase/schemas/functions/billing/record_refund_event.sql",
+    "supabase/schemas/functions/billing/refund_due.sql",
+    "supabase/schemas/functions/billing/run.sql"
+   ]
+  },
+  "billing.seats": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_renewal.sql",
+    "supabase/schemas/functions/billing/apply_upgrade.sql",
+    "supabase/schemas/functions/billing/downgrade.sql",
+    "supabase/schemas/functions/billing/remove_login.sql",
+    "supabase/schemas/functions/billing/unclaim.sql",
+    "supabase/schemas/functions/billing/write_seats.sql"
+   ]
+  },
+  "billing.subscriptions": {
+   "part": "billing",
+   "writers": [
+    "supabase/schemas/functions/billing/apply_payment.sql",
+    "supabase/schemas/functions/billing/apply_purchase.sql",
+    "supabase/schemas/functions/billing/apply_renewal.sql",
+    "supabase/schemas/functions/billing/apply_upgrade.sql",
+    "supabase/schemas/functions/billing/cancel.sql",
+    "supabase/schemas/functions/billing/downgrade.sql",
+    "supabase/schemas/functions/billing/end_sub.sql",
+    "supabase/schemas/functions/billing/run_one.sql",
+    "supabase/schemas/functions/billing/switch_interval.sql",
+    "supabase/schemas/functions/billing/undo_cancel.sql"
+   ]
+  },
+  "billing.switch_over": {
+   "part": "billing",
+   "writers": []
+  },
+  "msg.kinds": {
+   "part": "messages",
+   "writers": []
+  },
+  "msg.outbox": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/msg/push_settle.sql",
+    "supabase/schemas/functions/msg/route_event_rows.sql",
+    "supabase/schemas/functions/public/msg_email_bind.sql",
+    "supabase/schemas/functions/public/msg_email_done.sql",
+    "supabase/schemas/functions/public/msg_email_take.sql",
+    "supabase/schemas/functions/public/msg_push_take.sql"
+   ]
+  },
+  "msg.push_sends": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/public/msg_push_done.sql",
+    "supabase/schemas/functions/public/msg_push_take.sql"
+   ]
+  },
+  "private.admins": {
+   "part": "accounts",
+   "writers": []
+  },
+  "private.email_system_state": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/public/email_sweep.sql"
+   ]
+  },
+  "private.feedback": {
+   "part": "accounts",
+   "writers": [
+    "supabase/schemas/functions/public/api_send_feedback.sql"
+   ]
+  },
+  "private.fn_calls": {
+   "part": "system",
+   "writers": [
+    "supabase/schemas/functions/private/call_fn.sql",
+    "supabase/schemas/functions/public/job_check_inputs.sql"
+   ]
+  },
+  "private.gaps": {
+   "part": "reading",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/gap_record.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql"
+   ]
+  },
+  "private.grid_off_progress": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/private/grid_off_update.sql",
+    "supabase/schemas/functions/private/plant_readings_delete.sql"
+   ]
+  },
+  "private.history_delete_log": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/history_delete_check.sql",
+    "supabase/schemas/functions/private/history_delete_run.sql",
+    "supabase/schemas/functions/private/plant_readings_delete.sql"
+   ]
+  },
+  "private.history_delete_queue": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/private/history_delete_run.sql"
+   ]
+  },
+  "private.inverter_alert_state": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/email_poll_step.sql",
+    "supabase/schemas/functions/public/email_sweep.sql"
+   ]
+  },
+  "private.inverters": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/private/billing_drop_plant.sql",
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/api_account_delete.sql",
+    "supabase/schemas/functions/public/api_link_disconnect.sql",
+    "supabase/schemas/functions/public/inverters_seed.sql"
+   ]
+  },
+  "private.job_check_mark": {
+   "part": "system",
+   "writers": [
+    "supabase/schemas/functions/public/job_check_inputs.sql"
+   ]
+  },
+  "private.job_checks": {
+   "part": "system",
+   "writers": [
+    "supabase/schemas/functions/public/job_check_save.sql"
+   ]
+  },
+  "private.link_attempts": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/public/link_attempt.sql",
+    "supabase/schemas/functions/public/link_succeeded.sql"
+   ]
+  },
+  "private.mail_blocked": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/public/mail_block.sql"
+   ]
+  },
+  "private.meta": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/meta_upsert.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql"
+   ]
+  },
+  "private.notice_reads": {
+   "part": "messages",
+   "writers": []
+  },
+  "private.partitions_dropped": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/rollup_old_days.sql",
+    "supabase/schemas/functions/private/split_partition.sql"
+   ]
+  },
+  "private.plant_alert_state": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/billing/readings_start.sql",
+    "supabase/schemas/functions/private/email_plant_apply.sql",
+    "supabase/schemas/functions/private/plant_start_fill.sql",
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/email_poll_step.sql",
+    "supabase/schemas/functions/public/email_sweep.sql"
+   ]
+  },
+  "private.plant_purge": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plants_tombstone.sql",
+    "supabase/schemas/functions/private/purge_plant.sql"
+   ]
+  },
+  "private.plant_wipe": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_start_fill.sql",
+    "supabase/schemas/functions/private/purge_plant.sql"
+   ]
+  },
+  "private.poll_runs": {
+   "part": "reading",
+   "writers": [
+    "supabase/schemas/functions/public/poll_run_log.sql"
+   ]
+  },
+  "private.recover_kicks": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/first_load_continue.sql",
+    "supabase/schemas/functions/public/plant_bootstrap_kick.sql"
+   ]
+  },
+  "private.refill_queue": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/private/first_load_continue.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql"
+   ]
+  },
+  "private.rollup_progress": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/rollup_old_days.sql",
+    "supabase/schemas/functions/public/batt_sign_detect.sql"
+   ]
+  },
+  "private.rollup_slow": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/rollup_old_days.sql"
+   ]
+  },
+  "private.string_alert_state": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/email_poll_step.sql"
+   ]
+  },
+  "private.sunsynk_accounts": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/private/billing_drop_plant.sql",
+    "supabase/schemas/functions/private/refresh_store.sql",
+    "supabase/schemas/functions/public/account_access_set.sql",
+    "supabase/schemas/functions/public/account_disable.sql",
+    "supabase/schemas/functions/public/account_mark.sql",
+    "supabase/schemas/functions/public/account_upsert.sql",
+    "supabase/schemas/functions/public/api_account_delete.sql",
+    "supabase/schemas/functions/public/api_link_disconnect.sql",
+    "supabase/schemas/functions/public/email_poll_step.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql",
+    "supabase/schemas/functions/public/share_account_set.sql"
+   ]
+  },
+  "private.sunsynk_calls": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/public/sunsynk_calls_report.sql",
+    "supabase/schemas/functions/public/sunsynk_tally.sql"
+   ]
+  },
+  "private.sunsynk_login_events": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/public/account_mark.sql",
+    "supabase/schemas/functions/public/account_upsert.sql"
+   ]
+  },
+  "private.test_users": {
+   "part": "accounts",
+   "writers": []
+  },
+  "public.agg_5m": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/agg_minute_rollup.sql",
+    "supabase/schemas/functions/private/plant_readings_delete.sql"
+   ]
+  },
+  "public.agg_minute": {
+   "part": "reading",
+   "writers": [
+    "supabase/schemas/functions/private/agg_minute_rollup.sql",
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/batt_sign_detect.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql",
+    "supabase/schemas/functions/public/q_insert_recovered.sql"
+   ]
+  },
+  "public.app_config": {
+   "part": "system",
+   "writers": [
+    "supabase/functions/_shared/sunsynk.ts",
+    "supabase/schemas/functions/private/plants_tombstone.sql",
+    "supabase/schemas/functions/public/plant_users_upsert.sql"
+   ]
+  },
+  "public.client_errors": {
+   "part": "system",
+   "writers": []
+  },
+  "public.config_changes": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/private/log_config_change.sql",
+    "supabase/schemas/functions/private/purge_plant.sql"
+   ]
+  },
+  "public.email_prefs": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/public/email_unsub_token.sql",
+    "supabase/schemas/functions/public/email_unsubscribe.sql"
+   ]
+  },
+  "public.email_queue": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/msg/email_settled.sql",
+    "supabase/schemas/functions/private/billing_drop_plant.sql",
+    "supabase/schemas/functions/private/email_enqueue_plant.sql",
+    "supabase/schemas/functions/private/email_on_confirm.sql",
+    "supabase/schemas/functions/private/email_on_history.sql",
+    "supabase/schemas/functions/private/email_on_plant_user.sql",
+    "supabase/schemas/functions/private/email_on_relink.sql",
+    "supabase/schemas/functions/private/share_release.sql",
+    "supabase/schemas/functions/public/api_account_delete.sql",
+    "supabase/schemas/functions/public/api_link_disconnect.sql",
+    "supabase/schemas/functions/public/api_notifications_read.sql",
+    "supabase/schemas/functions/public/api_send_feedback.sql",
+    "supabase/schemas/functions/public/email_sweep.sql",
+    "supabase/schemas/functions/public/plant_users_upsert.sql",
+    "supabase/schemas/functions/public/share_claim.sql",
+    "supabase/schemas/functions/public/share_claim_live.sql",
+    "supabase/schemas/functions/public/share_sync.sql"
+   ]
+  },
+  "public.grid_off": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/private/grid_off_update.sql",
+    "supabase/schemas/functions/private/plant_readings_delete.sql"
+   ]
+  },
+  "public.inverter_history": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/q_insert_inverter_history.sql",
+    "supabase/schemas/functions/public/q_prune_inverter_history.sql"
+   ]
+  },
+  "public.inverter_history_5m": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/q_prune_inverter_history.sql"
+   ]
+  },
+  "public.plant_config": {
+   "part": "plants",
+   "writers": [
+    "public/data.jsx",
+    "supabase/functions/recover/index.ts",
+    "supabase/schemas/functions/billing/purge_now.sql",
+    "supabase/schemas/functions/private/plant_start_fill.sql",
+    "supabase/schemas/functions/private/purge_plant.sql",
+    "supabase/schemas/functions/public/batt_sign_detect.sql",
+    "supabase/schemas/functions/public/battery_banks_detect.sql",
+    "supabase/schemas/functions/public/plant_config_seed.sql",
+    "supabase/schemas/functions/public/plant_features_detect.sql"
+   ]
+  },
+  "public.plant_energy": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/q_upsert_plant_energy_v2.sql"
+   ]
+  },
+  "public.plant_users": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/private/billing_drop_plant.sql",
+    "supabase/schemas/functions/private/share_release.sql",
+    "supabase/schemas/functions/public/api_account_delete.sql",
+    "supabase/schemas/functions/public/api_link_disconnect.sql",
+    "supabase/schemas/functions/public/plant_users_upsert.sql",
+    "supabase/schemas/functions/public/share_claim.sql",
+    "supabase/schemas/functions/public/share_claim_live.sql",
+    "supabase/schemas/functions/public/share_sync.sql"
+   ]
+  },
+  "public.profiles": {
+   "part": "accounts",
+   "writers": [
+    "supabase/schemas/functions/public/api_account_delete.sql",
+    "supabase/schemas/functions/public/api_prefs_set.sql",
+    "supabase/schemas/functions/public/handle_new_user.sql"
+   ]
+  },
+  "public.push_prefs": {
+   "part": "messages",
+   "writers": []
+  },
+  "public.push_subs": {
+   "part": "messages",
+   "writers": [
+    "supabase/schemas/functions/public/api_push_sub.sql",
+    "supabase/schemas/functions/public/api_push_unsub.sql",
+    "supabase/schemas/functions/public/msg_push_done.sql"
+   ]
+  },
+  "public.readings": {
+   "part": "reading",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/batt_sign_detect.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql"
+   ]
+  },
+  "public.readings_5m": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/private/rollup_old_days.sql",
+    "supabase/schemas/functions/private/rollup_partition.sql"
+   ]
+  },
+  "public.strings": {
+   "part": "reading",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/public/poll_commit.sql",
+    "supabase/schemas/functions/public/poll_commit_batch.sql"
+   ]
+  },
+  "public.strings_5m": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/private/plant_readings_delete.sql",
+    "supabase/schemas/functions/private/rollup_partition.sql"
+   ]
+  }
+ },
+ "parts": {
+  "accounts": {
+   "files": []
+  },
+  "billing": {
+   "files": [
+    "supabase/schemas/functions/billing/",
+    "supabase/functions/billing/"
+   ]
+  },
+  "plants": {
+   "files": [
+    "supabase/schemas/functions/plants/",
+    "supabase/functions/_shared/brands/"
+   ],
+   "readers": {
+    "billing.logins": [
+     "supabase/schemas/functions/billing/account_state.sql",
+     "supabase/schemas/functions/billing/fetch_lane.sql",
+     "supabase/schemas/functions/billing/has_route.sql",
+     "supabase/schemas/functions/billing/link_login.sql",
+     "supabase/schemas/functions/billing/linked_plants.sql",
+     "supabase/schemas/functions/billing/login_seen.sql",
+     "supabase/schemas/functions/billing/login_status_follow.sql",
+     "supabase/schemas/functions/billing/outbox_take.sql",
+     "supabase/schemas/functions/billing/plants_read_now.sql",
+     "supabase/schemas/functions/billing/reading_routes.sql",
+     "supabase/schemas/functions/billing/reading_routes_set.sql",
+     "supabase/schemas/functions/billing/remove_login.sql",
+     "supabase/schemas/functions/billing/screen_state.sql",
+     "supabase/schemas/functions/private/login_lock.sql",
+     "supabase/schemas/functions/public/api_link_remove.sql",
+     "supabase/schemas/functions/public/billing_links.sql",
+     "supabase/schemas/functions/public/link_login_allowed.sql",
+     "supabase/schemas/functions/public/link_login_live.sql"
+    ],
+    "billing.login_plants": [
+     "supabase/schemas/functions/billing/account_state.sql",
+     "supabase/schemas/functions/billing/fetch_lane.sql",
+     "supabase/schemas/functions/billing/has_route.sql",
+     "supabase/schemas/functions/billing/link_login.sql",
+     "supabase/schemas/functions/billing/linked_plants.sql",
+     "supabase/schemas/functions/billing/login_seen.sql",
+     "supabase/schemas/functions/billing/login_status_follow.sql",
+     "supabase/schemas/functions/billing/outbox_take.sql",
+     "supabase/schemas/functions/billing/plants_read_now.sql",
+     "supabase/schemas/functions/billing/reading_routes.sql",
+     "supabase/schemas/functions/billing/reading_routes_set.sql",
+     "supabase/schemas/functions/billing/remove_login.sql",
+     "supabase/schemas/functions/billing/screen_state.sql",
+     "supabase/schemas/functions/private/login_lock.sql",
+     "supabase/schemas/functions/public/api_link_remove.sql",
+     "supabase/schemas/functions/public/link_login_live.sql",
+     "supabase/schemas/functions/public/poll_jobs_v2.sql"
+    ],
+    "billing.plant_claims": [
+     "supabase/schemas/functions/billing/account_state.sql",
+     "supabase/schemas/functions/billing/claim_plant.sql",
+     "supabase/schemas/functions/billing/fetch_lane.sql",
+     "supabase/schemas/functions/billing/has_route.sql",
+     "supabase/schemas/functions/billing/linked_plants.sql",
+     "supabase/schemas/functions/billing/plants_read_now.sql",
+     "supabase/schemas/functions/billing/reading_routes.sql",
+     "supabase/schemas/functions/billing/reading_routes_set.sql",
+     "supabase/schemas/functions/billing/screen_state.sql",
+     "supabase/schemas/functions/billing/unclaim.sql",
+     "supabase/schemas/functions/public/share_sync.sql"
+    ],
+    "public.plant_users": [
+     "supabase/functions/notify/index.ts",
+     "supabase/schemas/functions/billing/account_state.sql",
+     "supabase/schemas/functions/billing/outbox_take.sql",
+     "supabase/schemas/functions/billing/screen_state.sql",
+     "supabase/schemas/functions/msg/email_guard.sql",
+     "supabase/schemas/functions/msg/push_guard.sql",
+     "supabase/schemas/functions/private/billing_drop_plant.sql",
+     "supabase/schemas/functions/private/email_enqueue_plant.sql",
+     "supabase/schemas/functions/private/email_on_relink.sql",
+     "supabase/schemas/functions/private/grid_off_update_all.sql",
+     "supabase/schemas/functions/private/purge_plant.sql",
+     "supabase/schemas/functions/private/reports_due.sql",
+     "supabase/schemas/functions/private/share_release.sql",
+     "supabase/schemas/functions/public/admin_overview.sql",
+     "supabase/schemas/functions/public/api_account_delete.sql",
+     "supabase/schemas/functions/public/api_alerts.sql",
+     "supabase/schemas/functions/public/api_link_disconnect.sql",
+     "supabase/schemas/functions/public/api_link_remove.sql",
+     "supabase/schemas/functions/public/api_logins.sql",
+     "supabase/schemas/functions/public/api_me.sql",
+     "supabase/schemas/functions/public/api_notifications.sql",
+     "supabase/schemas/functions/public/api_overview.sql",
+     "supabase/schemas/functions/public/api_plant_states.sql",
+     "supabase/schemas/functions/public/email_sweep.sql",
+     "supabase/schemas/functions/public/inverters_cached_many.sql",
+     "supabase/schemas/functions/public/msg_email_take.sql",
+     "supabase/schemas/functions/public/msg_push_take.sql",
+     "supabase/schemas/functions/public/plant_bootstrap_kick.sql",
+     "supabase/schemas/functions/public/poll_commit.sql",
+     "supabase/schemas/functions/public/poll_commit_batch.sql",
+     "supabase/schemas/functions/public/share_claim.sql",
+     "supabase/schemas/functions/public/share_claim_live.sql"
+    ],
+    "billing.plants": [
+     "supabase/schemas/functions/billing/account_state.sql",
+     "supabase/schemas/functions/billing/account_status.sql",
+     "supabase/schemas/functions/billing/alerts.sql",
+     "supabase/schemas/functions/billing/delete_due.sql",
+     "supabase/schemas/functions/billing/history_take.sql",
+     "supabase/schemas/functions/billing/lock_plants.sql",
+     "supabase/schemas/functions/billing/outbox_guard.sql",
+     "supabase/schemas/functions/billing/outbox_take.sql",
+     "supabase/schemas/functions/billing/plant_state.sql",
+     "supabase/schemas/functions/billing/set_chosen_plants.sql",
+     "supabase/schemas/functions/billing/write_allowed.sql",
+     "supabase/schemas/functions/billing/write_allowed_set.sql",
+     "supabase/schemas/functions/public/my_plant_ids.sql",
+     "supabase/schemas/functions/public/plants_seen_before.sql",
+     "supabase/schemas/functions/public/poll_commit_batch.sql",
+     "supabase/schemas/functions/public/poll_commit_v2.sql",
+     "supabase/schemas/functions/public/poll_jobs_v2.sql",
+     "supabase/schemas/functions/public/poll_routes.sql"
+    ],
+    "private.sunsynk_accounts": [
+     "supabase/schemas/functions/billing/fetch_lane.sql",
+     "supabase/schemas/functions/billing/history_take.sql",
+     "supabase/schemas/functions/billing/reading_routes.sql",
+     "supabase/schemas/functions/billing/reading_routes_set.sql",
+     "supabase/schemas/functions/billing/screen_state.sql",
+     "supabase/schemas/functions/msg/email_guard.sql",
+     "supabase/schemas/functions/private/billing_drop_plant.sql",
+     "supabase/schemas/functions/private/login_copies.sql",
+     "supabase/schemas/functions/private/login_lock.sql",
+     "supabase/schemas/functions/private/poll_shards.sql",
+     "supabase/schemas/functions/private/refresh_store.sql",
+     "supabase/schemas/functions/private/username_logins.sql",
+     "supabase/schemas/functions/public/account_by_username.sql",
+     "supabase/schemas/functions/public/account_disable.sql",
+     "supabase/schemas/functions/public/account_mark.sql",
+     "supabase/schemas/functions/public/account_refresh_get.sql",
+     "supabase/schemas/functions/public/account_upsert.sql",
+     "supabase/schemas/functions/public/admin_overview.sql",
+     "supabase/schemas/functions/public/api_account_delete.sql",
+     "supabase/schemas/functions/public/api_link_disconnect.sql",
+     "supabase/schemas/functions/public/api_link_remove.sql",
+     "supabase/schemas/functions/public/api_logins.sql",
+     "supabase/schemas/functions/public/billing_links.sql",
+     "supabase/schemas/functions/public/email_sweep.sql",
+     "supabase/schemas/functions/public/msg_email_take.sql",
+     "supabase/schemas/functions/public/plant_users_upsert.sql",
+     "supabase/schemas/functions/public/poll_commit.sql",
+     "supabase/schemas/functions/public/poll_commit_batch.sql",
+     "supabase/schemas/functions/public/poll_jobs_v2.sql",
+     "supabase/schemas/functions/public/poll_routes.sql",
+     "supabase/schemas/functions/public/share_account_get.sql",
+     "supabase/schemas/functions/public/share_claim.sql",
+     "supabase/schemas/functions/public/share_claim_live.sql",
+     "supabase/schemas/functions/public/share_retry_due.sql"
+    ],
+    "public.plant_config": [
+     "supabase/functions/_shared/db.ts",
+     "supabase/functions/notify/index.ts",
+     "supabase/schemas/functions/billing/history_take.sql",
+     "supabase/schemas/functions/billing/readings_start.sql",
+     "supabase/schemas/functions/private/email_on_plant_user.sql",
+     "supabase/schemas/functions/private/first_load_continue.sql",
+     "supabase/schemas/functions/private/grid_minutes.sql",
+     "supabase/schemas/functions/private/plant_start_fill.sql",
+     "supabase/schemas/functions/private/purge_plant.sql",
+     "supabase/schemas/functions/private/setup_steps_open.sql",
+     "supabase/schemas/functions/public/api_balance.sql",
+     "supabase/schemas/functions/public/api_grid_today.sql",
+     "supabase/schemas/functions/public/api_me.sql",
+     "supabase/schemas/functions/public/api_overview.sql",
+     "supabase/schemas/functions/public/api_plant_states.sql",
+     "supabase/schemas/functions/public/batt_sign_detect.sql",
+     "supabase/schemas/functions/public/battery_banks_detect.sql",
+     "supabase/schemas/functions/public/email_plant_events.sql",
+     "supabase/schemas/functions/public/email_poll_step.sql",
+     "supabase/schemas/functions/public/plant_bootstrap_kick.sql",
+     "supabase/schemas/functions/public/plant_cfg.sql",
+     "supabase/schemas/functions/public/plant_features_detect.sql",
+     "supabase/schemas/functions/public/plant_tz.sql",
+     "supabase/schemas/functions/public/poll_jobs_v2.sql",
+     "supabase/schemas/functions/public/poll_routes.sql",
+     "supabase/schemas/functions/public/q_missing_minutes.sql"
+    ],
+    "private.meta": [
+     "supabase/schemas/functions/private/email_plant_apply.sql",
+     "supabase/schemas/functions/private/purge_plant.sql",
+     "supabase/schemas/functions/public/admin_overview.sql",
+     "supabase/schemas/functions/public/api_inverter_history.sql",
+     "supabase/schemas/functions/public/api_overview.sql",
+     "supabase/schemas/functions/public/email_plant_events.sql",
+     "supabase/schemas/functions/public/email_poll_step.sql",
+     "supabase/schemas/functions/public/email_sweep.sql",
+     "supabase/schemas/functions/public/inverters_cached_many.sql",
+     "supabase/schemas/functions/public/poll_commit.sql",
+     "supabase/schemas/functions/public/poll_commit_batch.sql"
+    ],
+    "public.config_changes": [
+     "supabase/schemas/functions/private/purge_plant.sql"
+    ],
+    "private.inverters": [
+     "supabase/schemas/functions/private/purge_plant.sql",
+     "supabase/schemas/functions/public/api_logins.sql",
+     "supabase/schemas/functions/public/api_overview.sql",
+     "supabase/schemas/functions/public/api_plant_states.sql",
+     "supabase/schemas/functions/public/api_trends_compare.sql",
+     "supabase/schemas/functions/public/email_plant_inverters.sql",
+     "supabase/schemas/functions/public/email_sweep.sql",
+     "supabase/schemas/functions/public/inverters_cached_many.sql",
+     "supabase/schemas/functions/public/inverters_list.sql",
+     "supabase/schemas/functions/public/plant_inverters.sql",
+     "supabase/schemas/functions/public/poll_routes.sql"
+    ],
+    "private.sunsynk_calls": [
+     "supabase/schemas/functions/public/job_check_inputs.sql",
+     "supabase/schemas/functions/public/sunsynk_calls_report.sql"
+    ],
+    "private.link_attempts": [
+     "supabase/schemas/functions/public/link_attempt.sql",
+     "supabase/schemas/functions/public/link_succeeded.sql"
+    ],
+    "private.sunsynk_login_events": [
+     "supabase/schemas/functions/public/share_retry_due.sql"
+    ]
+   }
+  },
+  "reading": {
+   "files": []
+  },
+  "history": {
+   "files": []
+  },
+  "messages": {
+   "files": [
+    "supabase/schemas/functions/msg/"
+   ]
+  },
+  "alerts": {
+   "files": []
+  },
+  "system": {
+   "files": []
+  }
+ }
+}
