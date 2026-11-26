@@ -33,7 +33,7 @@ begin
       continue;
     end if;
     rid := net.http_post(                                                 -- 0235: keep the id
-      url := 'https://pmakzojwhouamawgszrc.functions.supabase.co/recover?plant=' || p,
+      url := private.functions_url() || '/recover?plant=' || p,               -- 0280
       headers := jsonb_build_object(
         'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
         'Content-Type', 'application/json'),

@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION public.plant_bootstrap_kick(p_plant bigint)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
-  fn_base text := 'https://pmakzojwhouamawgszrc.functions.supabase.co';
+  fn_base text;
   fn text;
   auth jsonb;
   acc uuid;
@@ -15,6 +15,7 @@ begin
     raise notice 'pg_net not enabled here - not kicking bootstrap for plant %', p_plant;
     return;
   end if;
+  fn_base := private.functions_url();                                     -- 0280
   auth := jsonb_build_object(
     'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
     'Content-Type', 'application/json');

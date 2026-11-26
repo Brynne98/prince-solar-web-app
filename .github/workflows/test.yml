@@ -59,3 +59,27 @@ jobs:
           STATE_DB_URL: postgresql://postgres:postgres@127.0.0.1:55322/postgres
           PSQL: psql
         run: npm run test:state
+
+  staging:
+    # Local staging (F10, F11): cron on and calling this stack's own functions, the fake SunSynk.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Start local staging
+        run: STAGING_DIR="$RUNNER_TEMP/staging" scripts/staging-local.sh
+      - name: Sign up, link a fake plant, cron calls only this stack
+        env:
+          PSQL: psql
+        run: |
+          eval "$(supabase status -o env 2>/dev/null | grep -E '^(API_URL|ANON_KEY|DB_URL)=')"
+          API_URL="$API_URL" ANON_KEY="$ANON_KEY" DB_URL="$DB_URL" node scripts/staging-check.mjs
+      - name: Function log
+        if: failure()
+        run: tail -100 "$RUNNER_TEMP/staging/functions.log"

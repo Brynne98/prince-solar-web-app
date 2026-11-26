@@ -7,7 +7,7 @@ AS $function$
 declare rid bigint;
 begin
   rid := net.http_post(
-    url := 'https://pmakzojwhouamawgszrc.functions.supabase.co/' || p_path,
+    url := private.functions_url() || '/' || p_path,
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
       'Content-Type', 'application/json'),

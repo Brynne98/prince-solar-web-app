@@ -115,6 +115,25 @@ file, and a function changed in a migration but not in its file turns the run re
 replace` cannot change a function's return type or argument names: drop it first in the
 same migration. No two functions may share a name (one file each).
 
+**Staging is local** (SOLAR-679 F10, F11; decided 2026-11-26: no paid staging project until
+sign-ups open). `scripts/staging-local.sh [<folder holding supabase/>]` starts a fresh local
+stack from every migration, turns on cron and pg_net, points the Vault secret `functions_url` at
+the stack's own gateway, schedules the jobs (`private.schedule_jobs()`), starts the fake SunSynk
+on :4400 and serves the functions. It takes `PAYSTACK_SECRET_KEY` (test keys only) and, to send
+mail, `RESEND_API_KEY` with `NOTIFY_LIVE=1`. `scripts/staging-check.mjs` then signs up, links a
+fake plant and checks cron called only this stack; CI runs both on every push.
+
+- Pay with a test card in the app: Paystack's checkout page, option Success. Paystack refuses a
+  `.test` email, so sign up with an `@example.com` one.
+- Paystack's webhook needs a public address; the return to the app calls `/billing/verify`, so
+  most runs need none. When one does: `cloudflared tunnel --url http://127.0.0.1:<api port>` and
+  set the test webhook URL in Paystack to `<tunnel>/functions/v1/billing/webhook`.
+- To rehearse a data move, copy production into a local stack of its own, never the other way:
+  `supabase db dump --linked --data-only -f <scratch>/prod.sql`, then load it with psql. Delete
+  the copy afterwards.
+- Beside another local stack: copy `supabase/` to a folder of its own and give it its own
+  `project_id` and ports in `config.toml` first.
+
 **New tables, sequences and functions get no access by default** (0108, SOLAR-145).
 Since 0108, and on Supabase from 2026-10-30, a new object in `public` is open to no
 one but its owner, and service_role for functions. The migration that creates it grants
