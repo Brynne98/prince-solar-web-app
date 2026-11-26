@@ -2452,7 +2452,7 @@ begin
   perform public.plant_bootstrap_kick(p_plant);
 end $function$;
 
-CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
+CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 25)
  RETURNS TABLE(shard integer, shards integer, delay_ms integer)
  LANGUAGE sql
  STABLE
@@ -4883,6 +4883,16 @@ AS $function$
    where coalesce(e.load_kwh, 0) > 0 or coalesce(e.pv_kwh, 0) > 0
 $function$;
 
+CREATE OR REPLACE FUNCTION public.sync_logins()
+ RETURNS TABLE(id uuid, user_id uuid, username text, brand text, access_token text, access_expires_at bigint)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select l.id, l.user_id, l.username, l.brand, l.access_token, l.access_expires_at
+    from plants.logins l where l.status = 'ok' order by l.id
+$function$;
+
 -- ---------------------------------------------------------------------------
 -- the old copies go (R3, R7, R24)
 drop function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text, uuid);
@@ -6510,7 +6520,7 @@ AS $function$
     from dev, now_s where now_s.t - dev.last_dev <= 900
 $function$;
 
-CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
+CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 25)
  RETURNS TABLE(shard integer, shards integer, delay_ms integer)
  LANGUAGE sql
  STABLE
@@ -6552,3 +6562,48 @@ begin
   return jsonb_build_object('minutes', n, 'upto', upto);
 end $function$;
 
+CREATE OR REPLACE FUNCTION private.schedule_jobs()
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_temp'
+AS $function$
+declare j record;
+begin
+  -- pg_cron keys a job by name and user: run as anyone else, every job would be made twice
+  if current_user <> 'postgres' then
+    raise exception 'run private.schedule_jobs() as postgres, not %', current_user using errcode = '42501';
+  end if;
+  for j in select * from (values
+    ('agg-minute-rollup',    '40 4 * * *',         $c$select private.agg_minute_rollup(31)$c$),
+    ('alerts',               '* * * * *',          $c$select private.alerts_minute()$c$),
+    ('plant-check',          '* * * * *',          $c$select private.plant_checks()$c$),
+    ('plant-sync',           '* * * * *',          $c$select private.call_fn('plant-jobs', '{"task":"sync"}', 55000)$c$),
+    ('temps',                '* * * * *',          $c$select private.call_fn('plant-jobs', '{"task":"temps"}', 55000)$c$),
+    ('billing-delete',       '*/5 * * * *',        $c$select billing.delete_due()$c$),
+    ('billing-history',      '* * * * *',          $c$select private.call_fn('recover?queue=1', '{}', 60000)$c$),
+    ('billing-run',          '*/5 4-5 * * *',      $c$select private.call_fn('billing/run', '{}', 120000)$c$),
+    ('ensure-partitions',    '0 3 * * *',          $c$select private.ensure_partitions()$c$),
+    ('first-load-continue',  '*/2 * * * *',        $c$select private.first_load_continue()$c$),
+    ('grid-off',             '10 4 * * *',         $c$select private.grid_off_update_all()$c$),
+    ('history-delete',       '* * * * *',          $c$call private.history_delete_run()$c$),
+    ('history-delete-slow',  '*/15 * * * *',       $c$call private.history_delete_check()$c$),
+    ('job-check',            '2-59/5 * * * *',     $c$select private.call_fn('job-check', '{}', 30000)$c$),
+    ('notify-email',         '* * * * *',          $c$select private.call_fn('notify-email', '{}', 55000)$c$),
+    ('notify-push',          '* * * * *',          $c$select private.call_fn('notify-push', '{}', 55000)$c$),
+    ('purge-cron-log',       '45 4 * * *',         $c$delete from cron.job_run_details where end_time < now() - make_interval(days => 7)$c$),
+    ('rollup-old-days',      '*/5 5-7 * * *',      $c$call private.rollup_old_days(31)$c$),
+    ('plant-energy',         '15 2 * * *',         $c$select private.call_fn('sync-plant-energy', '{}', 150000)$c$),
+    ('reader',               '* * * * *',          $c$select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from private.poll_shards() s$c$),
+    ('recover',              '5 4,10,16,22 * * *', $c$select private.call_fn('recover', '{}', 150000)$c$)
+  ) t(name, sched, cmd) loop
+    perform cron.schedule(j.name, j.sched, j.cmd);   -- by name: an existing job is updated in place
+  end loop;
+  -- the names before SOLAR-681 R16: gone, so no job runs twice
+  perform cron.unschedule(jobname) from cron.job where jobname in ('sunsynk-poll', 'sunsynk-recover', 'sunsynk-plant-energy');
+end $function$;
+
+-- the jobs as their latest list has them (private.schedule_jobs above)
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then perform private.schedule_jobs(); end if;
+end $$;

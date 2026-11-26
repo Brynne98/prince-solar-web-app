@@ -34,7 +34,6 @@ import { db, rpc } from "../_shared/db.ts";
 import { denyUnlessServer } from "../_shared/server.ts";
 import { type Account, saveAllCalls } from "../_shared/brands/index.ts";
 import { ensureBootstrapAccount, type PlantJob, plantsToPoll, pollJobs } from "../_shared/plants.ts";
-import { runSync, runTemps } from "../_shared/sidejobs.ts";
 import { accountFailed, type AccountResult, emailOutcome, pollAccount } from "../_shared/poller.ts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
@@ -116,9 +115,6 @@ serve("poll", async (req) => {
   let logged = false;
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-    // the side jobs, each its own cron call (R18): the read below does nothing else
-    if (body.task === "sync") return json({ ok: true, task: "sync", ...(await runSync(nowMinuteEpoch())) });
-    if (body.task === "temps") return json({ ok: true, task: "temps", ...(await runTemps(nowMinuteEpoch())) });
     spec = shardSpec(body);
     // The minute this invocation is logging — fixed before the stagger delay so
     // a shard that waits 20 s still stamps the minute the cron tick was for.

@@ -10,6 +10,7 @@ import { BusyButton, Segmented, Skeleton, Tip, dayText, fmtTime, localDateStr, m
 import { READ_FRESH_MS, dayFor, fetchDay, fetchEnergy, fetchMe, fetchNotifications, fetchPlantDays, fetchPlantStates, fetchSnapshot, firstLoadSync, isStale, plantNow, pushResync, readNotifications, realPoints, savePlantConfig, savePrefs, sendFeedback, setCurrentPlant, syncProgress } from './data.jsx';
 import { AT, Dialog, LinkDialog, LinkForm, LinkGate, accountNow, addAsked, billingReturn, checkReturn, hasActivePlant, mountNode, reloadAccount, settlePayment, takeAddAsk, useAccount, useAccountWatch } from './link.jsx';
 import { sb } from './sb.js';
+import { minuteMissing, RETRY_MS } from './live-retry.mjs';
 const { useState, useEffect, useRef, useCallback } = React;
 
 export const TrashIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
@@ -1488,7 +1489,7 @@ function App({ links }) {
   const liveFails = useRef(0);
   const liveRetry = useRef(null);
   const dayRetries = useRef(0);
-  const loadLive = useCallback(async (spin = true) => {
+  const loadLive = useCallback(async (spin = true, minuteAsk = false) => {
     const t0 = Date.now();
     if (spin) setBusy(b => b + 1);
     clearTimeout(liveRetry.current);
@@ -1506,6 +1507,10 @@ function App({ links }) {
       else if (dayRetries.current < 3) {
         dayRetries.current += 1;
         liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 8000);
+      }
+      // the minute's ask found the minute before: once more 5 s later, then the next minute (R22)
+      if (minuteAsk && !behind && minuteMissing(last, at, READ_FRESH_MS)) {
+        liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, RETRY_MS);
       }
       // for the offline page (offline.js, SOLAR-592)
       if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: plantNow.tz || null })); } catch (e) {}
@@ -1666,8 +1671,9 @@ function App({ links }) {
   // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
   // device on one plant still asks together, while different plants ask at different
   // moments instead of all in one second (SOLAR-70). Readings land 12–27 s past the minute
-  // (Nov 2026), so an early second often shows the minute before; at midnight that minute is
-  // yesterday's and loadLive asks again (SOLAR-648).
+  // (Nov 2026), so an early second can find the minute before: it asks once more 5 s later
+  // (live-retry.mjs, SOLAR-681 R22); at midnight that minute is yesterday's and loadLive asks
+  // again (SOLAR-648).
   useEffect(() => {
     if (!auto) return;
     let a;
@@ -1677,7 +1683,7 @@ function App({ links }) {
     // another app); wake below catches up the moment it is back (SOLAR-140).
     const tick = () => {
       if (document.visibilityState === 'visible') {
-        loadLive(false);
+        loadLive(false, true);
         if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); loadNotifs(); }
         // a plant just added: today's series is asked each minute until it draws (SOLAR-181)
         else if (todayThin.current) loadToday();

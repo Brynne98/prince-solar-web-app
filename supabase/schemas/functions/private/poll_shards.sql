@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
+CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 25)
  RETURNS TABLE(shard integer, shards integer, delay_ms integer)
  LANGUAGE sql
  STABLE

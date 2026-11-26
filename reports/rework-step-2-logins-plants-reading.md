@@ -223,7 +223,7 @@ Each rule has the check that proves it. The step is done when every check passes
   | Measure | Pass |
   |---|---|
   | Plant-minutes missed (no `agg_minute` row once the minute is over) | 0 |
-  | Reading age | every plant-minute saved before that plant's page asks: its own second, 12-42 s past the minute (`public/app.jsx:1666-1674`, SOLAR-70) |
+  | Reading age | every reading on screen within 5 s of the page's ask second (12-42 s past the minute, SOLAR-70): the page asks once more 5 s later when the minute is not saved yet, then waits for the next minute (`public/live-retry.mjs`). Signed by Brynne 2026-11-27 |
   | Rows written after `ends_at` | 0 |
 
   Today, at 500 logins, the old way missed 2 plant-minutes in 7 minutes and saved at p95 5.6 s
@@ -371,8 +371,9 @@ moves, the compares and every rewritten function. Nothing released yet.
 | 30 min, groups at 0/2/4 s | 14,500 | 4 (a local gateway 502; read retry added) | 37 (0.26%) | 8.6 s |
 | 2-hour soak, side jobs on | 57,502 | 0 | 141 (0.25%) | 8.6 s |
 
-The soak's late saves are reads the fake held 10 s or more (its 504 tail); with the page asking
-at 20-50 s past the minute none were late in a clean 5-minute sample. Decision for Brynne.
+The soak's late saves are reads the fake held 10 s or more (its 504 tail). Brynne's decision
+(2026-11-27): the page keeps its 12-42 s ask and asks once more 5 s later; R22's reading age is
+now "on screen within 5 s of the ask second".
 
 **Rehearsal on a production copy** (read-only copy of the login, plant and billing tables,
 emails masked, no tokens): 24 accounts, `account_state` the same before and after (0
