@@ -14,7 +14,7 @@ const POSTHOG_KEY = "phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v";
 const POSTHOG_URL = Deno.env.get("POSTHOG_URL") ?? "https://eu.i.posthog.com/i/v0/e/";
 // The release on every error and event: the web app version these functions were last
 // deployed with. npm test fails when it is not public/config.js's APP_VERSION.
-export const APP_VERSION = "v0.64.0";
+export const APP_VERSION = "v0.65.0";
 
 const scrub = (s: string) => s.replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, "[email]");
 
