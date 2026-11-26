@@ -1,17 +1,19 @@
 # Deploying
 
-Production ships only from the release workflow, `.github/workflows/release.yml` (SOLAR-679 F2,
-F3). It is started by hand, and only on Brynne's say-so. It takes one commit through four stages,
-each waiting for the one before and stopping on red:
+Production ships only through `npm run release` (`scripts/release.mjs`, SOLAR-679 F2, F3), run
+from Brynne's Mac on his say-so. Decided 2026-11-26: he is the only developer, so no production
+key lives in GitHub; GitHub runs the tests only. Revisit when more developers join. The script
+takes one commit through four stages and stops at the first failure:
 
-1. **Tests**: everything `.github/workflows/test.yml` runs on every push.
-2. **Database**: the `functions_url` Vault secret if missing, then `supabase db push`. Runs only
-   for a release started on `main`.
-3. **Functions**: `supabase functions deploy` for all of them (unchanged ones are skipped), then
-   every live database function compared with its file (`node scripts/db-files.mjs --live`).
-4. **Frontend**: `npm ci && npm run build` with source maps, the maps sent to PostHog and
-   deleted, `public/` uploaded to Cloudflare Pages, then the live `config.js` must show the
-   version asked for and `/build/*.js.map` must answer 404 (F19).
+1. **Checks**: on `main`, clean tree, HEAD equals `origin/main`, and every GitHub check for that
+   commit green (node, deno, sql, staging).
+2. **Database**: the `functions_url` Vault secret if missing; every live function compared with
+   its file, except those the pending migrations change; `supabase db push`.
+3. **Functions**: `supabase functions deploy` (unchanged ones are skipped), then every live
+   database function compared with its file (`node scripts/db-files.mjs --live`).
+4. **Frontend**: built from a clean copy of the commit with content-named files and source
+   maps; the maps go to PostHog and are deleted; `wrangler pages deploy`; then the live
+   `config.js` must show the version and every `/build/*.js.map` must answer 404 (F19).
 
 Backend before frontend: new UI must never call an RPC that isn't there yet. Migrations and
 functions stay backward-compatible with the frontend still live.
@@ -24,35 +26,30 @@ functions stay backward-compatible with the frontend still live.
 
 ## Before a release
 
-```bash
-git status --short                  # clean
-git log --oneline origin/main..HEAD # pushed: the release takes a commit on GitHub
-supabase migration list --linked   # Local and Remote columns: only the new ones differ
-grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
-```
-
 **Version.** Ask which number to use (semver). Set it in `public/config.js`
 (`window.APP_VERSION`) and in `supabase/functions/_shared/errors.ts` (`APP_VERSION`); `npm test`
-fails while they differ. A backend-only release still needs a number: the release checks it.
+fails while they differ. Commit, push to main, wait for the checks.
 
-**Backup**, before any release with a migration: Supabase keeps daily backups (Pro). For a data
-move, also dump the tables it touches to this machine: `supabase db dump --linked --data-only
--t <schema.table> -f <scratch>/backup.sql`. Never into the repo or a workflow artifact (the repo is
-public).
+**Backup**, before any release with a migration: Supabase keeps daily backups (Pro). Also dump
+to this Mac, outside the repo (it is public): `supabase db dump --remote=<ref> -f <dir>/schema.sql`
+and `supabase db dump --remote=<ref> --data-only -f <dir>/data.sql`.
 
 ## Running it
 
-GitHub > Actions > Release > Run workflow, branch `main`, version `v1.2.3`. Brynne approves the
-`production` environment when asked. Or: `gh workflow run release.yml -f version=v1.2.3`.
+```bash
+npm run release
+```
 
-The `production` environment holds `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`,
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `POSTHOG_CLI_TOKEN` (a PostHog personal API key
-that can write error tracking) and the variables `SUPABASE_PROJECT_REF` and
-`POSTHOG_CLI_PROJECT_ID`, with Brynne as required reviewer. The three production stages each ask for approval: approve them one after another, since the database stays ahead of the functions while one waits.
+Logins it uses, all on this Mac, none in a file:
 
-**Cloudflare does not build on push** (F2): in the Pages project (Settings > Builds > Branch
-control), automatic production deployments are off, so a red push never reaches the site. Only
-the release uploads. Until Brynne switches that off, every push to main still ships the frontend.
+- Supabase CLI: its stored login (keychain).
+- Cloudflare: `npx wrangler@4.20.0 login`, once.
+- PostHog source maps: a personal API key in the keychain,
+  `security add-generic-password -s prince-solar-posthog-cli -a admin -w`. Missing: the maps are
+  not uploaded (a warning), and still never published.
+
+**Cloudflare does not build on push** (F2): in the Pages project, automatic production
+deployments are off, so a push never publishes the site; only the release uploads.
 `.github/workflows/secrets-guard.yml` still scans every push to main for secrets.
 
 ## After it

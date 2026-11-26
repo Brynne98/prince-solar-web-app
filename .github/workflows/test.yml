@@ -1,5 +1,5 @@
-# Every push runs every test (SOLAR-679 F1). The release workflow calls this one first and
-# stops on red (F2).
+# Every push runs every test (SOLAR-679 F1). npm run release refuses a commit whose checks here
+# are not all green (F2).
 #   node:  npm test (app tests and the guardrails in scripts/reuse-check.mjs)
 #   deno:  every supabase/functions/**/*_test.ts
 #   sql:   npm run test:state on a fresh local Supabase built from every migration
@@ -9,13 +9,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  # called by the release workflow, github.workflow is "Release": its own group, never cancelled
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 

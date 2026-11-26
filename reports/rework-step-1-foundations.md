@@ -7,7 +7,7 @@ email and brand are not built here; each comes with its first real user in steps
 
 ## What this step owns
 
-- `.github/workflows/` (test and release workflows)
+- `.github/workflows/` (test and nightly workflows); `scripts/release.mjs` (the release)
 - `supabase/schemas/` (new: one file per database function)
 - `supabase/config.toml` (`schema_paths`)
 - `scripts/` test runners and the guardrail check (`scripts/reuse-check.mjs`)
@@ -26,10 +26,11 @@ Each rule has the check that proves it. The step is done when every check passes
   fresh local database in CI.
   *Check:* a deliberate failing test on a branch turns the run red.
 - **F2. A red run cannot reach production.** Cloudflare's build-on-push is turned off.
-  Production deploys only from the release workflow, which needs the tests green.
+  Production publishes only through the release script, which needs the commit's checks green.
   *Check:* push a commit with a failing test; the live site does not change.
 - **F3. Release order is fixed: database, functions, frontend, from one commit.** The
-  release workflow starts by hand (Brynne's say-so stays the trigger).
+  release script (`npm run release`) runs from Brynne's Mac, on his say-so; no production key
+  lives in GitHub (changed 2026-11-26: he is the only developer).
   *Check:* one release run to production (after a backup, on Brynne's say-so), log shows
   the three stages in order.
 - **F4. Long tests run nightly, not per push.** Billing simulator, abuse and scale runs.
@@ -112,7 +113,7 @@ is a launch requirement (SOLAR-678): it goes in before sign-ups open.
 1. F1, F4, F7, F20: tests and guardrails in CI (nothing deploys yet).
 2. F5, F6, F8, F9: one file per function, drift check, types.
 3. F10, F11: local staging setup, production address removed.
-4. F2, F3: release workflow, Cloudflare build-on-push off.
+4. F2, F3: release script, Cloudflare build-on-push off.
 5. F12–F14: paging, bounces, send speed.
 6. F15–F19: Vite. Last, because other threads are changing `public/*.jsx` now
    (SOLAR-648, 661, 642, 659, 637); it starts once those are merged.

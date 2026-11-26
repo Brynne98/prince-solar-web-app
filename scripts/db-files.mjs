@@ -10,7 +10,7 @@
 //   node scripts/db-files.mjs --write  rewrite the files from the database
 //   node scripts/db-files.mjs --live   check the functions (not the types) of the project
 //                                      SUPABASE_PROJECT_REF names (else the linked one), read only,
-//                                      through the Supabase CLI (the release workflow)
+//                                      through the Supabase CLI (scripts/release.mjs)
 //
 // The database is STATE_DB_URL, local, at the newest migration (scripts/local-db.mjs). A function
 // change is a migration and its file together: write the migration (the whole function, never
@@ -66,11 +66,14 @@ if (write) {
     fs.writeFileSync(path.join(DIR, rel), body);
   }
 } else {
+  // --except <schema/name.sql>: a function a pending migration will change (scripts/release.mjs)
+  const except = new Set(process.argv.flatMap((a, i, all) => all[i - 1] === '--except' ? [a] : []));
   for (const [rel, body] of want) {
+    if (except.has(rel)) continue;
     if (!have.has(rel)) problems.push(`${rel}: the database has this function, no file does`);
     else if (have.get(rel) !== body) problems.push(`${rel}: the file differs from the database's body`);
   }
-  for (const rel of have.keys()) if (!want.has(rel)) problems.push(`${rel}: no such function in the database`);
+  for (const rel of have.keys()) if (!want.has(rel) && !except.has(rel)) problems.push(`${rel}: no such function in the database`);
 }
 
 if (live) {
