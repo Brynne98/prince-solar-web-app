@@ -1,0 +1,113 @@
+# Release to production (SOLAR-679 F2, F3). Started by hand only: Brynne's say-so is the trigger.
+# One commit, in a fixed order: tests, then database, then functions, then frontend. Each stage
+# waits for the one before and stops the release on red. Every job checks out the same commit.
+#
+# Needs, in the GitHub environment "production" (Settings > Environments), with Brynne as the
+# required reviewer:
+#   SUPABASE_ACCESS_TOKEN   personal access token for the Supabase CLI
+#   SUPABASE_DB_PASSWORD    the production database password
+#   CLOUDFLARE_API_TOKEN    Cloudflare token with Pages edit on this account
+#   CLOUDFLARE_ACCOUNT_ID
+# and the variable SUPABASE_PROJECT_REF. Take a backup before running it (DEPLOY.md).
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version in public/config.js, e.g. v0.65.0 (checked, not set)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
+  database:
+    needs: tests
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_YES: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: The version asked for is the one in this commit
+        env:
+          VERSION: ${{ inputs.version }}
+        run: grep -qF "APP_VERSION = '$VERSION'" public/config.js
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Link production (the CLI reads SUPABASE_DB_PASSWORD)
+        run: supabase link --project-ref "$REF"
+      - name: Functions address in Vault (0280 reads it)
+        run: |
+          supabase db query --remote \
+            "select vault.create_secret('https://$REF.functions.supabase.co', 'functions_url')
+              where not exists (select 1 from vault.secrets where name = 'functions_url')"
+      - name: Migrations
+        run: supabase db push --remote
+      - name: Live functions match their files
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: node scripts/db-files.mjs --live
+
+  functions:
+    needs: database
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_YES: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Deploy every function (unchanged ones are skipped)
+        run: supabase functions deploy --remote="$REF" --use-api --jobs 4
+
+  frontend:
+    needs: functions
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run build
+      - name: Upload public/ to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx -y wrangler@4.20.0 pages deploy public --project-name prince-solar-web-app --branch main --commit-hash "$GITHUB_SHA" --commit-dirty=false
+      - name: The live app serves this version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          for i in $(seq 1 30); do
+            curl -s "https://app.princesolarhub.co.za/config.js?v=$(date +%s)" | grep -qF "APP_VERSION = '$VERSION'" && exit 0
+            sleep 10
+          done
+          echo "::error::app.princesolarhub.co.za does not serve $VERSION"; exit 1

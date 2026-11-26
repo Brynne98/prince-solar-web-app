@@ -8,6 +8,9 @@
 //
 //   node scripts/db-files.mjs          check: exit 0 when every file matches the database, 1 when not
 //   node scripts/db-files.mjs --write  rewrite the files from the database
+//   node scripts/db-files.mjs --live   check the functions (not the types) of the project
+//                                      SUPABASE_PROJECT_REF names (else the linked one), read only,
+//                                      through the Supabase CLI (the release workflow)
 //
 // The database is STATE_DB_URL, local, at the newest migration (scripts/local-db.mjs). A function
 // change is a migration and its file together: write the migration (the whole function, never
@@ -15,9 +18,11 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO, psql } from './local-db.mjs';
+import { fileURLToPath } from 'node:url';
 
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const write = process.argv.includes('--write');
+const live = process.argv.includes('--live');
 const SCHEMAS = ['billing', 'msg', 'private', 'public'];
 const DIR = path.join(REPO, 'supabase/schemas/functions');
 const TYPES = path.join(REPO, 'supabase/functions/_shared/database.types.ts');
@@ -25,14 +30,25 @@ const problems = [];
 
 // ---- functions ----
 const q = `select coalesce(json_agg(json_build_object('schema', n.nspname, 'name', p.proname, 'def', pg_get_functiondef(p.oid))
-                  order by n.nspname, p.proname), '[]')
+                  order by n.nspname, p.proname), '[]') as fns
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname in (${SCHEMAS.map((s) => `'${s}'`).join(', ')}) and p.prokind in ('f', 'p')
    and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')`;
-const r = psql(q, ['-At']);
-if (r.status !== 0) { console.error(r.stderr.trim()); process.exit(1); }
+let fns;
+if (live) {
+  const r = spawnSync('supabase', ['db', 'query', process.env.SUPABASE_PROJECT_REF ? `--remote=${process.env.SUPABASE_PROJECT_REF}` : '--remote', '--read-only', '--output-format', 'json', q],
+    { cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 28 });
+  if (r.status !== 0) { console.error(`supabase db query failed: ${r.stderr.trim().split('\n').at(-1)}`); process.exit(1); }
+  const v = JSON.parse(r.stdout).rows[0].fns;
+  fns = typeof v === 'string' ? JSON.parse(v) : v;
+} else {
+  const { psql } = await import('./local-db.mjs');
+  const r = psql(q, ['-At']);
+  if (r.status !== 0) { console.error(r.stderr.trim()); process.exit(1); }
+  fns = JSON.parse(r.stdout);
+}
 const want = new Map();
-for (const f of JSON.parse(r.stdout)) {
+for (const f of fns) {
   const rel = `${f.schema}/${f.name}.sql`;
   // one file per name: a second function with the same name would need a second file
   if (want.has(rel)) problems.push(`${rel}: two functions with one name: give each its own name`);
@@ -55,6 +71,12 @@ if (write) {
     else if (have.get(rel) !== body) problems.push(`${rel}: the file differs from the database's body`);
   }
   for (const rel of have.keys()) if (!want.has(rel)) problems.push(`${rel}: no such function in the database`);
+}
+
+if (live) {
+  if (problems.length) { console.log(problems.map((p) => `FAIL  ${p}`).join('\n')); process.exit(1); }
+  console.log(`live functions: ${want.size}, all the same as their files`);
+  process.exit(0);
 }
 
 // ---- types ----
