@@ -12,6 +12,7 @@
 #   PAYSTACK_SECRET_KEY  a Paystack test key (sk_test_...); no live key is accepted
 #   RESEND_API_KEY       optional; mail is sent only with NOTIFY_LIVE=1 as well
 #   NOTIFY_LIVE          optional, "1" to send mail
+#   RESEND_WEBHOOK_SECRET optional; the bounce webhook (resend-webhook) refuses every call without it
 # Leaves running: the stack, the fake SunSynk on :4400, `supabase functions serve`. Logs and the
 # functions' settings file go to $STAGING_DIR (default: a new temp folder). Stop with
 # `supabase stop --workdir <folder>` and kill the two background jobs it names.
@@ -58,6 +59,7 @@ umask 077
   grep -v '^#' "$REPO/scripts/mock-sunsynk/mock.env"
   [ -n "${PAYSTACK_SECRET_KEY:-}" ] && echo "PAYSTACK_SECRET_KEY=$PAYSTACK_SECRET_KEY"
   [ -n "${RESEND_API_KEY:-}" ] && echo "RESEND_API_KEY=$RESEND_API_KEY"
+  [ -n "${RESEND_WEBHOOK_SECRET:-}" ] && echo "RESEND_WEBHOOK_SECRET=$RESEND_WEBHOOK_SECRET"
   echo "NOTIFY_LIVE=${NOTIFY_LIVE:-0}"
 } >"$ENVF"
 nohup supabase functions serve --workdir "$WD" --env-file "$ENVF" >"$OUT/functions.log" 2>&1 &

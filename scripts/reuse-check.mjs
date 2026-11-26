@@ -330,7 +330,8 @@ for (const f of jsx) {
     paystack: /paystack/gi, resend: /\bresend/gi, infobip: /infobip/gi };
   // a vendor's own files: its adapter and its stand-in
   const OWN = { sunsynk: ['supabase/functions/_shared/sunsynk.ts', 'supabase/functions/_shared/mock-sunsynk.mjs',
-    'supabase/functions/mock-sunsynk/index.ts'] };
+    'supabase/functions/mock-sunsynk/index.ts'],
+    resend: ['supabase/functions/resend-webhook/index.ts'] };
   const walk = (d) => fs.existsSync(path.join(ROOT, d)) ? fs.readdirSync(path.join(ROOT, d), { recursive: true }).map(f => path.join(d, String(f))) : [];
   const files = [
     ...fs.readdirSync(PUB).filter(f => /\.(jsx|js)$/.test(f)).map(f => `public/${f}`),

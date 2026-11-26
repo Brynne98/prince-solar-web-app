@@ -196,7 +196,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 
 | Name | Use it for |
 |---|---|
-| `Pacer`, `retryAfterMs` (`pace.ts`) | The one Resend pace in a run: `slot(deadline)` before each call, `hold(retryAfter)` on a 429. notify-email's three lanes share one (SOLAR-645). |
+| `Pacer`, `retryAfterMs`, `readRate` (`pace.ts`) | The one Resend pace in a run: `slot(deadline)` before each call, `learn(readRate(headers))` after every reply (calls left in the window go at once, none left waits for the reset; SOLAR-679 F14), `hold(retryAfter)` on a 429. notify's `paced()` does all three; notify-email's three lanes share one (SOLAR-645). |
+| `mail_block`, `private.mail_blocked` (0281) | Addresses that bounced for good, complained or are on Resend's block list (`resend-webhook`, SOLAR-679 F13). `msg.email_guard` and `billing.outbox_take` drop mail to them as "address blocked". A new Resend sender checks `private.mail_blocked(address)` too. |
 | `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`; `msgKey` gives `ms-<id>` for `msg.outbox` emails). |
 
 ## CSS

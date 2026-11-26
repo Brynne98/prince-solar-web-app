@@ -38,6 +38,9 @@ AS $function$
              then 'login or plant added'
            when coalesce(q.to_email, (select u.email::text from auth.users u where u.id = q.user_id), p_o.to_email) is null
              then 'no address'
+           -- bounced for good, marked as spam or on the sender's block list (0281, SOLAR-679 F13)
+           when private.mail_blocked(coalesce(q.to_email, (select u.email::text from auth.users u where u.id = q.user_id), p_o.to_email))
+             then 'address blocked'
            when q.pair_key is not null then
              case msg.email_down_state(q.user_id, q.pair_key)
                when 'wait' then 'wait' when 'dropped' then 'down not sent' end

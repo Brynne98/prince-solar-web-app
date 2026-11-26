@@ -419,6 +419,10 @@ verify_jwt = false
 # Outside uptime check (SOLAR-469): no session; answers only ok and minutes.
 verify_jwt = false
 
+[functions.resend-webhook]
+# Resend's bounce and complaint webhook (SOLAR-679 F13): no session; checks the Svix signature.
+verify_jwt = false
+
 [functions.mock-sunsynk]
 # Fake SunSynk (SOLAR-270): called by our own functions with a fake SunSynk token, not a JWT.
 verify_jwt = false

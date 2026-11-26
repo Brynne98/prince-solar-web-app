@@ -1,7 +1,10 @@
 // Sending one billing outbox email (SOLAR-641, notify). Each row goes in its own call under a
 // key tied to the row alone, so a retry after a lost answer is answered from the first send,
 // whatever other rows are due by then. Resend keeps a key for 24 hours.
-export type Post = (url: string, body: unknown, key: string) => Promise<{ status: number; error?: string; retryAfter?: string | null }>;
+import type { Rate } from "./pace.ts";
+// rate: the reply's rate-limit headers, which set the pace (pace.ts).
+export type Post = (url: string, body: unknown, key: string) =>
+  Promise<{ status: number; error?: string; retryAfter?: string | null; rate?: Rate | null }>;
 
 export const outboxKey = (id: number) => `ob-${id}`;
 // msg.outbox email rows (SOLAR-645 step 4): the same rule, their own key.
@@ -13,5 +16,5 @@ export const msgKey = (id: number) => `ms-${id}`;
  *  the same key is answered from the first send, so nothing goes twice and nothing is lost. */
 export async function sendOutboxOne(post: Post, url: string, o: { id: number; payload: unknown }, key = outboxKey(o.id)) {
   const res = await post(url, o.payload, key);
-  return res.status === 409 && /invalid_idempotent_request/.test(res.error ?? "") ? { status: 200 } : res;
+  return res.status === 409 && /invalid_idempotent_request/.test(res.error ?? "") ? { status: 200, ...(res.rate ? { rate: res.rate } : {}) } : res;
 }
