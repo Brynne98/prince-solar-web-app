@@ -1103,6 +1103,14 @@ begin
   perform pg_temp.ok('P9b monthly booked for the billing date', r->>'next_interval' = 'month'
     and (r->>'next_amount_minor')::int = 9900 and r->>'next_plan' = 'family');
 
+  -- the first renewal after yearly to monthly: R99 for one month from the old billing date
+  perform pg_temp.ok('P9b renewal charged', pg_temp.job(b, pe, null) is not null);
+  perform pg_temp.ok('P9b first renewal: Family monthly R99, one month',
+    (select amount_minor = 9900 and interval = 'month' and plan = 'family' and period_start = pe
+            and period_end = pe + interval '1 month' from billing.invoices where account = b and kind = 'renewal' and status = 'open'));
+  -- a running plan's quote with no interval stays on its own interval
+  perform pg_temp.eq('P9b no interval: the plan''s own', billing.quote(a, 'family', null, pg_temp.t(20))->>'kind', 'interval');
+
   perform pg_temp.fails('P9b a made-up interval refused',
     format('select billing.upgrade(%L, ''family'', 0, ''{990010951}'', %L, p_interval => ''week'')', a, pg_temp.t(20)), 'monthly or yearly');
   perform pg_temp.ok('P9b billing_v2 passes the interval to upgrade and downgrade',
@@ -1154,6 +1162,43 @@ begin
   perform pg_temp.ok('P10 switching back clears the booking', (pg_temp.sub(a)).next_price is null);
 end $$;
 
+-- P9c review cases (SOLAR-675, Astra, Sol, Fable): a given interval wins over a switch booked
+--     earlier, none given carries it as before; a retry a day later is priced again
+do $$
+declare c uuid := pg_temp.acct('p9d'); d uuid := pg_temp.acct('p9e'); e uuid := pg_temp.acct('p9f');
+        r jsonb; r2 jsonb; ref text;
+begin
+  -- Home monthly, yearly booked, then Family on the Monthly view: stays monthly
+  perform pg_temp.link(c, 'p9d', '{990010971,990010972,990010973}', pg_temp.t(0));
+  perform pg_temp.buy(c, 'home', 'month', '{990010971,990010972}', pg_temp.t(0), 'AUTH_p9d');
+  perform billing.switch_interval(c, 'year', pg_temp.t(5));
+  perform pg_temp.ok('P9c quote: Family monthly from the billing date',
+    (select q->>'interval' = 'month' and (q->>'next_amount_minor')::int = 9900 from billing.quote(c, 'family', 'month', pg_temp.t(10)) q));
+  r := billing.upgrade(c, 'family', 0, '{990010971,990010972,990010973}', pg_temp.t(10), p_interval => 'month');
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9d');
+  perform pg_temp.ok('P9c the given monthly replaces the booked yearly', (pg_temp.sub(c)).plan = 'family'
+    and (pg_temp.sub(c)).interval = 'month' and (pg_temp.sub(c)).next_price is null);
+  -- the same with no interval given: the booked yearly carries over, as before 0278
+  perform pg_temp.link(d, 'p9e', '{990010981,990010982,990010983}', pg_temp.t(0));
+  perform pg_temp.buy(d, 'home', 'month', '{990010981,990010982}', pg_temp.t(0), 'AUTH_p9e');
+  perform billing.switch_interval(d, 'year', pg_temp.t(5));
+  r := billing.upgrade(d, 'family', 0, '{990010981,990010982,990010983}', pg_temp.t(10));
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9e');
+  perform pg_temp.ok('P9c no interval: the booked yearly carries to Family',
+    (select interval = 'year' and plan = 'family' from billing.prices where id = (pg_temp.sub(d)).next_price));
+  -- yearly to monthly left unpaid, tried again a day later: a new bill at the new sum
+  perform pg_temp.link(e, 'p9f', '{990010991,990010992,990010993}', pg_temp.t(0));
+  perform pg_temp.buy(e, 'home', 'year', '{990010991,990010992}', pg_temp.t(0), 'AUTH_p9f');
+  r := billing.upgrade(e, 'family', 0, '{990010991,990010992,990010993}', pg_temp.t(100), p_interval => 'month');
+  r2 := billing.upgrade(e, 'family', 0, '{990010991,990010992,990010993}', pg_temp.t(101), p_interval => 'month');
+  perform pg_temp.ok('P9c a day later: a new, smaller bill; the old one void', r2->>'invoice' <> r->>'invoice'
+    and (r2->>'amount_minor')::int < (r->>'amount_minor')::int
+    and (r2->>'amount_minor')::int = (billing.quote(e, 'family', 'month', pg_temp.t(101))->>'due_minor')::int
+    and (select status from billing.invoices where id = (r->>'invoice')::uuid) = 'void');
+end $$;
+
 -- P10b a smaller plan on the other interval: both booked for the billing date in one call (SOLAR-675)
 do $$
 declare a uuid := pg_temp.acct('p10b'); r jsonb;
@@ -1166,7 +1211,11 @@ begin
   r := billing.downgrade(a, 'home', 0, '{990011053}', pg_temp.t(5), p_interval => 'year');
   perform pg_temp.ok('P10b Home yearly booked', r->>'next_plan' = 'home' and r->>'next_interval' = 'year'
     and (r->>'next_amount_minor')::int = 49000 and r->>'plan' = 'family' and r->>'interval' = 'month');
-  -- the same plan as now with an interval: only the interval stays booked
+  -- Billing's undo sends the running interval: plan and interval both undone (review, Sol, Fable)
+  r := billing.downgrade(a, 'family', null, '{}', pg_temp.t(6), p_interval => 'month');
+  perform pg_temp.ok('P10b undo with the running interval: nothing booked', (pg_temp.sub(a)).next_price is null
+    and (pg_temp.sub(a)).next_extra_places is null);
+  -- the same plan as now with another interval: only the interval stays booked
   r := billing.downgrade(a, 'family', null, '{}', pg_temp.t(6), p_interval => 'year');
   perform pg_temp.ok('P10b undo keeps the yearly switch', r->>'next_plan' = 'family' and r->>'next_interval' = 'year');
 end $$;

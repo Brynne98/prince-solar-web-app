@@ -580,7 +580,7 @@ export function mail(m: MailInput): Mail | null {
     case "receipt": {
       const b = m.bill; if (!b) return null;
       const rows: [string, string][] = [
-        ["For", `${b.plan_name}, ${b.kind === "upgrade" && !b.starts_now ? "the days left" : b.interval === "year" ? "yearly" : "monthly"}${b.period_start && b.period_end ? `, ${day(s, b.period_start)} to ${day(s, b.period_end)}` : ""}`]];
+        ["For", `${b.plan_name}, ${b.kind === "upgrade" && !b.starts_now ? "the days left" : b.interval === "year" ? "yearly" : "monthly"}${b.period_start && b.period_end ? `, ${day(s, b.kind === "upgrade" && !b.starts_now && b.paid_at ? b.paid_at : b.period_start)} to ${day(s, b.period_end)}` : ""}`]];
       const c = card(b.card_type, b.last4); if (c) rows.push(["Card", c]);
       if (b.reference) rows.push(["Reference", b.reference]);
       if (b.period_end) rows.push(["Next payment", `${$(b.next_amount_minor, b.currency)} on ${day(s, b.period_end)}`]);

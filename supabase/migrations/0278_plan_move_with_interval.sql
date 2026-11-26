@@ -10,9 +10,10 @@
 --     the month, and there is no credit balance to keep it in.
 --   smaller plan: plan and interval booked together for the billing date, nothing to pay
 --
--- upgrade and downgrade take p_interval last (default null: the plan's own interval), so every
--- existing call keeps its meaning. quote and upgrade share upgrade_due, so the review and the
--- bill are one sum.
+-- upgrade and downgrade take p_interval last (default null: as before, a booked switch carries
+-- over), so every existing call keeps its meaning. A given interval wins over a switch booked
+-- earlier: the review promised it (review, Astra, Sol, Fable). quote and upgrade share
+-- upgrade_due, so the review and the bill are one sum; a bill is reused only at that sum.
 
 -- a bigger plan bought now that turns monthly at the billing date
 alter table billing.invoices add column next_interval text check (next_interval in ('month', 'year'));
@@ -85,18 +86,21 @@ begin
     raise exception 'that is not more places' using errcode = '22023';
   end if;
 
-  iv := case when p_interval = 'year' and s.interval = 'month' then 'year' else s.interval end;
-  nxt := case when p_interval = 'month' and s.interval = 'year' then 'month' end;
+  -- another plan monthly to yearly: the year now. Otherwise the plan's interval now, and a given
+  -- interval from the billing date (it replaces a switch booked earlier)
+  iv := case when p_interval = 'year' and s.interval = 'month' and p_plan <> s.plan then 'year' else s.interval end;
+  nxt := case when iv = s.interval then p_interval end;
   pr := billing.price_keeping_offer(p_plan, a.market, iv, s.offer, p_at);
   new_amt := pr.amount_minor + extras * pr.extra_place_minor;
   due := billing.upgrade_due(s, m, new_amt, iv, p_at);
   want := billing.final_choice(p_account, p_plants, pl.places + extras + billing.grant_places(p_account, p_at));
 
-  -- the same upgrade again (the card page closed, tried again): the same bill
+  -- the same upgrade again (the card page closed, tried again): the same bill, while its sum is
+  -- still today's (a day later the days left are fewer: a new bill at the new sum)
   select * into inv from billing.invoices
    where subscription = s.id and kind = 'upgrade' and status = 'open' and plan = p_plan and extra_places = extras
      and plants = want and expected_version = a.version and period_start = s.period_start
-     and interval = iv and next_interval is not distinct from nxt
+     and interval = iv and next_interval is not distinct from nxt and amount_minor = due
    order by created_at desc limit 1;
   if inv.id is not null then return billing.invoice_out(inv) || jsonb_build_object('applied', false); end if;
   if billing.payment_in_flight(p_account) then
@@ -135,8 +139,9 @@ begin
 end $$;
 revoke all on function billing.upgrade(uuid, text, int, bigint[], timestamptz, text, text) from public, anon, authenticated;
 
--- apply_upgrade: a bill that turns monthly at the billing date books that, on the new plan.
--- The interval change now (a bill with another interval) was there since 0245.
+-- apply_upgrade: a bill with an interval from the billing date (next_interval) books that on the
+-- new plan, or clears a switch booked earlier when it is the running interval. The interval
+-- change now (a bill with another interval) was there since 0245.
 do $$
 declare
   d text := pg_get_functiondef('billing.apply_upgrade(billing.invoices, timestamptz)'::regprocedure);
@@ -145,10 +150,12 @@ declare
 $o$;
 begin
   if position(old in d) = 0 then raise exception 'apply_upgrade changed since 0245: edit it by hand'; end if;
-  d := replace(d, old, $n$  -- a yearly plan moved to a bigger plan, monthly from the billing date (0278)
+  d := replace(d, old, $n$  -- the interval the move was made at, from the billing date (0278): it wins over a switch
+  -- booked earlier
   if p_inv.next_interval is not null and p_inv.interval = s.interval then
     update billing.subscriptions
-       set next_price = (billing.price_keeping_offer(p_inv.plan, a.market, p_inv.next_interval, s.offer, p_at)).id
+       set next_price = case when p_inv.next_interval <> s.interval
+                             then (billing.price_keeping_offer(p_inv.plan, a.market, p_inv.next_interval, s.offer, p_at)).id end
      where id = s.id;
   end if;
   -- another interval now: an old monthly-to-yearly charge (copy_from_old) pays the same plan a
@@ -259,6 +266,8 @@ begin
   select * into pl from billing.plans where code = p_plan;
   if not found then raise exception 'no such plan' using errcode = '22023'; end if;
   if st.sub is null then
+    -- a first plan is monthly unless asked (api_plan_quote passes null through since 0278)
+    p_interval := coalesce(p_interval, 'month');
     pr := billing.price_shown(p_account, p_plan, p_interval, p_at);
     return jsonb_build_object('kind', 'purchase', 'plan', p_plan, 'plan_name', pl.name, 'places', pl.places,
       'interval', p_interval, 'due_minor', pr.amount_minor, 'next_amount_minor', pr.amount_minor,
@@ -268,8 +277,8 @@ begin
   s := billing.live_sub(p_account);
   cur_places := (select places from billing.plans where code = s.plan) + s.extra_places;
   if pl.places > cur_places then
-    iv := case when p_interval = 'year' and s.interval = 'month' then 'year' else s.interval end;
-    nxt := case when p_interval = 'month' and s.interval = 'year' then 'month' end;
+    iv := case when p_interval = 'year' and s.interval = 'month' and p_plan <> s.plan then 'year' else s.interval end;
+    nxt := case when iv = s.interval then p_interval end;
     pr := billing.price_keeping_offer(p_plan, a.market, iv, s.offer, p_at);
     if nxt is not null then npr := billing.price_keeping_offer(p_plan, a.market, nxt, s.offer, p_at); end if;
     due := billing.upgrade_due(s, m, pr.amount_minor, iv, p_at);
@@ -287,6 +296,29 @@ begin
     'plan', p_plan, 'plan_name', pl.name, 'places', pl.places, 'interval', pr.interval, 'due_minor', 0,
     'next_amount_minor', pr.amount_minor, 'next_at', s.period_end, 'currency', s.currency, 'offer', pr.offer,
     'drop', greatest(st.chosen - pl.places - billing.grant_places(p_account, p_at), 0));
+end $$;
+
+-- a running plan's quote without an interval is its own interval, not monthly (review, Astra)
+create or replace function public.api_plan_quote(p_plan text, p_interval text default null)
+returns jsonb language plpgsql stable security definer set search_path = billing, pg_temp as $$
+declare acc uuid := billing.account_of(auth.uid(), false);
+begin
+  if acc is null then raise exception 'sign in first' using errcode = '42501'; end if;
+  return billing.quote(acc, p_plan, p_interval);
+end $$;
+
+-- record_dispute: the bill is read again under the account's lock, so a payment applied while
+-- the dispute waited (an upgrade moves its bill to the new year) is seen (review, Sol)
+do $$
+declare
+  d text := pg_get_functiondef('billing.record_dispute(text, text, text, boolean, int, timestamptz, text)'::regprocedure);
+  old text := $o$  if inv.account is not null then perform billing.lock_account(inv.account); end if;
+$o$;
+begin
+  if position(old in d) = 0 then raise exception 'record_dispute changed since 0245: edit it by hand'; end if;
+  d := replace(d, old, old || $n$  select * into inv from billing.invoices where id = att.invoice;
+$n$);
+  execute d;
 end $$;
 
 -- billing_v2: the pay and change calls pass the interval the pop-up showed

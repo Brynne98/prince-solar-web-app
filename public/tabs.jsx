@@ -2321,7 +2321,8 @@ function PlanSection({ acct, onPlans }) {
   const undo = async () => {
     setBusy(true);
     const ok = await window.bookChange(acct.cancel_at ? { action: 'undo_cancel' }
-      : acct.next_plan && acct.next_plan !== acct.plan ? { action: 'downgrade', plan: acct.plan, drop: [] }
+      // the plan and the interval booked with it are undone together (SOLAR-675)
+      : acct.next_plan && acct.next_plan !== acct.plan ? { action: 'downgrade', plan: acct.plan, drop: [], period: acct.interval }
       : { action: 'interval', period: acct.interval }, { name: 'plan_change_undone', props: { plan: acct.plan } });
     setBusy(false);
     if (ok) window.toast(AT.pay.undone);
