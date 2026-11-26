@@ -1,6 +1,6 @@
 # Rework step 2: logins, plants and reading
 
-SOLAR-681, part of SOLAR-678. Draft 2 2026-11-26, not signed. Reviewed by Sol and Neon
+SOLAR-681, part of SOLAR-678. Signed by Brynne 2026-11-26: reader stays today's, proven at 500 logins; old plant ids kept. Reviewed by Sol and Neon
 (draft 1: both "rework"; their findings are fixed below). Hard calls by Fable and Astra.
 
 Owners see nothing new. After this step: one home for logins, one home for each login's
@@ -10,8 +10,7 @@ Facts from production (read only, 2026-11-26): 26 rows in `private.sunsynk_accou
 logins + the share login, which has no account), 25 in `billing.logins`; 33 in `plant_users`,
 33 in `billing.login_plants`; 23 plants, all brand `sunsynk`, every one with
 `id = external_id`, ids 495944..900006022. `plant_config.timezone` holds 4 zones.
-`billing.markets.default_time_zone` exists. `pgmq` 1.5.1 is available, not installed.
-`private.poll_mode` was dropped in 0255:86.
+`billing.markets.default_time_zone` exists. `private.poll_mode` was dropped in 0255:86.
 
 Paths: `SF/` = `supabase/schemas/functions/`, `EF/` = `supabase/functions/`.
 
@@ -208,42 +207,30 @@ Each rule has the check that proves it. The step is done when every check passes
   *Check:* today's state tests pass; a save that arrives after `ends_at` with an old `p_at`
   writes 0 rows.
 
-**Reader host (choice 1 for Brynne)**
+**Reader host (decided 2026-11-26: today's reader, proven at 500 logins)**
 
-- **R21. If the queue is chosen: pgmq, short calls only.**
-  1. Each minute, cron sends one message per login (per batch of at most 10 plants for the
-     share login), delayed to its read second.
-  2. Every 5 s, cron posts `ceil(visible / 10)` consumer calls through pg_net, capped.
-  3. A consumer reads at most 10 messages, reads each login with a hard stop at 15 s, saves in
-     one batch and deletes its messages in the same transaction, then answers. No background
-     work after the answer.
-  4. Visibility is 30 s, above the consumer's hard stop. A killed call's messages come back and
-     are read again inside the 50 s deadline; past 50 s the minute is left for recover.
-  5. Fence: the save passes each message's `read_ct`; a save whose message was handed out
-     again since is refused. A slow first consumer cannot write over the second.
-  6. Token renewal takes a short lease per login (advisory try-lock, released before any HTTP
-     call; the token is re-read after it). No row lock is held across an HTTP call.
-  7. The drain loop (`drain(n)`) lives in `_shared`; the worker, if needed, runs the same loop
-     on the same queue.
+- **R21. The reader stays on Supabase:** today's edge shards, posted each minute by pg_cron.
+  No paid host and no paid branch until there are paying customers. It is tuned (shard size,
+  dispatch spread, call cap, side jobs gone per R18) until it passes R22 at 500 logins.
   *Check:* R22.
-- **R22. Load test at 1,000 logins against the fake SunSynk** (`load-test/v3/`, production
-  timings): 30 minutes normal, a 2-hour soak, the slow run. Pass marks:
+- **R22. Load test at 500 logins against the fake SunSynk** (`load-test/v3/`, production
+  timings, the 500 shape): 30 minutes normal, then a 2-hour soak that includes the hourly plant
+  sync and the side jobs on their own minutes. Pass marks:
 
   | Measure | Pass |
   |---|---|
-  | Plant-minutes lost, not caused by SunSynk | 0.1% or less, no minute over 1% |
-  | Read second to saved | p95 15 s or less, p99 40 s or less |
-  | SunSynk calls per inverter reading | 4.5 or less (today 4.3) |
-  | Overlapping reads of one login, forced reconnects | 0 |
-  | Rows written after `ends_at`, fenced saves written | 0 |
-  | Slow run (5% of calls 10-20 s, 5% 429) | lost 0.5% or less, p95 25 s or less |
+  | Plant-minutes missed (no `agg_minute` row once the minute is over) | 0 |
+  | Reading age | every plant-minute saved before that plant's page asks: its own second, 12-42 s past the minute (`public/app.jsx:1666-1674`, SOLAR-70) |
+  | Rows written after `ends_at` | 0 |
 
-  Decision point: the queue reader goes live only if every mark passes after at most one round
-  of fixes, inside a 3-day box. Any miss, or a backlog that grows, and the reader moves to the
-  always-on worker (SOLAR-663: Fly.io, Frankfurt, one active copy and a fenced standby) on the
-  same `drain` loop. A mode switch (`private.poll_mode`, recreated) keeps today's poller one
-  switch away until the new reader has run a week in production.
-  *Check:* numbers and the decision on this page and on SOLAR-681 before the switch.
+  Today, at 500 logins, the old way missed 2 plant-minutes in 7 minutes and saved at p95 5.6 s
+  (`poller-v3-design.md`, load test table). A read the fake fails (its 0.1% 504 tail) must be
+  retried inside the minute to count as not missed.
+
+  Worker trigger: the always-on worker (SOLAR-663) is built only when paying customers bring
+  the login count near the proven ceiling: 400 logins (80% of 500), or any production day with a
+  missed plant-minute not caused by SunSynk. `job-check` reports the login count each day.
+  *Check:* the numbers on this page and on SOLAR-681.
 
 **Same figures everywhere**
 
@@ -310,30 +297,27 @@ Each step ships on its own, on today's poller.
 4. R16, R17: brand strings and per-brand state, now that `plants.brands` exists.
 5. R18-R20: side jobs out of the reader, outcomes for every login, one lock order, save on the
    database clock.
-6. Reader host as chosen (R21-R22, or the worker).
+6. R21-R22: tune today's reader and run the 500-login load test until it passes.
 7. R23: figure functions; app and `notify` switched; tests.
 
 ## Size
 
-Large. About 3-4 weeks for steps 1-5 and 7. Step 6: the queue trial is boxed to 3 days; the
-worker adds about 1 week. About 60 SQL functions and 8 edge files change; the data is small
+Large. About 3-4 weeks. The worker is not in this step. About 60 SQL functions and 8 edge files change; the data is small
 (26 logins, 33 list rows, 23 plants).
 
 ## Costs
 
 | Item | Cost a month |
 |---|---|
-| Supabase Queues (pgmq) | $0 (extension in the current project) |
+| Reader | $0 (today's Supabase plan) |
 | Load test | $0 (local) |
-| Worker, if chosen or if the trial fails | about $5-15 at 1,000 logins (two small Fly.io machines; assumed, confirm before creating) |
-| Hosted trial on a Supabase branch, if chosen | about $10 for 3 days (assumed) |
+| Worker, later, at the R22 trigger | about $5-15 (two small Fly.io machines; assumed, confirm before creating) |
 
 ## Needs Brynne
 
-1. Sign rules R1-R26 once.
-2. Choice 1: reader host (queue trial, worker now, or today's poller for now).
-3. Choice 2: keep the 23 old plant ids, or give every plant a new id now.
-4. Each production release stays on his say-so.
+- Signed 2026-11-26 (rules R1-R26). Reader: today's, proven at 500 logins (choice D).
+  Plant ids: the 23 old ids kept, new ones from 1e12 (choice A).
+- Each production release stays on his say-so.
 
 ## Where reviewers disagree
 
@@ -341,15 +325,12 @@ worker adds about 1 week. About 60 SQL functions and 8 edge files change; the da
 |---|---|---|
 | Where new plant ids start | Fable: 1e12, a wrong id then finds nothing. Astra: one past the highest id; no range is safe from unknown brands, types do the job | 1e12 and the types |
 | Keep old ids | Fable: keep, but a full re-key is cheapest now (312 MB) and shows the bug class on day one. Astra: keep; the two-brand test finds the bug without a rewrite | Keep; re-key offered as choice 2 |
-| Queue trial | Astra: run it, short calls with re-delivery were never tested. Fable: run it boxed, but the council already said no edge-only shape holds. Neon: cut it; 25 logins, today's poller holds to ~500 | Choice 1 for Brynne |
-| Save-time pass mark | Fable: p95 15 s. Astra: 25 s | 15 s; 25 s for the slow run |
-| Calls per reading | Fable: 4.43. Astra: 4.75 | 4.5 |
+| Queue trial | Astra: run it, short calls with re-delivery were never tested. Fable: run it boxed, but the council already said no edge-only shape holds. Neon: cut it; 25 logins, today's poller holds to ~500 | Brynne: no trial; today's reader proven at 500 |
 | Same figures in this step | Neon: defer to step 4, mail has no new consumer yet. Sol: cut single-consumer wrappers | Kept for figures worked out in two or more places; `notify` moves now as it is touched anyway |
-| Fence in the worker | Fable: the queue's timeout may replace the lease. Astra, Sol: keep a fence | `read_ct` fence on the queue, lease fence in the worker |
 
 ## Case against
 
 Large, and owners see nothing new. Keeping the old plant ids means two kinds of id for good,
 and a missed vendor-id lookup works on every live plant; R12 and R14 are the only guard. The
-same holds for inverter serials (R13). The queue trial may cost 3 days to learn what the
-council expected.
+same holds for inverter serials (R13). Today's reader is proven only to 500 logins; at
+the trigger, the worker must be built before more customers come.
