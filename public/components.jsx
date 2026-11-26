@@ -161,10 +161,11 @@ const Meter = ({ pct, color }) => (
 );
 
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
-function StatTile({ label, value, unit, accent, sub, bar, loading }) {
+// info: a (?) beside the label; the whole label opens it, as on MiniStat (SOLAR-348)
+function StatTile({ label, value, unit, accent, sub, bar, loading, info }) {
   return (
     <Card className="stat-tile">
-      <div className="stat-label">{label}</div>
+      <div className="stat-label">{info ? <Tip className="ml-text" text={info}>{label}<InfoDot bare /></Tip> : label}</div>
       {/* The placeholder is sized in the number's own font, so it is 44px on a desktop
           and 34px on a phone, like the number that replaces it. */}
       {loading

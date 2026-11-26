@@ -350,27 +350,10 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
   // consistent with the number AND moves on every refresh; "previous" comes from
   // the compare endpoint (same elapsed slice of the prior period).
-  // The compare endpoint pairs each finished day of the current slice with its
-  // counterpart in the previous period and sums only the pairs where both days have a
-  // record (0037). So for Week/Month/Year the current side must be that paired sum
-  // too, not the live tile total, or a plant logging since mid-year would compare a
-  // full slice against a few matched days. Today joins that sum as one more pair when
-  // its counterpart has a reading at the same time (`now`, 0078): today's live figures
-  // on this side, the counterpart up to the same time on the other.
-  const rawRow = (cmp && cmp[period]) ? cmp[period] : null;
-  const plus = (x, y) => ({ pv: x.pv + y.pv, load: x.load + y.load, imp: x.imp + y.imp });
-  const liveToday = { pv: a.pvToday || 0, load: a.loadToday || 0, imp: hasGrid ? (a.gridFromToday || 0) : 0 };
-  // An inverter offline: today's figures miss its share while the other day has it, so
-  // today is not compared at all; Week, Month and Year keep their finished days (SOLAR-561)
+  // Week/Month/Year: the paired sums with today as one more pair (pairToday), the same
+  // row the Solar, Home and Grid tabs' arrows use (SOLAR-675)
   const invOff = (snap.inverters || []).some(i => i.status !== 'online');
-  const now = rawRow && !invOff ? rawRow.now : null;
-  // today is in the slice either way; it counts as compared only with a counterpart
-  const cmpRow = (!rawRow || period === 'today') ? rawRow : {
-    cur: now ? plus(rawRow.cur, liveToday) : rawRow.cur,
-    prev: now ? plus(rawRow.prev, now) : rawRow.prev,
-    days: (rawRow.days || 0) + (now ? 1 : 0),
-    span: (rawRow.span || 0) + 1,
-  };
+  const cmpRow = pairToday(cmp, period, snap);
   const cmpDays = cmpRow ? (cmpRow.days || 0) : 0;
   // one compared day is enough: the arrow should always show (Brynne, 2026-10-06)
   const useLive = period === 'today';
@@ -578,6 +561,13 @@ function periodTotals(key, now, energy, today) {
 // does not fall. The day comes from the earliest daily row when it sits in that month
 // (daily rows reach back six months; monthly ones to the start of the plant).
 function lifetimeSince(rows, earliest, today) {
+  const ym = lifetimeStart(rows, today);
+  return ym && 'since ' + (earliest && earliest.startsWith(ym)
+    ? window.dayText(earliest, { day: 'numeric', month: 'short', year: 'numeric' })
+    : window.dayText(ym + '-01', { month: 'short', year: 'numeric' }));
+}
+// The first stored month with solar, as YYYY-MM: where this plant's history here starts.
+function lifetimeStart(rows, today) {
   if (!rows || !rows.length) return null;
   const years = new Array(rows.length);
   let y = Number(today.slice(0, 4));
@@ -587,11 +577,13 @@ function lifetimeSince(rows, earliest, today) {
     years[i] = y;
   }
   const i = rows.findIndex(r => (r.pv || 0) > 0);
-  if (i < 0) return null;
-  const ym = years[i] + '-' + rows[i].date;
-  return 'since ' + (earliest && earliest.startsWith(ym)
-    ? window.dayText(earliest, { day: 'numeric', month: 'short', year: 'numeric' })
-    : window.dayText(ym + '-01', { month: 'short', year: 'numeric' }));
+  return i < 0 ? null : years[i] + '-' + rows[i].date;
+}
+// The Lifetime tile's (?): the inverters' own totals (Equipment) count from their install,
+// so they can be larger (SOLAR-675).
+function lifetimeInfo(rows, today) {
+  const ym = lifetimeStart(rows, today);
+  return ym ? 'History here starts ' + window.dayText(ym + '-01', { month: 'short', year: 'numeric' }) + '. Each inverter’s total counts from its own install.' : null;
 }
 
 // The day's flows from its 5-minute points, worked out once so Solar, Home and Grid show the
@@ -622,8 +614,9 @@ function dayFlows(points) {
   return f;
 }
 const WIW_INFO = {
-  solar: 'Solar goes to the house first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
-  home: 'The house uses solar first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
+  // the inverters' own use is the gap to the Home, Solar and battery figures (SOLAR-675)
+  solar: 'Solar goes to the house first, then the battery, then the grid. The inverters use some energy themselves, so this can differ from Home and the battery figures.',
+  home: 'The house uses solar first, then the battery, then the grid. The inverters use some energy themselves, so this can differ from Solar and the battery figures.',
   grid: 'Imported power goes to the house first, then the battery. Power sent out came from solar first, then the battery. Worked out from readings every 5 minutes, so it can come in a little under Today.',
 };
 // Where a day's energy went or came from (SOLAR-332): a hollow pie of its parts
@@ -677,10 +670,10 @@ const PAST_TODAY = ['THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'];
 // none: no reading yet, so a missing figure is a dash, not a load that never ends (SOLAR-623).
 // TODAY with no figure has no reading today yet: a dash too, not a shimmer all day (SOLAR-648).
 // The other periods are null only while their days load.
-const totalTile = (accent) => (label, v, sub, none) => {
+const totalTile = (accent) => (label, v, sub, none, info) => {
   const [n, u] = window.fmtEnergyParts(v);
   const noToday = v == null && label === 'TODAY';
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null && !none && !noToday}
+  return <StatTile label={label} info={info} value={n} unit={u} accent={accent} loading={v == null && !none && !noToday}
     sub={none && v == null ? WAITING : noToday ? 'No readings today' : PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
 };
 
@@ -1098,13 +1091,40 @@ const changePct = (c, p) => (p === 0 ? (c === 0 ? 0 : Infinity) : ((c - p) / p) 
 
 const titled = (title, word) => <>{title} · <span style={{ color: 'var(--text)' }}>{word}</span></>;
 
-// A week or month tile's trend, with the Live overview's pairing: matched days before today,
-// and at least `min` of them. Solar needs something last period to compare with. Grid import
+// A period's compare row as Live's overview and the Solar, Home and Grid tabs all use it
+// (SOLAR-675; the tabs compared finished days only and their arrows disagreed with Live's).
+// The compare endpoint pairs each finished day of the current slice with its counterpart in
+// the previous period and sums only the pairs where both days have a record (0037). So the
+// current side is that paired sum too, not the tile total, or a plant logging since mid-year
+// would compare a full slice against a few matched days. Today joins that sum as one more
+// pair when its counterpart has a reading at the same time (`now`, 0078): today's live
+// figures on this side, the counterpart up to the same time on the other. An inverter
+// offline: today's figures miss its share while the other day has it, so today is not
+// compared at all; the finished days stay (SOLAR-561). Today's own row passes as it is.
+function pairToday(cmp, period, snap) {
+  const raw = (cmp && cmp[period]) || null;
+  if (!raw || period === 'today') return raw;
+  const a = snap.aggregate;
+  const grid = (snap.features || {}).hasGrid !== false;
+  const live = { pv: a.pvToday || 0, load: a.loadToday || 0, imp: grid ? (a.gridFromToday || 0) : 0 };
+  const off = (snap.inverters || []).some(i => i.status !== 'online');
+  const now = off ? null : raw.now;
+  const plus = (x, y) => ({ pv: x.pv + y.pv, load: x.load + y.load, imp: x.imp + y.imp });
+  // today is in the slice either way; it counts as compared only with a counterpart
+  return {
+    cur: now ? plus(raw.cur, live) : raw.cur,
+    prev: now ? plus(raw.prev, now) : raw.prev,
+    days: (raw.days || 0) + (now ? 1 : 0),
+    span: (raw.span || 0) + 1,
+  };
+}
+
+// A week or month tile's trend, from the same paired row as Live's (pairToday): one compared
+// day is enough, as on Live. Solar needs something last period to compare with. Grid import
 // (invert: less is better) often really is zero, so a zero last period counts whenever that
 // period logged anything at all; a rise from zero shows as kWh.
-function periodTrend(cmp, k, key, min, word, invert) {
-  const r = cmp && cmp[k];
-  if (!r || (r.days || 0) < min || r.cur[key] == null || r.prev[key] == null) return null;
+function periodTrend(r, key, word, invert) {
+  if (!r || !(r.days > 0) || r.cur[key] == null || r.prev[key] == null) return null;
   const c = r.cur[key], p = r.prev[key];
   const logged = (r.prev.pv || 0) > 0 || (r.prev.load || 0) > 0;
   if (!(p > 0) && !(invert && logged)) return null;
@@ -1161,7 +1181,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // Every tile keeps its second line, empty or not: the trends and the since-date land after
   // the totals, and a row whose tiles had none yet was 29px short until they did.
   const tile = totalTile(CC.pv);
-  const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
+  const trend = (k, word) => periodTrend(pairToday(cmp, k, snap), 'pv', word);
   const kwp = cfg.systemKwp;
   React.useEffect(() => { try { localStorage.setItem('synsynk.kwpSet', kwp > 0 ? '1' : '0'); } catch (e) {} }, [kwp]);
   const [nowN, nowU] = fmtPowerParts(a.pvNow);
@@ -1218,10 +1238,10 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
-        {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
-        {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
+        {tile('THIS WEEK', tot.week, trend('week', 'last week'))}
+        {tile('THIS MONTH', tot.month, trend('month', 'last month'))}
         {tile('THIS YEAR', tot.year)}
-        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday), false, lifetimeInfo(energy.lifetime, plantToday))}
       </div>
 
       <Card id="solar-day">
@@ -1296,7 +1316,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const tot = periodTotals('load', a.loadToday, energy, plantToday);
   const tile = totalTile(CC.load);
   // less used is better, as on Grid
-  const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
+  const trend = (k, word) => periodTrend(pairToday(cmp, k, snap), 'load', word, true);
   const [nowN, nowU] = fmtPowerParts(a.loadNow);
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
@@ -1333,10 +1353,10 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
         <StatTile label="HOME NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.load}
           sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
         {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
-        {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
-        {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
+        {tile('THIS WEEK', tot.week, trend('week', 'last week'))}
+        {tile('THIS MONTH', tot.month, trend('month', 'last month'))}
         {tile('THIS YEAR', tot.year)}
-        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday), false, lifetimeInfo(energy.lifetime, plantToday))}
       </div>
 
       <Card id="home-day">
@@ -1431,7 +1451,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // two-inverter plant reads nothing, so the inverters' own counters undercount.
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
   const tile = totalTile(CC.grid);
-  const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
+  const trend = (k, word) => periodTrend(pairToday(cmp, k, snap), 'imp', word, true);
   // Any power out is exporting, as Live's Grid box says (no deadband, 2026-11-07; SOLAR-628)
   const exporting = a.gridPower < 0;
   // signed as the chart is: + bought, − exported
@@ -1508,10 +1528,10 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       <div className="solar-stats">
         <StatTile label="GRID NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.grid} sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
         {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
-        {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
-        {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
+        {tile('THIS WEEK', tot.week, trend('week', 'last week'))}
+        {tile('THIS MONTH', tot.month, trend('month', 'last month'))}
         {tile('THIS YEAR', tot.year)}
-        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday), false, lifetimeInfo(energy.lifetime, plantToday))}
       </div>
 
       <Card id="grid-day" className="grid-day">
@@ -1792,7 +1812,8 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const temps = Object.values(st.invT);
   const warm = temps.length ? temps.reduce((x, y) => (y.ac > x.ac ? y : x)) : null;
   const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
-  const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
+  // the house's use, as Live and Home show it; output_w also counts what goes to the grid (SOLAR-675)
+  const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.load || 0), 0);
   // no temperature yet today (it comes every six hours): the power to the house is the figure, not a dash (SOLAR-407)
   const outParts = !warm && !st.allQuiet && !st.ps.none ? fmtPowerParts(out) : null;
   const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
@@ -1992,7 +2013,7 @@ function EqInvertersCard({ st, now }) {
   const rows = [
     ['State', invs.map(inv => st.ps.none ? { v: 'No reading yet' } : down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
       : { v: 'On', sub: 'Read ' + eqReadAt(inv, now) })],
-    ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
+    ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.load) }))],
     ['Temperature', invs.map(inv => {
       const t = st.invT[inv.sn];
       if (!t) return { v: '—' };
