@@ -1,4 +1,4 @@
--- The day's peak (SOLAR-676, 0277): the top minute from agg_minute, not the top 5-minute
+-- The day's peak (SOLAR-676, 0278): the top minute from agg_minute, not the top 5-minute
 -- average; a bucket with no minute rows uses agg_5m's max for it. Ties go to the earliest.
 -- Needs the local database at the latest migration. Runs in one transaction, rolled back.
 -- Exit code decides: any wrong case raises.

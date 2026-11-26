@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0277 — the day's peak is the top minute, not the top 5-minute average. (SOLAR-676)
+-- 0278 — the day's peak is the top minute, not the top 5-minute average. (SOLAR-676)
 --
 -- Solar, Home and Grid showed "Peak" from the day series, which is 5-minute averages:
 -- Tshigabe 2026-11-25 read 9.37 kW at 08:50 while the minutes peaked at 11.58 kW at 14:02.
