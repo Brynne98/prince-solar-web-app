@@ -701,6 +701,9 @@ export type Database = {
 "local_ts_tz":
 { Args: { "ts": number,"tz": string }; Returns: string
                            },
+"mail_block":
+{ Args: { "p_detail"?: string,"p_emails": (string)[],"p_reason": string }; Returns: number
+                           },
 "meta_upsert":
 { Args: { "p_rows": Json }; Returns: undefined
                            },

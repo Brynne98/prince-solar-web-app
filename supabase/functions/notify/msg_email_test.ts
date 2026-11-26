@@ -12,7 +12,7 @@ const row = (id: number, over: Partial<MsgEmail> = {}): MsgEmail => ({
   plant_name: "Home", tz: "Africa/Johannesburg", kind: "grid_down", key: `k${id}`, data: { since: 1_700_000_000 }, ...over,
 });
 const mail: Email = { subject: "s", html: "<p>h</p>", text: "t" } as Email;
-type Ans = { status: number; error?: string; retryAfter?: string | null };
+type Ans = { status: number; error?: string; retryAfter?: string | null; rate?: { remaining: number; resetS: number } };
 type Make = (r: { kind: string; id: number }) => Promise<Email | null>;
 
 /** One take of `rows`, then an empty one. Resend answers from `answers` by key. Records every
@@ -131,6 +131,20 @@ Deno.test("the RPC missing (functions out before the migration): noted, not fata
   const c = await msgEmailPass(Date.now() + 1000, Date.now() + 1000,
     () => Promise.reject(new Error("msg_email_take: Could not find the function public.msg_email_take(p_lane, p_limit) in the schema cache")));
   assertEquals((c as { missing?: boolean }).missing, true);
+});
+
+// SOLAR-679 F14: the gap comes from each reply's rate-limit headers, not a fixed 550 ms.
+// Five rows alone (feedback), calls left in the window: no wait between them, not 4 x 550 ms.
+Deno.test("the pace follows the reply's rate-limit headers", loose, async () => {
+  const rows = [41, 42, 43, 44, 45].map((id) => row(id, { kind: "feedback" }));
+  const rate = { remaining: 50, resetS: 1 };
+  const f = fake(rows, Object.fromEntries(rows.map((r) => [`ms-${r.id}`, { status: 200, rate }])));
+  const t0 = Date.now();
+  const c = await f.run();
+  assertEquals(c.sent, 5);
+  // the first call may wait out the gap an earlier test left (up to 550 ms)
+  const took = Date.now() - t0;
+  if (took > 1200) throw new Error(`5 calls took ${took} ms`);
 });
 
 // last: a 429 holds the shared pace for its Retry-After

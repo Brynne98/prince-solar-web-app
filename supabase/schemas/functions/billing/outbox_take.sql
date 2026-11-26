@@ -36,6 +36,11 @@ begin
       update billing.outbox set status = 'dropped', drop_reason = 'no email', claimed_until = null where id = o.id;
       continue;
     end if;
+    -- 0281 (SOLAR-679 F13): bounced for good or marked as spam; never sent, so never tried again
+    if private.mail_blocked(u.email) then
+      update billing.outbox set status = 'dropped', drop_reason = 'address blocked', claimed_until = null where id = o.id;
+      continue;
+    end if;
     inv := null; att := null; pm := null;
     if o.invoice is not null then
       select * into inv from billing.invoices where id = o.invoice;

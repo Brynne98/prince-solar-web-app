@@ -163,6 +163,20 @@ onto today; that must stay local.
 
 ---
 
+## Bounce webhook (SOLAR-679 F13)
+
+Mail to an address that bounced for good, was marked as spam or is on Resend's block list is
+dropped ("address blocked", 0281). Resend tells us through `resend-webhook`. Set up once, after
+0281 is pushed:
+
+1. `supabase functions deploy resend-webhook` (verify_jwt is off in `config.toml`).
+2. Resend → Webhooks → Add: URL `https://pmakzojwhouamawgszrc.supabase.co/functions/v1/resend-webhook`,
+   events `email.bounced`, `email.complained`, `email.suppressed`.
+3. Copy its signing secret (`whsec_...`) and `supabase secrets set RESEND_WEBHOOK_SECRET=<it>`
+   (paste it yourself). Without it every call gets 503 and Resend retries for a day.
+
+Let an address through again: `delete from private.mail_blocked where email = '<lower case>'`.
+
 ## Going live
 
 Until the Paystack account is verified, production runs on the test key: only the
