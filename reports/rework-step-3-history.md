@@ -1,7 +1,9 @@
 # Rework step 3: history
 
-SOLAR-686, part of SOLAR-678. Draft 2, 2026-11-27. Not signed. Reviewed by Sol and Neon
-(draft 1: both "rework"; their findings are taken below).
+SOLAR-686, part of SOLAR-678. Signed by Brynne 2026-11-27: rules H1-H26; choice 1A (progress
+on link, switch back and restart; mail once per plant and account); choice 2A (fleet cap on
+import calls, a setting, start 600, set by the load test). Reviewed by Sol and Neon (draft 1:
+both "rework"; their findings are taken below).
 
 Owners see one change: a switch back or a restart also shows "Fetching history" and its
 progress, not only a first link (choice 1). After this step: one engine fetches every past
@@ -358,6 +360,9 @@ move is tiny (22 bookmarks); the tables around it are not (1.2 GB).
 | Load proof, rehearsal | $0 (local) |
 
 ## Needs Brynne
+
+Signed 2026-11-27: H1-H26, choice 1A, choice 2A. The options as signed:
+
 
 1. **Which imports show "Fetching history" and send the "history ready" mail?**
    - **A (recommended; Sol and Neon agree).** A link, switch back or restart shows progress.
