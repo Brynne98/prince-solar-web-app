@@ -400,3 +400,64 @@ parents' plant already cannot minute-backfill (its 15-string inverter's 504), an
 can break what works for the others. Holding today's pacing, claims and gates exactly makes
 the new queue nearly as detailed as the old one; the gain is one place, not less logic. The
 load proof is local against a fake; SunSynk's real limit for many logins is not known.
+
+## Built (2026-11-27)
+
+Branch `solar-686-history`. One migration, `0284_history_engine.sql`: schema `history`, the
+queue, the callers switched, the copy and its compare, the old engines' functions dropped.
+Edge function `history` replaces `recover` and `sync-plant-energy`. Nothing released yet.
+
+| Rule | Done | Proof |
+|---|---|---|
+| H1, H2 | Minutes and extras in `history.days`, kWh totals in `history.totals`, one edge function | old functions, cron jobs and cursors gone; billing checks RQ18, H1 |
+| H3, H4 | One import per plant, accounts on it, the fastest pace wins, today's pacing kept | billing checks R4, R5, RQ16, H3 |
+| H5 | Newest first, 60 days a setting (`HISTORY_DAYS`) | H5 checks |
+| H6-H8 | Claims, retries, waits; Billing gates at queue, hand-out and write | RQ14, RQ15, H7, H8 checks; a trial over keeps the import |
+| H9 | Per-login 429 mark from the reader, fleet cap per group of 25 logins, real calls counted | H9 checks; load runs below |
+| H10 | Clean-up; `job-check` alerts when the queue stops (`history-queue`) | H10 checks |
+| H11-H13 | Holes queued per local day, 6-hourly check, live edge, feed fallback; temperatures and grid Hz; 31-day trim | H11, H12 checks; local link of a fake plant: 60 days, totals and mail in 15 s |
+| H14, H15 | Owners in `owners.json`; no other writer of History's tables | `npm test` (owners-check) |
+| H16, H17 | Screens read `history.progress`; "history ready" from `history.imports`, once per plant and account (1A) | H16, H17 checks; `npm test` |
+| H18, H19 | `BrandHistory` contract, jobs carry the brand's id | `brands/contract_test.ts` |
+| H20 | A local day is 23, 24 or 25 h; the repeated hour kept apart | `localtime_test.ts`; H20 checks (1,500 and 1,380 minutes, London) |
+| H21 | Writes give up a lock after 1 s; one lock order | `history-race-test.mjs`: 100 saves beside imports, slowest 28 ms; 50 day-ends beside switch-outs; 0 deadlocks |
+| H22 | Imported day against reader minutes | `history/compare_test.ts` |
+| H23 | New, copy, compare, switch; way back | rehearsal below |
+| H24 | Old code gone | old names 0 outside migrations (columns and tables: SOLAR-693) |
+| H25 | No browser access to `history.*` | H25 checks |
+| H26 | 500 logins importing while the reader runs | load runs below |
+
+**Load runs, 500 logins, fake SunSynk at production timings (local):**
+
+| Run | Plant-minutes | Missed | Saved > 5 s after the page asked | Import calls a minute | Rows after a switch-out or delete |
+|---|---|---|---|---|---|
+| Reader only, 30 min | 14,000 | 0 | 71 (0.51%) | - | - |
+| Cap 600, 30 min | 13,720 | 0 | 25 (0.18%) | 902 (before the last budget fix) | 0 |
+| Cap 1,500, 30 min | 13,720 | 0 | 191 (1.38%) | 2,143 | 0 |
+| Cap 600, final code, 15 min | 6,370 | 0 | 18 (0.28%) | 670 | 0 |
+
+One plant alone: last 14 days in 1.6 min, all 60 in 8.2 min (pass marks 5 and 30). At cap 600 the
+queue does about 128 import days a minute: 500 new plants at once take about 8 hours. At 1,500 the
+reader's late saves rose almost threefold, so the cap stays at 600 (choice 2A: the load test sets it).
+
+**Rehearsal on a full production copy** (`scripts/rehearse-history.sh`; production read only; no
+tokens, Vault, cards, mail or push keys; emails and usernames masked; the dump deleted after):
+309 MB, 94,878 minute rows, 150,400 inverter rows, production's own partitions. 0284 ran in 0.1 s,
+compare 0; a stand-in reader saved every 2 s through it, 60 saves, 0 failed, longest 102 ms. The
+way back ran with open work in the copy (2 first loads, 1 paced switch): schema `history` gone,
+bookmarks and the fetch back, old jobs back. 0284 then applied again, compare 0.
+
+**Reviews:** Sol and Neon reviewed the build twice. First pass: both rework / fix then ship (27
+findings); second pass: both fix then ship; every must-fix taken. Accepted, not built:
+- The release checks the old engines' last calls by time; a link across the release can leave an
+  old bookmark. DEPLOY.md's catch-up query asks History for it.
+- The fleet cap is met by reservation; retries and the feed are counted after (measured 670 a
+  minute at 600).
+- A first load running beside a paced switch fetch goes at full speed (as before).
+- The way back can walk days again that are done; they have no missing minutes, so no calls.
+- History's cron calls fail for a minute or two between the migration and the functions deploy;
+  they write nothing.
+
+**Left open, each with its ticket:**
+- Drop the old columns, tables and the two old edge functions one release later: SOLAR-693.
+- `poll_jobs_v2` still returns the old bookmark columns (the reader's; after SOLAR-690).
