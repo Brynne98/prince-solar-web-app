@@ -472,7 +472,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   // A past day can be empty for three reasons; say which (0048).
   const sync = plantNow.sync;
   const emptyMsg = invs == null ? '' : isToday
-    ? 'Today’s readings arrive every six hours.'
+    ? 'Today’s readings arrive every 10 minutes.'
     : sync && sync.fetching && sync.extrasTo && date >= sync.floor && date <= sync.extrasTo ? 'Not fetched yet.'
       : date < earliest ? 'Older than 60 days, so not available.'
       : 'No readings for this day.';

@@ -39,7 +39,7 @@ create table history.imports (
   stop_reason   text
 );
 create unique index imports_one_open on history.imports (plant) where status = 'open';
-create index imports_lane on history.imports (lane) where status = 'open';
+create index imports_lane on history.imports (lane, started_at);
 
 create table history.import_accounts (
   import        bigint not null references history.imports (id) on delete cascade,
@@ -140,16 +140,23 @@ create function history.cost(p_kind text, p_plant bigint, p_grid_only boolean, p
          end
 $$;
 
--- does the plant hold a day's temperatures already (an import after a switch back skips it): most
--- of the day's samples, with both temperatures (the web host's day carries AC only)
+-- does the plant hold a day's temperatures already (an import after a switch back skips it): for
+-- every inverter, most of the day's samples with both temperatures (the web host's day carries
+-- AC only); read along each serial's key
 create function history.has_extras(p_plant bigint, p_day date) returns boolean
   language sql stable security definer set search_path to '' as $$
   with b as (select public.day_start_epoch_tz(p_day, plants.tz(p_plant)) lo,
-                    public.day_start_epoch_tz(p_day + 1, plants.tz(p_plant)) hi)
-  select (select count(*) from public.inverter_history h, b
-           where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_c is not null and h.dc_c is not null) >= 100
-      or (select count(*) from public.inverter_history_5m h, b
-           where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_max is not null and h.dc_max is not null) >= 100
+                    public.day_start_epoch_tz(p_day + 1, plants.tz(p_plant)) hi),
+  inv as (select i.sn from plants.inverter_info i where i.plant_id = p_plant)
+  select exists (select 1 from inv)
+     and not exists (
+       select 1 from inv, b
+        where (select count(*) from public.inverter_history h
+                where h.plant_id = p_plant and h.sn = inv.sn and h.ts >= b.lo and h.ts < b.hi
+                  and h.ac_c is not null and h.dc_c is not null) < 100
+          and (select count(*) from public.inverter_history_5m h
+                where h.plant_id = p_plant and h.sn = inv.sn and h.ts >= b.lo and h.ts < b.hi
+                  and h.ac_max is not null and h.dc_max is not null) < 100)
 $$;
 
 -- the oldest minute History may fill for a plant: its first stored minute or its oldest import
@@ -207,6 +214,10 @@ begin
   on conflict (import, account) do update
      set reason = excluded.reason, pace_s = excluded.pace_s, fetch_no = excluded.fetch_no,
          requested_at = excluded.requested_at, left_at = null;
+  -- the fastest account on it sets the pace (H3): one at full speed brings the next step in now
+  if coalesce(p_pace_s, 0) = 0 then
+    update history.imports set next_at = least(next_at, p_at) where id = imp and started_at is not null;
+  end if;
   return imp;
 end $$;
 
@@ -277,7 +288,7 @@ begin
     continue when fl is null;
     for d in select today - g from generate_series(0, 13) g loop
       lo := greatest(public.day_start_epoch_tz(d, tz), (ceil(fl / 60.0) * 60)::bigint);
-      hi := least(public.day_start_epoch_tz(d + 1, tz), now_ts - 600);
+      hi := least(public.day_start_epoch_tz(d + 1, tz), ((now_ts - 600) / 60) * 60);
       continue when hi <= lo;
       select count(*) into have from public.agg_minute a
        where a.plant_id = p and a.ts >= lo and a.ts < hi and a.source <> 'poller_partial' and a.ts % 60 = 0;
@@ -382,19 +393,21 @@ begin
   -- its route was read at, so a route that changes before the write is refused (H8)
   create temp table if not exists _ht_route (plant bigint primary key, account uuid, lane uuid, version bigint) on commit drop;
   truncate _ht_route;
+  -- one route per plant first, then this group's logins: a plant two accounts read is in one group
   insert into _ht_route
-  select distinct on (rr.plant) rr.plant, rr.account, rr.lane, p.version
-    from billing.reading_routes(p_at) rr
-    join plants.login_info l on l.id = rr.lane and l.status = 'ok'
-    join plants.plant_info p on p.id = rr.plant
-   where abs(hashtext(rr.lane::text)) % p_shards = p_shard
-     and not plants.throttled(rr.lane, p_at - interval '2 minutes')
-     and not exists (select 1 from history.lanes hl where hl.lane = rr.lane and hl.backoff_until > p_at)
-     and not private.history_deleting(rr.plant)
-   order by rr.plant,
-            exists (select 1 from history.import_accounts ia join history.imports i on i.id = ia.import
-                     where i.plant = rr.plant and i.status = 'open' and ia.left_at is null and ia.account = rr.account) desc,
-            rr.account;
+  select x.plant, x.account, x.lane, x.version from (
+    select distinct on (rr.plant) rr.plant, rr.account, rr.lane, p.version
+      from billing.reading_routes(p_at) rr
+      join plants.login_info l on l.id = rr.lane and l.status = 'ok'
+      join plants.plant_info p on p.id = rr.plant
+     where not private.history_deleting(rr.plant)
+     order by rr.plant,
+              exists (select 1 from history.import_accounts ia join history.imports i on i.id = ia.import
+                       where i.plant = rr.plant and i.status = 'open' and ia.left_at is null and ia.account = rr.account) desc,
+              rr.via_share, rr.since, rr.account, rr.lane) x
+   where abs(hashtext(x.lane::text)) % p_shards = p_shard
+     and not plants.throttled(x.lane, p_at - interval '2 minutes')
+     and not exists (select 1 from history.lanes hl where hl.lane = x.lane and hl.backoff_until > p_at);
 
   for ln in select distinct x.lane from _ht_route x order by 1 loop
     continue when exists (select 1 from history.days d where d.lane = ln and d.status = 'queued' and d.claimed_until > p_at)
@@ -556,6 +569,10 @@ begin
     update history.days set claim = null, claimed_until = null, note = coalesce(p_note, note),
                             due_at = p_at + case when p_result = 'wait' then interval '5 minutes' else interval '1 minute' end
      where id = p_id;
+    -- the plant waits, not just this day: its other days would meet the same answer
+    update history.imports set next_at = p_at + case when p_result = 'wait' then interval '5 minutes' else interval '1 minute' end
+     where id = d.import and status = 'open';
+    return jsonb_build_object('status', 'queued');
   elsif p_result = 'failed' and d.tries + 1 < 3 then
     -- an extras day that lost only the grid endpoint: the next try asks that one alone (H12)
     update history.days set claim = null, claimed_until = null, tries = tries + 1, note = p_note, due_at = p_at + interval '1 minute',
@@ -687,6 +704,8 @@ create function history.missing(p_id bigint, p_at timestamptz default now()) ret
   select g from b, generate_series(b.lo, b.hi - 60, 60) g
    where b.hi > b.lo and b.lo is not null
      and not exists (select 1 from public.agg_minute a where a.plant_id = b.plant and a.ts = g and a.source <> 'poller_partial')
+     -- past 31 days a minute lives in its five-minute row (agg_minute_rollup): held, not missing
+     and not exists (select 1 from public.agg_5m f where f.plant_id = b.plant and f.ts = g - g % 300)
    order by g
 $$;
 
@@ -745,14 +764,22 @@ create function history.ready(p_plant bigint) returns boolean
           and exists (select 1 from public.agg_minute a where a.plant_id = p_plant))
 $$;
 
--- job-check (H10): the oldest open day due for over 30 minutes
+-- job-check (H10): the queue has stopped, not just busy: work due for over 30 minutes on read
+-- plants and no step ended in the last 30 minutes (a big burst under the fleet cap is busy, not
+-- stuck; a slowed import is not due)
 create function history.stuck(p_at timestamptz default now()) returns jsonb
   language sql stable security definer set search_path to '' as $$
-  select jsonb_build_object('waiting', count(*), 'oldest_due', min(d.due_at))
-    from history.days d
-   where d.status = 'queued' and d.due_at < p_at - interval '30 minutes'
-     and (d.claimed_until is null or d.claimed_until <= p_at)
-     and d.plant in (select r.plant from billing.reading_routes(p_at) r)
+  with due as (
+    select d.plant from history.days d
+      left join history.imports i on i.id = d.import
+     where d.status = 'queued' and (d.claimed_until is null or d.claimed_until <= p_at)
+       and coalesce(i.next_at, d.due_at) < p_at - interval '30 minutes' and d.due_at < p_at - interval '30 minutes'
+       and d.plant in (select r.plant from billing.reading_routes(p_at) r))
+  select jsonb_build_object(
+    'waiting', (select count(*) from due),
+    'last_step_at', (select max(d.closed_at) from history.days d),
+    'stuck', exists (select 1 from due)
+             and coalesce((select max(d.closed_at) from history.days d), '-infinity') < p_at - interval '30 minutes')
 $$;
 
 -- the edge's door (PostgREST reaches public only); the server key only (H25)
@@ -1658,10 +1685,23 @@ begin
    where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy');
 end $function$;
 
+CREATE OR REPLACE FUNCTION plants.purge(p_plant bigint)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare n int; out jsonb := '{}';
+begin
+  perform history.stop(p_plant, 'deleted');                                -- SOLAR-686 H15
+  delete from public.plant_config   where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_config', n);
+  delete from public.config_changes where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('config_changes', n);
+  delete from private.meta          where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('meta', n);
+  delete from private.inverters     where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverters', n);
+  return out;
+end $function$;
+
 -- the old engines' functions (H24); the old tables and columns go next release (H23)
-drop trigger email_on_history on public.plant_config;
-drop function private.email_on_history();
-drop function private.history_done(public.plant_config);
 drop function public.plant_history_loading(bigint);
 drop function public.plant_bookmarks_clear(bigint[]);
 drop function private.first_load_continue();
@@ -1811,7 +1851,10 @@ do $$ begin
   end if;
 end $$;
 
--- last: this locks plants.logins until the commit, a moment from now
+-- last: these lock plant_config and plants.logins until the commit, a moment from now
+drop trigger email_on_history on public.plant_config;
+drop function private.email_on_history();
+drop function private.history_done(public.plant_config);
 alter table plants.logins add column throttled_at timestamptz;
 
 commit;
