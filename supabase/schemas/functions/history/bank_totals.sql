@@ -3,6 +3,8 @@ CREATE OR REPLACE FUNCTION history.bank_totals(p_id bigint, p_claim uuid, p_rows
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO ''
+ SET lock_timeout TO '1s'
+ SET statement_timeout TO '10s'
 AS $function$
 declare pl bigint := history.held('totals', p_id, p_claim, p_at); v bigint;
 begin

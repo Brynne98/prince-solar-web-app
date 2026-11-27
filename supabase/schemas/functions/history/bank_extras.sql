@@ -3,6 +3,8 @@ CREATE OR REPLACE FUNCTION history.bank_extras(p_step text, p_id bigint, p_claim
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO ''
+ SET lock_timeout TO '1s'
+ SET statement_timeout TO '10s'
 AS $function$
 declare pl bigint := history.held(p_step, p_id, p_claim, p_at); n int;
 begin

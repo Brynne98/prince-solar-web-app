@@ -727,6 +727,14 @@ create function history.totals_now(p_plant bigint) returns boolean
   returning true
 $$;
 
+-- H21: an import write never waits long on a lock the reader holds, and never runs long
+alter function history.bank_minutes(bigint, uuid, jsonb, text, timestamptz) set lock_timeout = '1s';
+alter function history.bank_minutes(bigint, uuid, jsonb, text, timestamptz) set statement_timeout = '10s';
+alter function history.bank_extras(text, bigint, uuid, text, jsonb, timestamptz) set lock_timeout = '1s';
+alter function history.bank_extras(text, bigint, uuid, text, jsonb, timestamptz) set statement_timeout = '10s';
+alter function history.bank_totals(bigint, uuid, jsonb, timestamptz) set lock_timeout = '1s';
+alter function history.bank_totals(bigint, uuid, jsonb, timestamptz) set statement_timeout = '10s';
+
 -- every history function: the server only (H25)
 revoke all on all functions in schema history from public, anon, authenticated;
 grant execute on all functions in schema history to service_role;
