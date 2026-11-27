@@ -5688,6 +5688,7 @@ declare
   moved int := 0;
   serials text[];
 begin
+  create temp table rekey (old_id bigint primary key, new_id bigint not null) on commit drop;
   for p in
     select pl.* from plants.plants pl
      where pl.brand = 'sunsynk'
@@ -5703,25 +5704,29 @@ begin
     insert into public.plant_config
     select (jsonb_populate_record(null::public.plant_config, to_jsonb(c) || jsonb_build_object('plant_id', n))).*
       from public.plant_config c where c.plant_id = p.id;
-    -- every table that keys on a plant: its rows move to the new id (partitioned tables by their parent)
-    for tc in
-      select cl.relnamespace::regnamespace::text as sch, cl.relname as tab, a.attname as col
-        from pg_attribute a join pg_class cl on cl.oid = a.attrelid
-       where a.attname in ('plant_id', 'plant') and a.atttypid = 'bigint'::regtype and not a.attisdropped
-         and cl.relkind in ('r', 'p') and not cl.relispartition
-         and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
-         and not (cl.relnamespace::regnamespace::text = 'plants' and cl.relname = 'plants')
-         and not (cl.relnamespace::regnamespace::text = 'public' and cl.relname = 'plant_config')
-    loop
-      execute format('update %I.%I set %I = $1 where %I = $2', tc.sch, tc.tab, tc.col, tc.col) using n, p.id;
-    end loop;
+    insert into pg_temp.rekey values (p.id, n);
     update public.app_config set value = n where key = 'CALIBRATION_PLANT' and value = p.id;
     update billing.invoices set plants = array_replace(plants, p.id, n) where p.id = any (plants);
     update billing.outbox set ref = n::text where ref = p.id::text;
-    delete from public.plant_config where plant_id = p.id;
-    delete from plants.plants where id = p.id;
     moved := moved + 1;
   end loop;
+
+  -- every table that keys on a plant: its rows move to the new id (partitioned tables by their
+  -- parent), one pass per table for all the plants (a pass per plant ran past production's 2 min)
+  for tc in
+    select cl.relnamespace::regnamespace::text as sch, cl.relname as tab, a.attname as col
+      from pg_attribute a join pg_class cl on cl.oid = a.attrelid
+     where a.attname in ('plant_id', 'plant') and a.atttypid = 'bigint'::regtype and not a.attisdropped
+       and cl.relkind in ('r', 'p') and not cl.relispartition
+       and cl.relnamespace::regnamespace::text in ('public', 'private', 'billing', 'msg', 'plants')
+       and not (cl.relnamespace::regnamespace::text = 'plants' and cl.relname = 'plants')
+       and not (cl.relnamespace::regnamespace::text = 'public' and cl.relname = 'plant_config')
+  loop
+    execute format('update %I.%I t set %I = k.new_id from pg_temp.rekey k where t.%I = k.old_id', tc.sch, tc.tab, tc.col, tc.col);
+  end loop;
+  delete from public.plant_config c using pg_temp.rekey k where c.plant_id = k.old_id;
+  delete from plants.plants pl using pg_temp.rekey k where pl.id = k.old_id;
+  drop table pg_temp.rekey;
 
   -- their inverters: mock:<serial>, wherever a mock plant's row holds one (by plant where the table
   -- has a plant, else by the serials those plants ever had)
