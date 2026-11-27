@@ -174,7 +174,8 @@ Each rule has the check that proves it. The step is done when every check passes
 
 - **H14. Day totals and best day are worked out once.** `history.days(plant, from, to)`
   gives each local day's kWh (solar, home, grid in, battery in and out), from
-  `plants.day_energy` (step 2 R23) for days we hold and `plant_energy` before that.
+  `public.span_figures` and `_plant_day_energy` (step 2 R23) for days we hold and
+  `plant_energy` before that.
   `history.best(plant, from, to, field)` gives the best day. Today best day is worked out
   in `public/tabs.jsx:917` and `EF/notify/index.ts:97`, day rows in both. App and mail call
   the same functions.
