@@ -1,5 +1,5 @@
-// deno test -A --node-modules-dir=none sync-plant-energy/grid_test.ts (SOLAR-522)
-import { gridScale } from "./index.ts";
+// deno test -A --node-modules-dir=none history/grid_test.ts (SOLAR-522)
+import { gridScale } from "./totals.ts";
 
 const eq = (a: unknown, b: unknown, what: string) => { if (a !== b) throw new Error(`${what}: ${a} !== ${b}`); };
 

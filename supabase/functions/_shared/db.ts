@@ -22,8 +22,6 @@ export type Db = {
   rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<T>;
   /** Which of these plants already have a plant_config row. Throws `plant_config: message`. */
   configuredPlants(ids: number[]): Promise<number[]>;
-  /** Drop the history bookmarks of plants that are not read. Throws the database's message. */
-  clearBookmarks(ids: number[]): Promise<void>;
 };
 
 // Reads the reader makes every minute: a gateway that answered 502/503/504 is asked once more,
@@ -44,10 +42,6 @@ export const postgrest: Db = {
     const { data, error } = await db.rpc("plants_configured", { p_plants: ids });
     if (error) throw new Error(`plants_configured: ${error.message}`);
     return (data ?? []).map((r: any) => Number(r));
-  },
-  async clearBookmarks(ids) {
-    const { error } = await db.rpc("plant_bookmarks_clear", { p_plants: ids });
-    if (error) throw new Error(String(error.message));
   },
 };
 

@@ -5,7 +5,7 @@ import { clearYesterday, dayTurned, fromPrev, TODAY_COUNTERS } from "../../../po
 import { extrasOf, extrasPaths, historyRows, parseSeries } from "./invhistory.ts";
 import { extractReading, type InverterInfo, num, type RawBundle, realtimePaths } from "./extract.ts";
 import { type Account, apiGet } from "./api.ts";
-import { dayStartEpoch, localDate } from "../../localtime.ts";
+import { dayClock, localDate } from "../../localtime.ts";
 
 // ---------------------------------------------------------------------------
 // Outage signal: does this reading look like the grid is gone?
@@ -64,7 +64,7 @@ export const OUTPUT_EVERY_S = 600;
 export async function todayTemps(inv: InverterInfo, acc: Account, tz: string): Promise<Record<string, unknown>[]> {
   const day = localDate(tz);
   const out = await apiGet(extrasPaths(inv.sn, day).output, acc);
-  return historyRows(extrasOf(parseSeries(out), undefined), dayStartEpoch(tz, day));
+  return historyRows(extrasOf(parseSeries(out), undefined), dayClock(tz, day));
 }
 
 export type Endpoint = "battery" | "grid" | "load" | "output";

@@ -317,6 +317,13 @@ export const watchCalls = (f: typeof onCall) => { onCall = f; };
 // the rate limit is per login (2026-11-10).
 const backoffUntil = new Map<string, number>();
 
+/** A 429 that outlasted the retries: counted, and marked on the login, so History gives the
+ *  login no import step for 2 minutes while the reader catches up (SOLAR-686 H9). */
+function noteThrottled(acc: Account) {
+  throttledCounts.set(acc.id, (throttledCounts.get(acc.id) ?? 0) + 1);
+  rpc("login_throttled", { p_login: acc.id }).catch(() => {});
+}
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const share = isShareAccount(acc);
@@ -378,7 +385,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
     res = await doFetch();
   }
   if (throttled(res)) {
-    throttledCounts.set(acc.id, (throttledCounts.get(acc.id) ?? 0) + 1);
+    noteThrottled(acc);
     const e = new VendorError("rate", `API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
     sunsynkFailed(acc.username, pathname, resultOf(res), e);
     throw e;
@@ -407,6 +414,8 @@ export async function webGet(pathname: string, acc: Account): Promise<any> {
   countCall(acc);
   const share = isShareAccount(acc);
   const kind = `web:${pathname}`;
+  // the web host's calls wait out the login's back-off too (SOLAR-686 H9)
+  for (let until; (until = backoffUntil.get(acc.id) ?? 0) > Date.now();) await wait(until - Date.now());
   const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
   const t0 = Date.now();
   let res: Response;
@@ -420,6 +429,13 @@ export async function webGet(pathname: string, acc: Account): Promise<any> {
     throw e;
   } finally {
     done();
+  }
+  if (throttled(res)) {
+    await res.body?.cancel();
+    backoffUntil.set(acc.id, Math.max(backoffUntil.get(acc.id) ?? 0, Date.now() + RATE_LIMIT_BACKOFF_MS));
+    noteThrottled(acc);
+    tallyCall(tok, kind, resultOf(res), Date.now() - t0, share);
+    throw new Error(`web ${pathname} -> HTTP ${res.status} (rate-limited)`);
   }
   const body = await res.json().catch(() => ({}));
   const ok = res.ok && body?.code === 0;

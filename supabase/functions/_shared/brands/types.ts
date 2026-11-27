@@ -6,6 +6,8 @@
 // brand's own, text, used only in calls to the brand. Branded types keep one from being passed
 // where the other is wanted.
 
+import type { DayClock } from "../localtime.ts";
+export type { DayClock };
 export type PlantId = number & { readonly __plantId: unique symbol };
 export type VendorPlantId = string & { readonly __vendorPlantId: unique symbol };
 export const vendorPlantId = (v: string | number) => String(v) as VendorPlantId;
@@ -133,7 +135,7 @@ export interface Brand {
   /** today's inverter temperature rows so far (inverter_history rows) */
   todayTemps(inv: InverterInfo, acc: Account, tz: string): Promise<Record<string, unknown>[]>;
 
-  // history (History rebuilds this in step 3; recover and sync-plant-energy call it)
+  // history: past days, for the History engine (EF/history)
   history: BrandHistory;
 
   // calls
@@ -159,10 +161,10 @@ export interface BrandHistory {
   inverterDay(acc: Account, sn: string, day: string, web?: boolean): Promise<any>;
   /** one inverter's day of temperatures, volts and Hz */
   inverterExtras(acc: Account, sn: string, day: string, gridOnly?: boolean): Promise<any>;
-  /** inverter_history rows from either day shape */
-  historyRows(day: any, dayStart: number): Record<string, unknown>[];
-  /** the plant's minute spine from its inverters' days */
-  plantSpine(days: any[], dayStart: number): Map<number, SpineRow>;
+  /** inverter_history rows from either day shape, at the local day's clock (SOLAR-686 H20) */
+  historyRows(day: any, clock: DayClock): Record<string, unknown>[];
+  /** the plant's minute spine from its inverters' days: 1380, 1440 or 1500 minutes */
+  plantSpine(days: any[], clock: DayClock): Map<number, SpineRow>;
   /** the plant's own day feed (5-minute buckets), null when the brand has none */
   plantDay(acc: Account, id: VendorPlantId, day: string): Promise<any | null>;
   /** scale of the plant feed against our own buckets */

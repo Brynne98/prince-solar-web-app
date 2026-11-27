@@ -7,7 +7,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthGate, FieldLabel, SignOutButton, invalidProps, resetAsked, useFieldErrors } from './auth.jsx';
 import { BusyButton, Segmented, Skeleton, Tip, dayText, fmtTime, localDateStr, moneySymbol, plantDateStr, plantHour, plantLabel, shiftDate } from './components.jsx';
-import { READ_FRESH_MS, dayFor, fetchDay, fetchEnergy, fetchMe, fetchNotifications, fetchPlantDays, fetchPlantStates, fetchSnapshot, firstLoadSync, isStale, plantNow, pushResync, readNotifications, realPoints, savePlantConfig, savePrefs, sendFeedback, setCurrentPlant, syncProgress } from './data.jsx';
+import { READ_FRESH_MS, dayFor, fetchDay, fetchEnergy, fetchMe, fetchNotifications, fetchPlantDays, fetchPlantStates, fetchSnapshot, isStale, plantNow, pushResync, readNotifications, realPoints, savePlantConfig, savePrefs, sendFeedback, setCurrentPlant, syncProgress } from './data.jsx';
 import { AT, Dialog, LinkDialog, LinkForm, LinkGate, accountNow, addAsked, billingReturn, checkReturn, hasActivePlant, mountNode, reloadAccount, settlePayment, takeAddAsk, useAccount, useAccountWatch } from './link.jsx';
 import { sb } from './sb.js';
 import { minuteMissing, RETRY_MS } from './live-retry.mjs';
@@ -291,7 +291,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : firstLoadSync(states[p.id].sync, p.linkedAt) };
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : states[p.id].sync };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
@@ -1403,14 +1403,13 @@ function App({ links }) {
     return ls.length > 0 && !ls.some(a => a.status === 'ok');
   };
   const loginCut = !!rawSnap && plantStatus(rawSnap, Date.now()).status !== 'live' && loginsCut(plantId);
-  const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
   const [err, setErr] = useState(null);
   // the login came back for this plant at: set below when a cut-off plant's login turns active
   const [relinked, setRelinked] = useState(null);
   const relinkedAt = relinked?.plantId === plantId ? relinked.at : null;
   // a failed refresh and a fresh reconnect ride on the snapshot, so every status line reads them (SOLAR-603, SOLAR-606)
   const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true, fetchFailed: !!err }
-    : { ...rawSnap, sync: firstLoadSync(rawSnap.sync, linkedAt), fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, linkedAt, err, relinkedAt]);
+    : { ...rawSnap, fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, err, relinkedAt]);
   // the menu and Settings > Plants read the plant on screen's reconnect and failed refresh from here
   currentLive = { plantId, relinkedAt, fetchFailed: !!err };
   // Readings starting or stopping can mean a login came back or died: read the logins

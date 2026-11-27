@@ -155,9 +155,9 @@ export async function syncPlants(acc: Account, linked?: { list: VendorPlant[]; i
  * import and kick the active plants that have no plant_config row yet. A claimed shared
  * plant (SOLAR-310) comes through here too. Returns the active plants.
  *
- * A paused plant with no row gets one too, with the brand's zone and lat/lon but no
- * history bookmarks (0192): the state a stopped plant is in. Starting it
- * (plant_start_fill) then sets the bookmarks in the plant's own zone (SOLAR-481).
+ * A paused plant with no row gets one too, with the brand's zone and lat/lon and no history
+ * import (0192): the state a stopped plant is in. Starting it (plant_start_fill) asks History
+ * for the 60 days (SOLAR-686).
  */
 export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<number>, invs?: InverterInfo[]): Promise<PlantInfo[]> {
   const plants = all.filter((p) => !paused.has(p.id));
@@ -184,25 +184,11 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
       lat: r.value.lat, lon: r.value.lon, paused: paused.has(ourId.get(String(r.value.vendorId))!),
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
+  // the 60 days: plant_config_seed asks History, which queues only a plant that is read now (SOLAR-686 H8)
   const activeRows = rows.filter((r) => !r.paused);
-  // A plant that is not read (0205: no plan, the free week over): recover never walks
-  // it back, so drop the 60-day bookmarks now rather than show "Fetching history".
-  if (activeRows.length) {
-    const live = await livePlants();
-    const cut = activeRows.map((r) => r.plant_id).filter((id) => !live.has(id));
-    if (cut.length) {
-      try { await dbHandle().clearBookmarks(cut); }
-      catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`free bookmarks ${cut.join(",")}: ${msg}`);
-        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${msg}`), { hourly: true });
-      }
-    }
-  }
-  // Plants seeded just now (0044): store their inverter serials so `recover` can
-  // ask the brand for per-inverter history before the first poll has run, then fire
-  // sync-plant-energy and recover for each. Best effort — a failure here leaves
-  // the plant on the nightly schedule, which is where it was before 0044.
+  // Plants seeded just now (0044): store their inverter serials so History can ask the brand
+  // for per-inverter history before the first poll has run, then kick the first poll. Best
+  // effort: a failure here leaves the plant to the schedule.
   if (activeRows.length) {
     const seededIds = activeRows.map((r) => r.plant_id);
     const wanted = new Set(seededIds);
@@ -212,12 +198,12 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
         await rpc("inverters_seed", { p_rows: seed.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) });
       }
     } catch (e) {
-      // recover refuses to walk a plant with no serials, and the first poll stores them.
+      // History waits on a plant with no serials, and the first poll stores them.
       console.warn(`inverter seed for ${seededIds.join(",")}:`, e instanceof Error ? e.message : e);
       noteError("inverter_seed_failed", e, { user: acc.user_id, hourly: true });
     }
-    // Two edge invocations per plant. An installer login can see hundreds of
-    // plants at once; those go to the nightly schedule instead of a burst.
+    // One edge invocation per plant. An installer login can see hundreds of plants at once;
+    // those go to the schedule instead of a burst.
     if (seededIds.length <= MAX_BOOTSTRAP_KICKS) {
       for (const pid of seededIds) {
         try { await rpc("plant_bootstrap_kick", { p_plant: pid }); }
@@ -316,34 +302,10 @@ export async function pollJobs(shard: number, shards: number, account?: string):
   });
 }
 
-/**
- * Round-robin for the batch functions (recover, sync-plant-energy). Each has a
- * time budget shared across every plant; without this, plants late in the list
- * could starve run after run (READINESS P3). The id of the last plant a run
- * finished is kept in app_config under `key`; the next run starts after it.
- */
 /** The plants that are read (0205): an account that runs the plant has a plan or is in its free week. */
 export async function livePlants(): Promise<Set<number>> {
   const ids = await rpc<number[]>("live_plants", {});
   return new Set((ids ?? []).map(Number));
-}
-
-export async function rotateJobs<T extends { plantId: number }>(jobs: T[], key: string): Promise<T[]> {
-  if (jobs.length < 2) return jobs;
-  const { data } = await db.from("app_config").select("value").eq("key", key).maybeSingle();
-  const last = data ? Number(data.value) : null;
-  if (last == null) return jobs;
-  const i = jobs.findIndex((j) => j.plantId === last);
-  if (i < 0) return jobs; // that plant is gone; start from the top
-  return [...jobs.slice(i + 1), ...jobs.slice(0, i + 1)];
-}
-export async function markCursor(key: string, plantId: number): Promise<void> {
-  const { error } = await db.from("app_config")
-    .upsert({ key, value: plantId, note: "last plant finished by this batch function; the next run starts after it" }, { onConflict: "key" });
-  if (error) {
-    console.warn(`cursor ${key}:`, error.message);
-    noteError("cursor_failed", new Error(`cursor ${key}: ${error.message}`), { hourly: true });
-  }
 }
 
 // ---------------------------------------------------------------------------

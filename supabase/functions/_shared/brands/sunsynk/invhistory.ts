@@ -24,6 +24,7 @@
 // SOLAR-612: the web host's `/inverter/{sn}/day?params=<ids>` gives the same series in
 // one call (ids from `/inverter/params`). Tried first; any failure or a missing spine
 // series falls back to the four official calls above.
+import type { DayClock } from "../../localtime.ts";
 import { type Account, apiGet, webGet } from "./api.ts";
 import { num } from "./extract.ts";
 
@@ -239,11 +240,11 @@ export async function fetchInverterExtras(acc: Account, sn: string, day: string,
 }
 
 /** {ts, ac, dc, vac, fac, gfac} rows for q_insert_inverter_history, at the device's own sample times. */
-export function historyRows(t: Extras, dayStart: number) {
+export function historyRows(t: Extras, clock: DayClock) {
   const byT = new Map<number, Record<string, number>>();
   const put = (xs: Sample[] | null, k: string) => {
     for (const s of xs ?? []) {
-      const row = byT.get(s.t) ?? { ts: dayStart + s.t };
+      const row = byT.get(s.t) ?? { ts: clock.at(s.t) };
       row[k] = s.v;
       byT.set(s.t, row);
     }
@@ -256,14 +257,15 @@ export function historyRows(t: Extras, dayStart: number) {
 export const HOLD_S = 360;
 
 /**
- * Samples -> 1440 per-minute values. Minute m takes the last sample at or before
- * its end (m*60+59) that is no older than HOLD_S, else null.
+ * Samples (seconds since the day's start) -> per-minute values, `minutes` of them (1440, or
+ * 1380 / 1500 on a day the clocks change). Minute m takes the last sample at or before its end
+ * (m*60+59) that is no older than HOLD_S, else null.
  */
-export function toMinutes(samples: Sample[] | null, holdS = HOLD_S): (number | null)[] {
-  const out: (number | null)[] = new Array(1440).fill(null);
+export function toMinutes(samples: Sample[] | null, holdS = HOLD_S, minutes = 1440): (number | null)[] {
+  const out: (number | null)[] = new Array(minutes).fill(null);
   if (!samples || !samples.length) return out;
   let j = 0;
-  for (let m = 0; m < 1440; m++) {
+  for (let m = 0; m < minutes; m++) {
     const end = m * 60 + 59;
     while (j + 1 < samples.length && samples[j + 1].t <= end) j++;
     const s = samples[j];
@@ -278,12 +280,16 @@ export function toMinutes(samples: Sample[] | null, holdS = HOLD_S): (number | n
  * SoC averaged over inverters reporting > 0, battery from the balance.
  * Keyed by epoch ts = dayStart + minute*60.
  */
-export function plantSpine(days: InverterDay[], dayStart: number): Map<number, SpineRow> {
+export function plantSpine(days: InverterDay[], clock: DayClock): Map<number, SpineRow> {
+  const minutes = (clock.end - clock.start) / 60;
+  // wall-clock sample times -> seconds since the day's start, right across a clock change (SOLAR-686 H20)
+  const el = (xs: Sample[] | null) => xs && xs.map((s) => ({ t: clock.at(s.t) - clock.start, v: s.v }));
   const per = days.map((d) => ({
-    pv: toMinutes(d.pv), grid: toMinutes(d.grid), load: toMinutes(d.load), soc: toMinutes(d.soc),
+    pv: toMinutes(el(d.pv), HOLD_S, minutes), grid: toMinutes(el(d.grid), HOLD_S, minutes),
+    load: toMinutes(el(d.load), HOLD_S, minutes), soc: toMinutes(el(d.soc), HOLD_S, minutes),
   }));
   const rows = new Map<number, SpineRow>();
-  for (let m = 0; m < 1440; m++) {
+  for (let m = 0; m < minutes; m++) {
     const sum = (k: "pv" | "grid" | "load") => {
       let s = 0;
       for (const p of per) { const v = p[k][m]; if (v == null) return null; s += v; }
@@ -293,7 +299,7 @@ export function plantSpine(days: InverterDay[], dayStart: number): Map<number, S
     const socs = per.map((p) => p.soc[m]).filter((v): v is number => v != null && v > 0);
     const soc = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
     if (pv == null && grid == null && load == null && soc == null) continue;
-    rows.set(dayStart + m * 60, {
+    rows.set(clock.start + m * 60, {
       pv_w: pv == null ? null : Math.round(pv),
       grid_w: grid == null ? null : Math.round(grid),
       load_w: load == null ? null : Math.round(load),
