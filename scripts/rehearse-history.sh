@@ -44,12 +44,12 @@ log "load the copy"
 # production's partitions of readings and strings (split into days over time; the migrations make
 # months): the local ones go, production's are made with their own bounds
 [ -s "$OUT/parts.csv" ] || supabase db query --remote="$REF" --read-only -o csv \
-  "select n.nspname, p.relname, c.relname, pg_get_expr(c.relpartbound, c.oid) from pg_inherits i join pg_class c on c.oid = i.inhrelid
+  "select n.nspname as schema, p.relname as parent, c.relname as child, pg_get_expr(c.relpartbound, c.oid) as bound from pg_inherits i join pg_class c on c.oid = i.inhrelid
      join pg_class p on p.oid = i.inhparent join pg_namespace n on n.oid = p.relnamespace
     where c.relkind in ('r', 'p') and n.nspname in ('public', 'private', 'billing', 'plants', 'msg')" 2>/dev/null > "$OUT/parts.csv"
 python3 - "$OUT/parts.csv" > "$OUT/partitions.sql" <<'PY'
 import csv, sys
-rows = [r for r in csv.reader(open(sys.argv[1])) if r and r[0] != 'nspname' and len(r) == 4]
+rows = [r for r in csv.reader(open(sys.argv[1])) if r and r[0] != 'schema' and len(r) == 4]
 for parent in sorted({(r[0], r[1]) for r in rows}):
     print(f"do $$ declare c text; begin for c in select format('%I.%I', n.nspname, k.relname) from pg_inherits i join pg_class k on k.oid = i.inhrelid join pg_namespace n on n.oid = k.relnamespace where i.inhparent = '{parent[0]}.{parent[1]}'::regclass loop execute 'drop table ' || c; end loop; end $$;")
 for r in rows:
