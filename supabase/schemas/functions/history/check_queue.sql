@@ -22,7 +22,7 @@ begin
     continue when fl is null;
     for d in select today - g from generate_series(0, 13) g loop
       lo := greatest(public.day_start_epoch_tz(d, tz), (ceil(fl / 60.0) * 60)::bigint);
-      hi := least(public.day_start_epoch_tz(d + 1, tz), now_ts - 600);
+      hi := least(public.day_start_epoch_tz(d + 1, tz), ((now_ts - 600) / 60) * 60);
       continue when hi <= lo;
       select count(*) into have from public.agg_minute a
        where a.plant_id = p and a.ts >= lo and a.ts < hi and a.source <> 'poller_partial' and a.ts % 60 = 0;

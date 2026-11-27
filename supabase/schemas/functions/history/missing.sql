@@ -14,5 +14,7 @@ AS $function$
   select g from b, generate_series(b.lo, b.hi - 60, 60) g
    where b.hi > b.lo and b.lo is not null
      and not exists (select 1 from public.agg_minute a where a.plant_id = b.plant and a.ts = g and a.source <> 'poller_partial')
+     -- past 31 days a minute lives in its five-minute row (agg_minute_rollup): held, not missing
+     and not exists (select 1 from public.agg_5m f where f.plant_id = b.plant and f.ts = g - g % 300)
    order by g
 $function$;

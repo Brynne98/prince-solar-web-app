@@ -50,6 +50,10 @@ begin
     update history.days set claim = null, claimed_until = null, note = coalesce(p_note, note),
                             due_at = p_at + case when p_result = 'wait' then interval '5 minutes' else interval '1 minute' end
      where id = p_id;
+    -- the plant waits, not just this day: its other days would meet the same answer
+    update history.imports set next_at = p_at + case when p_result = 'wait' then interval '5 minutes' else interval '1 minute' end
+     where id = d.import and status = 'open';
+    return jsonb_build_object('status', 'queued');
   elsif p_result = 'failed' and d.tries + 1 < 3 then
     -- an extras day that lost only the grid endpoint: the next try asks that one alone (H12)
     update history.days set claim = null, claimed_until = null, tries = tries + 1, note = p_note, due_at = p_at + interval '1 minute',

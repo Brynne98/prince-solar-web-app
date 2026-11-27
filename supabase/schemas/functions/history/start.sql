@@ -42,5 +42,9 @@ begin
   on conflict (import, account) do update
      set reason = excluded.reason, pace_s = excluded.pace_s, fetch_no = excluded.fetch_no,
          requested_at = excluded.requested_at, left_at = null;
+  -- the fastest account on it sets the pace (H3): one at full speed brings the next step in now
+  if coalesce(p_pace_s, 0) = 0 then
+    update history.imports set next_at = least(next_at, p_at) where id = imp and started_at is not null;
+  end if;
   return imp;
 end $function$;

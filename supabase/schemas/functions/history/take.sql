@@ -25,21 +25,25 @@ begin
   -- its route was read at, so a route that changes before the write is refused (H8)
   create temp table if not exists _ht_route (plant bigint primary key, account uuid, lane uuid, version bigint) on commit drop;
   truncate _ht_route;
+  -- one route per plant first, then this group's logins: a plant two accounts read is in one group
   insert into _ht_route
-  select distinct on (rr.plant) rr.plant, rr.account, rr.lane, p.version
-    from billing.reading_routes(p_at) rr
-    join plants.login_info l on l.id = rr.lane and l.status = 'ok'
-    join plants.plant_info p on p.id = rr.plant
-   where abs(hashtext(rr.lane::text)) % p_shards = p_shard
-     and not plants.throttled(rr.lane, p_at - interval '2 minutes')
-     and not exists (select 1 from history.lanes hl where hl.lane = rr.lane and hl.backoff_until > p_at)
-     and not private.history_deleting(rr.plant)
-   order by rr.plant,
-            exists (select 1 from history.import_accounts ia join history.imports i on i.id = ia.import
-                     where i.plant = rr.plant and i.status = 'open' and ia.left_at is null and ia.account = rr.account) desc,
-            rr.account;
+  select x.plant, x.account, x.lane, x.version from (
+    select distinct on (rr.plant) rr.plant, rr.account, rr.lane, p.version
+      from billing.reading_routes(p_at) rr
+      join plants.login_info l on l.id = rr.lane and l.status = 'ok'
+      join plants.plant_info p on p.id = rr.plant
+     where not private.history_deleting(rr.plant)
+     order by rr.plant,
+              exists (select 1 from history.import_accounts ia join history.imports i on i.id = ia.import
+                       where i.plant = rr.plant and i.status = 'open' and ia.left_at is null and ia.account = rr.account) desc,
+              rr.via_share, rr.since, rr.account, rr.lane) x
+   where abs(hashtext(x.lane::text)) % p_shards = p_shard
+     and not plants.throttled(x.lane, p_at - interval '2 minutes')
+     and not exists (select 1 from history.lanes hl where hl.lane = x.lane and hl.backoff_until > p_at);
 
-  for ln in select distinct x.lane from _ht_route x order by 1 loop
+  -- the logins in a new order each call, so the share of the cap is not always spent on the same ones
+  for ln in select y.lane from (select distinct x.lane from _ht_route x) y order by random() loop
+    exit when used >= cap;
     continue when exists (select 1 from history.days d where d.lane = ln and d.status = 'queued' and d.claimed_until > p_at)
                or exists (select 1 from history.totals t where t.lane = ln and t.claimed_until > p_at);
     -- the import this login is walking, when its next step is due; else a new one
@@ -83,8 +87,8 @@ begin
       order by due, pri
     loop
       c := history.cost(r.kind, r.plant, r.grid_only, r.full_sweep);
-      -- within the group's share; one step a minute always, so a large plant is never shut out
-      exit when used > 0 and used + c > cap;
+      -- a step goes while the group's share is not spent (the last one may go over by its own
+      -- cost), so a dear step (kWh totals, a plant of many inverters) is never shut out by cheap ones
       cl := gen_random_uuid();
       if r.k = 'day' then
         -- the import first, then the day (one lock order with step_done and stop: import, then day)
@@ -120,7 +124,6 @@ begin
          where x.plant = r.plant));
       exit;   -- one step per login
     end loop;
-    exit when used >= cap;
   end loop;
   insert into history.calls as hc (minute, shard, calls) values (date_trunc('minute', p_at), p_shard, used)
   on conflict (minute, shard) do update set calls = excluded.calls;

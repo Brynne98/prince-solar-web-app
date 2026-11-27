@@ -4141,6 +4141,7 @@ begin
     and (select count(*) from jsonb_array_elements(history.take(0, 4, pg_temp.t(71)))) <= 1);
   update public.app_config set value = 600 where key = 'HISTORY_CALLS_PER_MINUTE';
   -- H12: a day with AC temperatures only (the web host's) still fetches its extras
+  insert into private.inverters (sn, plant_id, account_id) values ('SNX', p, l) on conflict do nothing;
   perform set_config('billing.guarded', 'on', true);
   insert into public.inverter_history (plant_id, sn, ts, ac_c)
   select p, 'SNX', public.day_start_epoch_tz(d - 5, plants.tz(p)) + g * 300, 40 from generate_series(0, 287) g;
