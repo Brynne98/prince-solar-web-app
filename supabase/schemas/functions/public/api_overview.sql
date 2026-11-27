@@ -122,31 +122,6 @@ begin
              where a.plant_id = v_plant and a.ts >= v_glo and a.ts < v_glo + 86400
              group by (a.ts - v_glo) / 300) b
   ),
-  -- Fresh-link sync state (0048): the minute-history bookmark clears when done; the
-  -- inverter-history watermark never clears, it parks at today. Progress is days of
-  -- the last 60 with any minute or 5-minute row, in the plant's zone — 60 index probes, and only
-  -- while something is pending (the pill ignores it otherwise).
-  sy as (
-    select s.spine, s.inv, s.backfill_next, s.backfill_until, s.temp_next,
-           case when s.spine or s.inv then
-             (select count(*) from generate_series(0, 59) g(i)
-               where exists (select 1 from public.agg_minute a
-                              where a.plant_id = v_plant
-                                and a.ts >= public.day_start_epoch_tz(s.today - g.i, s.tz)
-                                and a.ts <  public.day_start_epoch_tz(s.today - g.i, s.tz) + 86400)
-                  -- past 31 days a backfilled day lives in agg_5m (0082)
-                  or exists (select 1 from public.agg_5m f
-                              where f.plant_id = v_plant
-                                and f.ts >= public.day_start_epoch_tz(s.today - g.i, s.tz)
-                                and f.ts <  public.day_start_epoch_tz(s.today - g.i, s.tz) + 86400))
-           else 60 end as days
-      from (select (pc.backfill_next is not null) as spine,
-                   (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(v_plant))) as inv,
-                   pc.backfill_next, pc.backfill_until, pc.temp_next,
-                   public.today_tz(plants.tz(v_plant)) as today,
-                   plants.tz(v_plant) as tz
-              from plants.settings pc, cfg c where pc.plant_id = v_plant) s
-  ),
   plant as (select pu.plant_id as id, pu.plant_name as name from plants.user_plants pu
              where pu.plant_id = v_plant and pu.user_id = auth.uid() limit 1)
   select jsonb_build_object(
@@ -174,13 +149,8 @@ begin
       'battPositiveMeans', c.batt_positive_means, 'battSignSource', c.batt_sign_source,
       'forecastAvailable', v_plant = public.calibration_plant()),
     'inverters', coalesce((select jsonb_agg(snap order by ord, sn) from inv), '[]'::jsonb),
-    'sync', (select jsonb_build_object(
-      'pending', s.spine or s.inv,
-      'spinePending', s.spine,
-      'invPending', s.inv,
-      'backfillNext', s.backfill_next, 'backfillUntil', s.backfill_until, 'tempNext', s.temp_next,
-      'days', s.days, 'window', 60)
-      from sy s))
+    -- History's progress (SOLAR-686 H16)
+    'sync', history.progress(v_plant))
     into v_out
   from totals t, grid_today g, cfg c;
   return v_out;

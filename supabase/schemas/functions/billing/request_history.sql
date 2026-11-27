@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION billing.request_history(p_account uuid, p_plants bigint[], p_at timestamp with time zone, p_counts boolean DEFAULT false)
+CREATE OR REPLACE FUNCTION billing.request_history(p_account uuid, p_plants bigint[], p_at timestamp with time zone, p_counts boolean DEFAULT false, p_reason text DEFAULT 'switch'::text)
  RETURNS void
  LANGUAGE plpgsql
  SET search_path TO 'billing', 'pg_temp'
@@ -22,8 +22,6 @@ begin
                               jsonb_build_object('fetch_no', n, 'counted', counted, 'plants', to_jsonb(p_plants)));
   end if;
   target := case when n <= 3 then 0 else least(1200 * power(2, least(n - 4, 10)), 86400)::int end;
-  update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = p_at, claimed_until = null
-   where account = p_account and plant = any (p_plants) and status in ('queued', 'running');
-  insert into billing.history_fetches (account, plant, fetch_no, target_s, requested_at)
-  select p_account, x, n, target, p_at from unnest(p_plants) x;
+  -- History's queue (SOLAR-686 H4): this account's pace on each plant's import
+  perform history.start(x, p_account, p_reason, target, n, p_at) from unnest(p_plants) x;
 end $function$;

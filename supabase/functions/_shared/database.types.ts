@@ -649,6 +649,9 @@ export type Database = {
 "grid_live":
 { Args: { "p_volts": number }; Returns: boolean
                            },
+"history_jobs":
+{ Args: { "p_args"?: Json,"p_cmd": string }; Returns: Json
+                           },
 "independence_pct":
 { Args: { "p_home": number,"p_import": number }; Returns: number
                            },
@@ -727,6 +730,9 @@ export type Database = {
 "login_outcomes":
 { Args: { "p_outcomes": Json }; Returns: undefined
                            },
+"login_throttled":
+{ Args: { "p_login": string }; Returns: undefined
+                           },
 "mail_block":
 { Args: { "p_detail"?: string,"p_emails": (string)[],"p_reason": string }; Returns: number
                            },
@@ -761,9 +767,6 @@ export type Database = {
 "panel_kwp":
 { Args: { "p_groups": Json }; Returns: number
                            },
-"plant_bookmarks_clear":
-{ Args: { "p_plants": (number)[] }; Returns: undefined
-                           },
 "plant_bootstrap_kick":
 { Args: { "p_plant": number }; Returns: undefined
                            },
@@ -777,9 +780,6 @@ export type Database = {
                            },
 "plant_features_detect":
 { Args: { "p_plant": number }; Returns: Json
-                           },
-"plant_history_loading":
-{ Args: { "p_plant": number }; Returns: boolean
                            },
 "plant_inverters":
 { Args: { "p_plant": number }; Returns: {
@@ -864,11 +864,6 @@ export type Database = {
                            },
 "q_insert_recovered_v2":
 { Args: { "p_at"?: string,"p_plant": number,"p_rows": Json,"p_source"?: string,"p_version": number }; Returns: number
-                           },
-"q_missing_minutes":
-{ Args: { "p_day": string,"p_plant": number }; Returns: {
-              "ts": number
-            }[]
                            },
 "q_missing_minutes_day":
 { Args: { "p_day": string,"p_plant": number }; Returns: {

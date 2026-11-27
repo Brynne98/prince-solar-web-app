@@ -178,10 +178,8 @@ begin
   insert into private.gaps (plant_id, from_ts, to_ts)
   select g.plant, g.prev, p_ts from _bgap g where g.prev is not null and p_ts - g.prev > 90 order by g.plant
   on conflict (plant_id, from_ts) do nothing;
-  -- SOLAR-378: a hole over 10 minutes is refilled by first_load_continue
-  insert into private.refill_queue (plant_id)
-  select g.plant from _bgap g where g.prev is not null and p_ts - g.prev > 600 order by g.plant
-  on conflict (plant_id) do nothing;
+  -- SOLAR-378: a hole over 10 minutes is refilled by History, each local day it touches (SOLAR-686 H11)
+  perform history.gap_queue(g.plant, g.prev, p_ts) from _bgap g where g.prev is not null and p_ts - g.prev > 600 order by g.plant;
   insert into public.agg_minute (plant_id, ts, pv_w, load_w, batt_w, grid_w, soc, source)
   select distinct on (g.plant) g.plant, p_ts, g.pv_w, g.load_w, g.batt_w, g.grid_w, g.soc,
          case when g.partial then 'poller_partial' else 'poller' end

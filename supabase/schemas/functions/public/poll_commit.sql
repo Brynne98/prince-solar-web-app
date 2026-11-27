@@ -65,10 +65,9 @@ begin
       insert into private.gaps (plant_id, from_ts, to_ts) values (a.plant_id, prev_ts, p_ts)
       on conflict (plant_id, from_ts) do nothing;
       gaps := gaps || a.plant_id;
-      -- SOLAR-378: a hole over 10 minutes is refilled by first_load_continue.
+      -- SOLAR-378: a hole over 10 minutes is refilled by History (SOLAR-686 H11).
       if p_ts - prev_ts > 600 then
-        insert into private.refill_queue (plant_id) values (a.plant_id)
-        on conflict (plant_id) do nothing;
+        perform history.gap_queue(a.plant_id, prev_ts, p_ts);
       end if;
     end if;
 

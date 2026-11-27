@@ -40,6 +40,6 @@ begin
   perform billing.lock_plants(p_inv.plants || had);
   perform billing.write_seats(p_inv.account, p_inv.plants, p_at);
   if restart then
-    perform billing.request_history(p_inv.account, array(select x from unnest(p_inv.plants) x where x = any (had)), p_at);
+    perform billing.request_history(p_inv.account, array(select x from unnest(p_inv.plants) x where x = any (had)), p_at, false, 'restart');
   end if;
 end $function$;

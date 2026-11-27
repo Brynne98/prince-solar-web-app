@@ -1748,8 +1748,46 @@ $$;
 create function pg_temp.has_agg(p_plant bigint) returns boolean language sql as $$
   select exists (select 1 from public.agg_minute where plant_id = p_plant)
 $$;
-create function pg_temp.fetch_row(p_acc uuid, p_plant bigint) returns billing.history_fetches language sql as $$
-  select * from billing.history_fetches where account = p_acc and plant = p_plant order by id desc limit 1
+-- an account's place on a plant's history import (SOLAR-686), in the old fetch's words: queued
+-- (not started), running, done, dropped (stopped, or the account left); the step it holds now
+create type pg_temp.fetch as (id bigint, status text, drop_reason text, target_s int, fetch_no int, started_at timestamptz,
+  days_total int, lane uuid, requested_at timestamptz, step bigint, claim uuid, day_next date, day_floor date, next_at timestamptz);
+create function pg_temp.fetch_row(p_acc uuid, p_plant bigint) returns pg_temp.fetch language sql as $$
+  select i.id,
+         case when i.status = 'stopped' or a.left_at is not null then 'dropped'
+              when i.status = 'open' then case when i.started_at is null then 'queued' else 'running' end
+              else i.status end,
+         case when i.status = 'stopped' or a.left_at is not null then coalesce(i.stop_reason, 'switched_out') end,
+         a.pace_s, a.fetch_no, i.started_at,
+         (select count(*) from history.days d where d.import = i.id and d.kind = 'minutes')::int,
+         i.lane, a.requested_at,
+         (select d.id from history.days d where d.import = i.id and d.status = 'queued' and d.claimed_until is not null
+           order by d.claimed_until desc, d.id limit 1),
+         (select d.claim from history.days d where d.import = i.id and d.status = 'queued' and d.claimed_until is not null
+           order by d.claimed_until desc, d.id limit 1),
+         (select max(d.day) from history.days d where d.import = i.id and d.status = 'queued' and d.kind = 'minutes'),
+         i.floor_day, i.next_at
+    from history.import_accounts a join history.imports i on i.id = a.import
+   where a.account = p_acc and i.plant = p_plant order by i.id desc limit 1
+$$;
+-- a handed-out step ends
+create function pg_temp.done(f pg_temp.fetch, p_result text, p_at timestamptz) returns jsonb language sql as $$
+  select history.step_done('day', f.step, f.claim, p_result, null, p_at)
+$$;
+-- every queued row of an import done but the newest p_left (to reach its end quickly)
+create function pg_temp.skip_to_end(p_import bigint, p_left int, p_at timestamptz) returns void language sql as $$
+  update history.days set status = 'done', closed_at = p_at, claim = null, claimed_until = null
+   where import = p_import and status = 'queued'
+     and id not in (select d.id from history.days d where d.import = p_import and d.status = 'queued'
+                     order by d.day desc, (d.kind = 'minutes') desc, d.id limit p_left)
+$$;
+-- an import finished by hand
+create function pg_temp.finish(p_import bigint, p_at timestamptz) returns void language sql as $$
+  update history.days set status = 'done', closed_at = p_at, claim = null, claimed_until = null where import = p_import and status = 'queued';
+  update history.imports set status = 'done', finished_at = p_at where id = p_import and status = 'open';
+$$;
+create function pg_temp.handed(w jsonb, p_plant bigint) returns boolean language sql as $$
+  select exists (select 1 from jsonb_array_elements(w) x where (x->>'plant')::bigint = p_plant and x->>'step' = 'day')
 $$;
 create function pg_temp.alert(p_kind text, p_ref text, p_at timestamptz) returns boolean language sql as $$
   select exists (select 1 from jsonb_array_elements(billing.alerts(p_at)) a where a->>'kind' = p_kind and a->>'ref' = p_ref)
@@ -1766,8 +1804,9 @@ begin
   update billing.switch_over set switched_at = pg_temp.t(0);
   -- earlier blocks queued billing emails and fetches with no stored login behind them: start clean
   update billing.outbox set status = 'dropped', drop_reason = 'test reset' where status = 'queued';
-  update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = pg_temp.t(0)
-   where status in ('queued', 'running');
+  update history.days set status = 'dropped', closed_at = pg_temp.t(0) where status = 'queued';
+  update history.imports set status = 'stopped', stop_reason = 'test reset', finished_at = pg_temp.t(0) where status = 'open';
+  delete from history.totals;
   perform pg_temp.ok('R0 switched on', billing.is_live());
 end $$;
 
@@ -1891,8 +1930,8 @@ begin
   update public.email_queue set status = 'sent', sent_at = pg_temp.t(37) where key = 'winback:state-test:' || uid;
   r := pg_temp.answer(ref, 'ok', pg_temp.t(40));
   perform pg_temp.eq('R3 payment applied', r->>'action', 'applied');
-  perform pg_temp.ok('R3 restart: history asked for again', (select status = 'queued' and requested_at = pg_temp.t(40)
-    from billing.history_fetches where account = c and plant = pg_temp.pid(990030301) order by id desc limit 1));
+  perform pg_temp.ok('R3 restart: history asked for again', (select f.status = 'queued' and f.requested_at = pg_temp.t(40)
+    from pg_temp.fetch_row(c, pg_temp.pid(990030301)) f));
   perform pg_temp.ok('R3 win-back return found', (billing.winback_return(ref)->>'user')::uuid = uid
     and (billing.winback_return(ref)->>'days')::int = 3);
   r := public.billing_jobs('winback', jsonb_build_object('reference', ref));
@@ -1914,7 +1953,7 @@ end $$;
 --    a fetch drops out of the count after 7 days; slowed by the wait between days
 -- ---------------------------------------------------------------------------
 do $$
-declare d uuid := pg_temp.acct('r4'); l uuid; i int; got text := ''; f billing.history_fetches; w jsonb; s jsonb;
+declare d uuid := pg_temp.acct('r4'); l uuid; i int; got text := ''; f pg_temp.fetch; w jsonb; s jsonb;
 begin
   l := pg_temp.link(d, 'r4', '{990030401,990030402,990030403,990030404,990030405,990030406,990030407,990030408}', pg_temp.t(0));
   perform pg_temp.stored(l);
@@ -1935,31 +1974,39 @@ begin
   perform pg_temp.choose(d, pg_temp.pids('{990030408}'), pg_temp.t(7.4));
   perform pg_temp.eq('R4 older fetches dropped out of the count', (pg_temp.fetch_row(d, pg_temp.pid(990030408))).fetch_no::text, '4');
   perform pg_temp.eq('R4 so it is 20 minutes again', (pg_temp.fetch_row(d, pg_temp.pid(990030408))).target_s::text, '1200');
-  -- the 1200 s fetch starts at once and spreads over its 60 days: 20 s a day
-  w := billing.history_take(pg_temp.t(7.4));
+  -- the 1200 s import starts at once and spreads over its rows (60 days of minutes and of extras);
+  -- its kWh totals are a step of their own on the same login, left out here
+  delete from history.totals where plant = pg_temp.pid(990030408);
+  w := history.take(0, 1, pg_temp.t(7.4));
   f := pg_temp.fetch_row(d, pg_temp.pid(990030408));
   perform pg_temp.ok('R4 started at once', f.status = 'running' and f.started_at = pg_temp.t(7.4) and f.days_total = 60);
   perform pg_temp.ok('R4 handed out with its login and version', exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'id')::bigint = f.id and x->'login'->>'id' = l::text and (x->>'version')::bigint = pg_temp.ver(pg_temp.pid(990030408))));
-  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds', f.claim);
-  -- 60 starts on 59 gaps: 1200 s / 59 after the start (phase 3 fix 17)
-  perform pg_temp.eqt('R4 next day waits a 59th of the target', s->>'next_step_at', pg_temp.t(7.4) + make_interval(secs => 1200.0 / 59));
-  -- 20 s away: the claim is let go and history_take hands the day out when it is due, so two
-  -- runs never walk it (phase 4 fix 18); go only while the next day is due within 5 s
-  perform pg_temp.ok('R4 a slowed day: no go, the claim let go', not (s->>'go')::boolean and (s->>'day')::date = f.day_next - 1
-    and (select claim is null and claimed_until is null from billing.history_fetches where id = f.id));
-  -- the earliest finish: the last day starts no earlier than the target after the start
-  update billing.history_fetches set day_next = day_floor + 1, claimed_until = pg_temp.t(7.5), claim = gen_random_uuid()
-   where id = f.id returning * into f;
-  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '30 seconds', f.claim);
-  perform pg_temp.ok('R4 the last day starts at the target or later (fix 17)',
-    (s->>'next_step_at')::timestamptz >= f.started_at + make_interval(secs => f.target_s));
+    where (x->>'plant')::bigint = pg_temp.pid(990030408) and x->'login'->>'id' = l::text
+      and (x->>'version')::bigint = pg_temp.ver(pg_temp.pid(990030408))));
+  perform pg_temp.eq('R4 newest day first, minutes first', (select x->>'day' || ' ' || (x->>'kind') from jsonb_array_elements(w) x
+    where (x->>'plant')::bigint = pg_temp.pid(990030408)), f.day_next || ' minutes');
+  s := pg_temp.done(f, 'ok', pg_temp.t(7.4) + interval '5 seconds');
+  -- 120 rows on 119 gaps: 1200 s / 119 after the start (phase 3 fix 17)
+  perform pg_temp.eqt('R4 the next row waits a 119th of the target', (pg_temp.fetch_row(d, pg_temp.pid(990030408))).next_at::text,
+    pg_temp.t(7.4) + make_interval(secs => 1200.0 / 119));
+  -- slowed: nothing for it until then, and the claim is let go
+  w := history.take(0, 1, pg_temp.t(7.4) + interval '6 seconds');
+  perform pg_temp.ok('R4 a slowed import: nothing handed out before its time', not pg_temp.handed(w, pg_temp.pid(990030408)));
+  w := history.take(0, 1, pg_temp.t(7.4) + interval '11 seconds');
+  perform pg_temp.ok('R4 ... and its next row when due', pg_temp.handed(w, pg_temp.pid(990030408)));
+  -- the earliest finish: the last row starts no earlier than the target after the start
+  f := pg_temp.fetch_row(d, pg_temp.pid(990030408));
+  perform pg_temp.skip_to_end(f.id, 2, pg_temp.t(7.41));
+  f := pg_temp.fetch_row(d, pg_temp.pid(990030408));
+  s := pg_temp.done(f, 'ok', pg_temp.t(7.4) + interval '30 seconds');
+  perform pg_temp.ok('R4 the last row starts at the target or later (fix 17)',
+    (pg_temp.fetch_row(d, pg_temp.pid(990030408))).next_at >= f.started_at + make_interval(secs => f.target_s));
   -- the cap: eleven fetches in a day
   for i in 1..11 loop
     perform pg_temp.choose(d, array[pg_temp.pid(990030401 + (i % 2))]::bigint[], pg_temp.t(20 + i * 0.01));
   end loop;
-  perform pg_temp.eq('R4 capped at 24 h', (select target_s::text from billing.history_fetches where account = d
-    order by id desc limit 1), '86400');
+  perform pg_temp.eq('R4 capped at 24 h', (select a.pace_s::text from history.import_accounts a where a.account = d
+    order by a.requested_at desc, a.import desc limit 1), '86400');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1968,53 +2015,53 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare e1 uuid := pg_temp.acct('r5a'); e2 uuid := pg_temp.acct('r5b'); sh uuid := pg_temp.share_login();
-        w jsonb; f billing.history_fetches; s jsonb; n int;
+        w jsonb; f pg_temp.fetch; s jsonb; n int;
 begin
-  -- R1's claim fetch holds the share login since R4's take: finish it
-  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0) where lane = sh and status = 'running';
+  -- R1's claim import holds the share login since R4's take: finish it
+  perform pg_temp.finish(i.id, pg_temp.t(0)) from history.imports i where i.lane = sh and i.status = 'open';
   perform pg_temp.pid(990030501); perform pg_temp.pid(990030502); perform pg_temp.pid(990030503);
   insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990030501), e1, pg_temp.t(0)),
     (pg_temp.pid(990030502), e1, pg_temp.t(0)), (pg_temp.pid(990030503), e2, pg_temp.t(0));
   perform pg_temp.choose(e1, pg_temp.pids('{990030501,990030502}'), pg_temp.t(0));
   perform pg_temp.choose(e2, pg_temp.pids('{990030503}'), pg_temp.t(0.001));
-  w := billing.history_take(pg_temp.t(0.01));
-  select count(*) into n from billing.history_fetches where lane = sh and status = 'running';
-  perform pg_temp.eq('R5 one fetch at a time on the share login', n::text, '1');
+  w := history.take(0, 1, pg_temp.t(0.01));
+  select count(*) into n from history.imports where lane = sh and status = 'open' and started_at is not null;
+  perform pg_temp.eq('R5 one import at a time on the share login', n::text, '1');
   perform pg_temp.eq('R5 first asked, first started', (pg_temp.fetch_row(e1, pg_temp.pid(990030501))).status, 'running');
-  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0.02) where account = e1 and plant = pg_temp.pid(990030501);
-  w := billing.history_take(pg_temp.t(0.02));
+  perform pg_temp.finish((pg_temp.fetch_row(e1, pg_temp.pid(990030501))).id, pg_temp.t(0.02));
+  w := history.take(0, 1, pg_temp.t(0.02));
   perform pg_temp.eq('R5 the other account takes its turn', (pg_temp.fetch_row(e2, pg_temp.pid(990030503))).status, 'running');
   perform pg_temp.eq('R5 the first account waits', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).status, 'queued');
 
   f := pg_temp.fetch_row(e2, pg_temp.pid(990030503));
-  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03), f.claim);
-  perform pg_temp.eq('R5 429: backed off a minute', s->>'backoff_s', '60');
-  w := billing.history_take(pg_temp.t(0.03) + interval '30 seconds');
-  perform pg_temp.ok('R5 nothing handed out on a backed-off login', not exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'id')::bigint = f.id));
-  w := billing.history_take(pg_temp.t(0.03) + interval '61 seconds');
+  s := pg_temp.done(f, 'throttled', pg_temp.t(0.03));
+  perform pg_temp.eq('R5 429: backed off a minute', (select backoff_s::text from history.lanes where lane = sh), '60');
+  perform pg_temp.eq('R5 ... no try spent', (select tries::text from history.days where id = f.step), '0');
+  w := history.take(0, 1, pg_temp.t(0.03) + interval '30 seconds');
+  perform pg_temp.ok('R5 nothing handed out on a backed-off login', not pg_temp.handed(w, pg_temp.pid(990030503)));
+  w := history.take(0, 1, pg_temp.t(0.03) + interval '61 seconds');
   f := pg_temp.fetch_row(e2, pg_temp.pid(990030503));
-  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03) + interval '62 seconds', f.claim);
-  perform pg_temp.eq('R5 429 again: twice as long', s->>'backoff_s', '120');
+  s := pg_temp.done(f, 'throttled', pg_temp.t(0.03) + interval '62 seconds');
+  perform pg_temp.eq('R5 429 again: twice as long', (select backoff_s::text from history.lanes where lane = sh), '120');
   -- the walk ends at its floor
-  update billing.history_fetches set day_next = day_floor, claimed_until = null, claim = gen_random_uuid() where id = f.id
-  returning * into f;
-  s := billing.history_step(f.id, f.day_floor, false, false, pg_temp.t(0.1), f.claim);
+  perform pg_temp.skip_to_end(f.id, 1, pg_temp.t(0.09));
+  w := history.take(0, 1, pg_temp.t(0.1));
+  f := pg_temp.fetch_row(e2, pg_temp.pid(990030503));
+  s := pg_temp.done(f, 'ok', pg_temp.t(0.1));
   perform pg_temp.eq('R5 last day walked: done', (pg_temp.fetch_row(e2, pg_temp.pid(990030503))).status, 'done');
-  perform pg_temp.ok('R5 a good answer clears the back-off', (select backoff_s = 0 from billing.history_lanes where lane = sh));
-  w := billing.history_take(pg_temp.t(0.11));
+  perform pg_temp.ok('R5 a good answer clears the back-off', (select backoff_s = 0 from history.lanes where lane = sh));
+  w := history.take(0, 1, pg_temp.t(0.11));
   perform pg_temp.eq('R5 then the first account again', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).status, 'running');
-  -- switched out while running: dropped at the next step
+  -- switched out while running: dropped
   perform pg_temp.choose(e1, pg_temp.pids('{990030501}'), pg_temp.t(0.12));
   perform pg_temp.eq('R5 switched out: dropped', (pg_temp.fetch_row(e1, pg_temp.pid(990030502))).drop_reason, 'switched_out');
-  -- the share login breaks while a fetch runs: it waits, it is not dropped
+  -- the share login breaks while a request waits: it waits, it is not dropped
   perform pg_temp.choose(e1, pg_temp.pids('{990030501,990030502}'), pg_temp.t(0.125));
   update plants.logins set status = 'needs_reconnect' where id = sh;
-  w := billing.history_take(pg_temp.t(0.13));
+  w := history.take(0, 1, pg_temp.t(0.13));
   f := pg_temp.fetch_row(e1, pg_temp.pid(990030502));
   perform pg_temp.eq('R5 share login down: the new request waits', f.status, 'queued');
-  perform pg_temp.ok('R5 nothing handed out without a working login', not exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'plant')::bigint = pg_temp.pid(990030502)));
+  perform pg_temp.ok('R5 nothing handed out without a working login', not pg_temp.handed(w, pg_temp.pid(990030502)));
   update plants.logins set status = 'ok' where id = sh;
 end $$;
 
@@ -2091,65 +2138,72 @@ do $$
 declare a uuid := pg_temp.acct('rq14'); b uuid := pg_temp.acct('rq15'); c1 uuid := pg_temp.acct('rq16a');
         c2 uuid := pg_temp.acct('rq16b'); d uuid := pg_temp.acct('rq21'); e uuid := pg_temp.acct('rq22');
         g uuid := pg_temp.acct('rq23'); h uuid := pg_temp.acct('rq24');
-        sh uuid := pg_temp.share_login(); l uuid; w jsonb; f billing.history_fetches; s jsonb; old uuid; n int;
+        sh uuid := pg_temp.share_login(); l uuid; w jsonb; f pg_temp.fetch; s jsonb; old uuid; n int;
 begin
-  -- 14: only the run holding the claim moves the fetch; a run whose claim ran out is told so
+  -- 14: only the run holding the claim moves the step; a run whose claim ran out is told so
   l := pg_temp.link(a, 'rq14', '{990061401}', pg_temp.t(30)); perform pg_temp.stored(l);
   perform pg_temp.pay(a, 'home', 'month', pg_temp.t(30));
   perform pg_temp.choose(a, pg_temp.pids('{990061401}'), pg_temp.t(30));
-  w := billing.history_take(pg_temp.t(30.01));
+  w := history.take(0, 1, pg_temp.t(30.01));
   f := pg_temp.fetch_row(a, pg_temp.pid(990061401));
   perform pg_temp.ok('RQ14 handed out with its claim', exists (select 1 from jsonb_array_elements(w) x
-    where (x->>'id')::bigint = f.id and (x->>'claim')::uuid = f.claim));
+    where (x->>'id')::bigint = f.step and (x->>'claim')::uuid = f.claim));
   perform pg_temp.eq('RQ14 a step with another claim is refused',
-    billing.history_step(f.id, f.day_next, false, false, pg_temp.t(30.01), gen_random_uuid())->>'status', 'not_yours');
-  perform pg_temp.ok('RQ14 the holder renews its claim', billing.history_renew(f.id, f.claim, pg_temp.t(30.01) + interval '60 seconds'));
+    history.step_done('day', f.step, gen_random_uuid(), 'ok', null, pg_temp.t(30.01))->>'status', 'not_yours');
+  perform pg_temp.ok('RQ14 the holder renews its claim', history.renew('day', f.step, f.claim, pg_temp.t(30.01) + interval '60 seconds'));
   old := f.claim;
-  w := billing.history_take(pg_temp.t(30.01) + interval '200 seconds');   -- the claim ran out: handed out again
+  w := history.take(0, 1, pg_temp.t(30.01) + interval '200 seconds');   -- the claim ran out: handed out again
   f := pg_temp.fetch_row(a, pg_temp.pid(990061401));
   perform pg_temp.ok('RQ14 a new claim after it ran out', f.claim is not null and f.claim <> old);
   perform pg_temp.eq('RQ14 the old run cannot release it',
-    billing.history_step(f.id, null, false, false, pg_temp.t(30.01) + interval '201 seconds', old)->>'status', 'not_yours');
-  perform pg_temp.ok('RQ14 ... nor renew it', billing.history_renew(f.id, old, pg_temp.t(30.01) + interval '202 seconds') is null);
+    history.step_done('day', f.step, old, 'ok', null, pg_temp.t(30.01) + interval '201 seconds')->>'status', 'not_yours');
+  perform pg_temp.ok('RQ14 ... nor renew it', not history.renew('day', f.step, old, pg_temp.t(30.01) + interval '202 seconds'));
+  perform pg_temp.fails('RQ14 ... nor write',
+    format('select history.bank_minutes(%s, %L, %L, %L, %L)', f.step, old,
+           jsonb_build_array(jsonb_build_object('ts', extract(epoch from pg_temp.t(-3))::bigint, 'pv_w', 1)), 'invhistory',
+           pg_temp.t(30.01) + interval '203 seconds'), 'claim lost');
 
-  -- 15: the share login breaks while a claimed plant's fetch runs: back to the queue, days kept
-  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31) where lane = sh and status = 'running';
+  -- 15: the share login breaks while a claimed plant's import runs: nothing handed out, days kept
+  perform pg_temp.finish(i.id, pg_temp.t(31)) from history.imports i where i.lane = sh and i.status = 'open';
   perform pg_temp.pid(990061501);
   insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990061501), b, pg_temp.t(31));
   perform pg_temp.pay(b, 'home', 'month', pg_temp.t(31));
   perform pg_temp.choose(b, pg_temp.pids('{990061501}'), pg_temp.t(31));
-  w := billing.history_take(pg_temp.t(31.01));
+  w := history.take(0, 1, pg_temp.t(31.01));
   f := pg_temp.fetch_row(b, pg_temp.pid(990061501));
   perform pg_temp.eq('RQ15 running on the share login', f.status || ':' || (f.lane = sh)::text, 'running:true');
-  update billing.history_fetches set day_next = day_next - 5 where id = f.id;
+  s := pg_temp.done(f, 'ok', pg_temp.t(31.01));
+  f := pg_temp.fetch_row(b, pg_temp.pid(990061501));
   update plants.logins set status = 'needs_reconnect' where id = sh;
-  w := billing.history_take(pg_temp.t(31.02));
-  perform pg_temp.eq('RQ15 login broke mid-fetch: back to the queue', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).status, 'queued');
-  perform pg_temp.ok('RQ15 ... its days kept', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next - 5);
+  w := history.take(0, 1, pg_temp.t(31.02));
+  perform pg_temp.ok('RQ15 login broke mid-import: nothing handed out', not pg_temp.handed(w, pg_temp.pid(990061501)));
+  perform pg_temp.ok('RQ15 ... its days kept', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next);
   update plants.logins set status = 'ok' where id = sh;
-  w := billing.history_take(pg_temp.t(31.03));
-  perform pg_temp.ok('RQ15 login back: carries on from where it was', (pg_temp.fetch_row(b, pg_temp.pid(990061501))).status = 'running'
-    and (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next - 5);
-  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31.04) where account = b and status = 'running';
+  w := history.take(0, 1, pg_temp.t(31.03));
+  perform pg_temp.ok('RQ15 login back: carries on from where it was', pg_temp.handed(w, pg_temp.pid(990061501))
+    and (pg_temp.fetch_row(b, pg_temp.pid(990061501))).day_next = f.day_next);
+  perform pg_temp.finish((pg_temp.fetch_row(b, pg_temp.pid(990061501))).id, pg_temp.t(31.04));
 
-  -- 16: a slowed fetch waiting between days does not hold the shared login
+  -- 16: a slowed import waiting between days does not hold the shared login
   perform pg_temp.pid(990061601); perform pg_temp.pid(990061602);
   insert into plants.claims (plant, account, claimed_at) values (pg_temp.pid(990061601), c1, pg_temp.t(32)), (pg_temp.pid(990061602), c2, pg_temp.t(32));
   perform pg_temp.pay(c1, 'home', 'month', pg_temp.t(32));
   perform pg_temp.pay(c2, 'home', 'month', pg_temp.t(32));
   perform pg_temp.choose(c1, pg_temp.pids('{990061601}'), pg_temp.t(32));
-  w := billing.history_take(pg_temp.t(32.01));
+  delete from history.totals where plant = pg_temp.pid(990061601);
+  w := history.take(0, 1, pg_temp.t(32.01));
   f := pg_temp.fetch_row(c1, pg_temp.pid(990061601));
-  update billing.history_fetches set target_s = 86400 where id = f.id;       -- A's 10th switch: a day long
-  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(32.01) + interval '10 seconds', f.claim);
-  perform pg_temp.ok('RQ16 the slowed fetch waits for its next day', (s->>'next_step_at')::timestamptz > pg_temp.t(32.02));
-  perform pg_temp.choose(c2, pg_temp.pids('{990061602}'), pg_temp.t(32.02));
-  w := billing.history_take(pg_temp.t(32.02) + interval '1 second');
-  perform pg_temp.ok('RQ16 another account''s first fetch starts on the same login at once',
-    exists (select 1 from jsonb_array_elements(w) x where (x->>'plant')::bigint = pg_temp.pid(990061602)));
+  update history.import_accounts set pace_s = 86400 where import = f.id;      -- A's 10th switch: a day long
+  s := pg_temp.done(f, 'ok', pg_temp.t(32.01) + interval '10 seconds');
+  perform pg_temp.ok('RQ16 the slowed import waits for its next row (a 119th of a day)',
+    (pg_temp.fetch_row(c1, pg_temp.pid(990061601))).next_at > pg_temp.t(32.01) + interval '10 minutes');
+  perform pg_temp.choose(c2, pg_temp.pids('{990061602}'), pg_temp.t(32.015));
+  w := history.take(0, 1, pg_temp.t(32.015) + interval '1 second');
+  perform pg_temp.ok('RQ16 another account''s first import starts on the same login at once', pg_temp.handed(w, pg_temp.pid(990061602)));
 
-  -- 18: the plants the queue is fetching, for the old recovery schedule to leave alone
-  perform pg_temp.ok('RQ18 fetching lists a queued or running plant', public.billing_jobs('fetching') @> ('[' || pg_temp.pid(990061602) || ']')::jsonb);
+  -- 18: the old engines are gone (SOLAR-686 H24)
+  perform pg_temp.ok('RQ18 no old history queue', to_regprocedure('billing.history_take(timestamptz)') is null
+    and to_regprocedure('private.first_load_continue()') is null);
 
   -- 20: readings never clear a delete; only a seat opening does
   perform pg_temp.ok('RQ20 no write path touches the plant row', to_regprocedure('billing.readings_arrived(bigint[])') is null);
