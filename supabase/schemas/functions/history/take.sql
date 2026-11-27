@@ -7,6 +7,7 @@ AS $function$
 declare
   cap int := ceil(history.setting('HISTORY_CALLS_PER_MINUTE', 600)::numeric / greatest(p_shards, 1));
   used int;
+  used0 int;
   out jsonb := '[]';
   ln uuid;
   r record;
@@ -20,6 +21,7 @@ begin
   end if;
   if p_shard = 0 then perform history.tidy(p_at); end if;
   used := coalesce((select hc.calls from history.calls hc where hc.minute = date_trunc('minute', p_at) and hc.shard = p_shard), 0);
+  used0 := used;
 
   -- the routes and the plants' versions in one statement (one snapshot): a step carries the version
   -- its route was read at, so a route that changes before the write is refused (H8)
@@ -44,6 +46,8 @@ begin
   -- the logins in a new order each call, so the share of the cap is not always spent on the same ones
   for ln in select y.lane from (select distinct x.lane from _ht_route x) y order by random() loop
     exit when used >= cap;
+    -- a take overlapping this one (a slow call into the next minute) leaves this login alone
+    continue when not pg_try_advisory_xact_lock(hashtext('history.lane'), hashtext(ln::text));
     continue when exists (select 1 from history.days d where d.lane = ln and d.status = 'queued' and d.claimed_until > p_at)
                or exists (select 1 from history.totals t where t.lane = ln and t.claimed_until > p_at);
     -- the import this login is walking, when its next step is due; else a new one
@@ -53,7 +57,9 @@ begin
        and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = x.account)
      order by i.started_at, i.id limit 1;
     if imp is null and not exists (select 1 from history.imports i join _ht_route x on x.plant = i.plant and x.lane = ln
-                                    where i.status = 'open' and i.started_at is not null and i.next_at <= p_at + interval '5 seconds') then
+                                    where i.status = 'open' and i.started_at is not null and i.next_at <= p_at + interval '5 seconds'
+                                      and exists (select 1 from history.import_accounts a
+                                                   where a.import = i.id and a.left_at is null and a.account = x.account)) then
       select i.id into imp from history.imports i join _ht_route x on x.plant = i.plant and x.lane = ln
        where i.status = 'open' and i.started_at is null
          and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = x.account)
@@ -127,8 +133,8 @@ begin
       exit;   -- one step per login
     end loop;
   end loop;
-  insert into history.calls as hc (minute, shard, calls) values (date_trunc('minute', p_at), p_shard, used)
-  on conflict (minute, shard) do update set calls = excluded.calls;
+  insert into history.calls as hc (minute, shard, calls) values (date_trunc('minute', p_at), p_shard, used - used0)
+  on conflict (minute, shard) do update set calls = hc.calls + excluded.calls;
   if p_shard = 0 then
     perform billing.heartbeat('history', p_at, jsonb_build_object('handed_out', jsonb_array_length(out)));
   end if;

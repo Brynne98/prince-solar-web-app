@@ -88,13 +88,13 @@ export function parseSeries(data: any): SeriesMap {
     const label = String(info?.label ?? "").toLowerCase().trim();
     if (!label) continue;
     const samples: Sample[] = [];
-    // records come in upload order: a time that steps back over half an hour is the hour the
+    // records come in upload order: a time that steps back is the hour the
     // clocks went back, a second time (SOLAR-686 H20); it keeps its own place
     let last = -1, pass = 0;
     for (const r of info.records || []) {
       const t0 = secondsOfDay(r?.time);
       if (t0 == null || r?.value == null || r.value === "") continue;
-      if (t0 < last - 1800) pass = SECOND_PASS;
+      if (t0 < last - 60) pass = SECOND_PASS;   // any step back in time, however sparse the uploads
       last = t0;
       samples.push({ t: t0 + pass, v: num(r.value) });
     }

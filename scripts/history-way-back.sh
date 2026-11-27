@@ -60,7 +60,7 @@ for f in billing/request_history billing/apply_purchase billing/write_seats bill
          public/poll_commit public/q_missing_minutes_day plants/plant_listed public/api_overview public/api_plant_states \
          private/history_done private/email_on_history public/plant_history_loading public/plant_bookmarks_clear \
          private/first_load_continue public/q_missing_minutes billing/history_take billing/history_step billing/history_renew \
-         private/schedule_jobs; do
+         private/schedule_jobs plants/purge; do
   old "$f"
 done
 cat <<'SQL'

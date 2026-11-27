@@ -372,6 +372,9 @@ migration refuses to run on the live project until the old engines have stopped.
    and write nothing.
 4. Check: `select status, count(*) from history.days group by 1`; the `history` heartbeat in
    `billing.job_heartbeats` moves each minute; `job-check` shows `history-queue` not failing.
+   A link that ran across the release can set an old bookmark after the copy; ask History for
+   those: `select history.start(plant_id, null, 'link') from public.plant_config where
+   backfill_next is not null` (none is the usual answer).
 5. Way back, if needed: `bash scripts/history-way-back.sh <commit before 0284> > way-back.sql`,
    run it, then deploy `recover` and `sync-plant-energy` from that commit. Rehearsed on a full
    production copy: `scripts/rehearse-history.sh` (deletes nothing in production; delete its dump

@@ -157,7 +157,9 @@ create or replace function lt3.history_result(p_from timestamptz, p_to timestamp
         select date_trunc('minute', closed_at) m, count(*) n from history.days
          where plant >= 980000000 and plant < 990000000 and why = 'import' and closed_at between p_from and p_to group by 1) x),
     'gap_days_closed', (select count(*) from history.days where plant >= 980000000 and why = 'gap' and status <> 'queued'),
-    'calls_per_minute', (select jsonb_agg(calls order by minute) from history.calls where minute between p_from and p_to),
+    -- the fleet's calls a minute: every group's counter summed
+    'calls_per_minute', (select jsonb_agg(c order by minute) from (select minute, sum(calls) c from history.calls
+                           where minute between p_from and p_to group by minute) x),
     -- rows written after a plant was switched out or deleted, each one as it was written (lt3.late)
     'rows_after_fence', (select count(*) from lt3.late),
     'brand_429', (select jsonb_object_agg(kind, calls) from plants.brand_calls where result in ('429', '403_throttle')),
@@ -175,6 +177,6 @@ begin
   end if;
   return null;
 end $$;
-create or replace trigger lt3_late after insert on public.agg_minute for each row execute function lt3.catch_late();
-create or replace trigger lt3_late after insert on public.inverter_history for each row execute function lt3.catch_late();
-create or replace trigger lt3_late after insert on public.plant_energy for each row execute function lt3.catch_late();
+create or replace trigger lt3_late after insert or update on public.agg_minute for each row execute function lt3.catch_late();
+create or replace trigger lt3_late after insert or update on public.inverter_history for each row execute function lt3.catch_late();
+create or replace trigger lt3_late after insert or update on public.plant_energy for each row execute function lt3.catch_late();

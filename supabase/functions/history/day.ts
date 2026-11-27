@@ -53,7 +53,7 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
 
   // 1. per-inverter history, one inverter at a time (4 calls in flight, not 4 x inverters)
   let banked = 0, failed = 0;
-  const days = [];
+  let days: any[] = [];
   try {
     for (const sn of sns) {
       const d = await H(s).inverterDay(s.login, sn, s.day!, true);
@@ -61,9 +61,13 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
       failed += d.failed ?? 0;
     }
   } catch (e) {
+    // a 429 is the login's: the step ends throttled and the login backs off (H7, H9)
+    if (/rate-limited/.test(String(e instanceof Error ? e.message : e))) throw e;
     failed++;
     noteError("invhistory_failed", e, { plant: s.plant, hourly: true });
     if (!s.feed) return { result: "failed", note: `history: ${e instanceof Error ? e.message : e}` };
+    // some inverters only: their sum is not the plant's, so no spine; the feed fills the day
+    days = [];
   }
   // past the days the feed keeps, a day where an endpoint failed banks no minutes: a partial sum
   // (no SoC, say) would stand for good; it is tried again whole (as the old walk did)
