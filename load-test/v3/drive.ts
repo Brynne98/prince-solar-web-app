@@ -6,7 +6,8 @@
 // every minute, runs the scenario's steps, and prints one JSON result at the end.
 //
 //   npx deno@2.5.6 run -A --node-modules-dir=none load-test/v3/drive.ts '<json options>'
-//   options: {label, minutes, db, api, key, mock, edge_container,
+//   options: {label, minutes, db, api, key, mock, edge_container, history (post History's queue
+//             groups each minute too, SOLAR-686 H26),
 //             warm (first minutes left out of the counts, default 1: a new fleet reads its
 //             inverter lists then), steps: [{minute, knobs?, sql?, stall_s?}]}
 //   steps run at the start of their minute (0 = the first minute); sql runs on its own
@@ -68,6 +69,13 @@ for (let m = 0; m < o.minutes; m++) {
       body: JSON.stringify({ shard: s.shard, shards: s.shards, delay_ms: s.delay_ms }), signal: AbortSignal.timeout(55000) })
       .then((r) => r.text()).catch(() => {}));
   }
+  if (o.history) {
+    for (const s of await sql`select * from history.shards()`) {
+      posts.push(fetch(`${o.api}/functions/v1/history`, { method: "POST", headers,
+        body: JSON.stringify({ task: "queue", shard: s.shard, shards: s.shards }), signal: AbortSignal.timeout(60000) })
+        .then((r) => r.text()).catch(() => {}));
+    }
+  }
   // the plants due this minute, as the routes stand now
   await sql`insert into lt3.expected (ts, plant_id, read_second)
             select ${ts}, plant_id, read_second from public.poll_routes(array(select generate_series(0, 59)), now())
@@ -88,7 +96,8 @@ await Promise.allSettled(posts);
 
 const last = first + (o.minutes - 1) * 60;
 const from = first + (o.warm ?? 1) * 60;
-const lost = await sql`select * from lt3.lost(${from}, ${last})`;
+// the reader's own rows only: a minute an import filled is still a minute the reader missed (H26)
+const lost = await sql`select * from lt3.lost_reader(${from}, ${last})`;
 const exp = lost.reduce((n, r) => n + Number(r.expected), 0), lst = lost.reduce((n, r) => n + Number(r.lost), 0);
 // second-to-save: a shard read starts at its delay
 const save = await sql`
@@ -115,6 +124,7 @@ const result = {
   cpu: { total_ms: cpuMs, per_call_ms: stEnd.calls ? Math.round(cpuMs / stEnd.calls * 100) / 100 : null,
          per_minute_ms: perMinute.map((m) => m.cpu_ms) },
   run_errors: runErr,
+  history: o.history ? (await sql`select lt3.history_result(to_timestamp(${first}), to_timestamp(${last + 60})) as r`)[0].r : null,
 };
 console.log(JSON.stringify(result));
 await sql.end();

@@ -15,8 +15,10 @@
 -- off. The old columns and tables (plant_config.backfill_*, temp_*, billing.history_fetches,
 -- history_lanes, private.refill_queue, private.recover_kicks) are dropped one release later (H23).
 
--- one transaction: the CLI adds none
+-- one transaction: the CLI adds none. A lock it cannot have in 5 s stops the release (it is run
+-- again) rather than holding the reader up behind it (H21, H23).
 begin;
+set local lock_timeout = '5s';
 
 create schema history;
 revoke all on schema history from public, anon, authenticated;
@@ -97,9 +99,6 @@ create table history.calls (
   minute        timestamptz primary key,
   calls         integer not null default 0
 );
-
--- the reader's 429s per login (H9): written by the brand adapter, read by history.take
-alter table plants.logins add column throttled_at timestamptz;
 
 revoke all on all tables in schema history from public, anon, authenticated;
 grant all on all tables in schema history to service_role;
@@ -742,14 +741,17 @@ grant execute on all functions in schema history to service_role;
 -- ---------------------------------------------------------------------------
 -- the reader's 429s per login (H9): the brand adapter marks, History reads (Plants' functions)
 
+-- plpgsql: the column is added last (it locks plants.logins, which the reader writes every minute)
 create function plants.throttled(p_login uuid, p_since timestamptz) returns boolean
-  language sql stable security definer set search_path to '' as $$
-  select coalesce((select l.throttled_at > p_since from plants.logins l where l.id = p_login), false)
-$$;
+  language plpgsql stable security definer set search_path to '' as $$
+begin
+  return coalesce((select l.throttled_at > p_since from plants.logins l where l.id = p_login), false);
+end $$;
 create function public.login_throttled(p_login uuid) returns void
-  language sql security definer set search_path to '' as $$
-  update plants.logins set throttled_at = now() where id = p_login
-$$;
+  language plpgsql security definer set search_path to '' as $$
+begin
+  update plants.logins set throttled_at = now() where id = p_login;
+end $$;
 revoke all on function plants.throttled(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function plants.throttled(uuid, timestamptz) to service_role;
 revoke all on function public.login_throttled(uuid) from public, anon, authenticated;
@@ -1710,5 +1712,8 @@ do $$ begin
     perform private.schedule_jobs();
   end if;
 end $$;
+
+-- last: this locks plants.logins until the commit, a moment from now
+alter table plants.logins add column throttled_at timestamptz;
 
 commit;
