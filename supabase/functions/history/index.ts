@@ -25,6 +25,8 @@ import { isRefused, jobs, type Result, type Step } from "./step.ts";
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 // every minute from pg_cron: stop well inside the minute so runs do not pile up
 const QUEUE_BUDGET_MS = 45_000;
+// no new step after this: a step (4 inverters, retries, the feed) ends before the next minute's call
+const TAKE_UNTIL_MS = 30_000;
 const RENEW_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -65,7 +67,7 @@ export async function runStep(s: Step & { refused?: boolean }): Promise<Result> 
 async function runQueue(shard: number, shards: number, started: number) {
   const out = { steps: 0, calls: 0, results: {} as Record<string, number> };
   for (;;) {
-    if (Date.now() - started > QUEUE_BUDGET_MS) break;
+    if (Date.now() - started > TAKE_UNTIL_MS) break;
     const steps = ((await jobs<Step[]>("take", { shard, shards })) ?? []).filter(Boolean);
     if (!steps.length) {
       // a paced import's next day may be seconds away: wait for it inside the minute (H4), else
@@ -73,7 +75,7 @@ async function runQueue(shard: number, shards: number, started: number) {
       const next = await jobs<number | null>("next");
       if (next == null) break;   // nothing queued anywhere
       const wait = Math.max(5, Number(next)) * 1000;   // at most one idle look every 5 s
-      if (Date.now() - started + wait > QUEUE_BUDGET_MS) break;
+      if (Date.now() - started + wait > TAKE_UNTIL_MS) break;
       await sleep(wait);
       continue;
     }
@@ -114,7 +116,12 @@ if (import.meta.main) serve("history", async (req) => {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     switch (body.task) {
       case "queue": return json({ ok: true, task: "queue", ...(await runQueue(Number(body.shard) || 0, Number(body.shards) || 1, started)) });
-      case "check": return json({ ok: true, task: "check", ...(await jobs("check")) });
+      case "check": {
+        const r = await jobs<{ given_up: number }>("check");
+        // holes still there when their day left the 14-day window (SOLAR-525)
+        if (r?.given_up) noteError("gap_day_given_up", new Error(`${r.given_up} hole days left the 14-day window unfilled`), { hourly: true });
+        return json({ ok: true, task: "check", ...r });
+      }
       case "trim": return json({ ok: true, task: "trim", ...(await runTrim()) });
       case "temps": return json({ ok: true, task: "temps", ...(await runTemps(nowMinuteEpoch())) });
       default: return json({ error: "task must be queue, check, trim or temps" }, 400);

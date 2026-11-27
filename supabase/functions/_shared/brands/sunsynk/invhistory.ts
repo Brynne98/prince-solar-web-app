@@ -157,7 +157,11 @@ export const webDayPath = (sn: string, day: string) =>
 
 /** One inverter-day in one web-host call; null when it failed or any spine series is missing. */
 export async function webInverterDay(acc: Account, sn: string, day: string): Promise<InverterDay | null> {
-  const m = parseSeries(await webGet(webDayPath(sn, day), acc).catch(() => null));
+  const m = parseSeries(await webGet(webDayPath(sn, day), acc).catch((e) => {
+    // a 429 is the login's: the official calls would meet it too (SOLAR-686 H9)
+    if (/rate-limited/.test(String(e instanceof Error ? e.message : e))) throw e;
+    return null;
+  }));
   const soc = seriesLike(m, "soc"), grid = seriesLike(m, "p-grid"), load = seriesLike(m, "p-load"), pv = seriesLike(m, "p-pv");
   if (!soc || !grid || !load || !pv) return null;
   return {

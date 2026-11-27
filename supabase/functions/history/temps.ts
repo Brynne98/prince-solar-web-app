@@ -49,6 +49,10 @@ export async function runTemps(ts: number) {
           const day = localDate(job.timezone);
           const x = await b.history.inverterExtras(acc, inv.sn, day, true);
           out.gridHz += await bank(inv, job.version, b.history.historyRows(x, dayClock(job.timezone, day)));
+          if (x.failed?.length) {
+            out.failed++;
+            noteError("grid_hz_failed", new Error(`${inv.sn}: ${x.failed.join("; ")}`), { plant: inv.plantId!, hourly: true });
+          }
         }
       } catch (e) {
         out.failed++;

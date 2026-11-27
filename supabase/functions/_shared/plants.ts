@@ -250,13 +250,6 @@ export type PlantJob = {
   vendorPlantId: VendorPlantId;
   /** plant_config.batt_positive_means; null until detected or set (0041) */
   battPositiveMeans: string | null;
-  /** plant_config.backfill_next / backfill_until (0044): YYYY-MM-DD, null = none pending */
-  backfillNext: string | null;
-  backfillUntil: string | null;
-  backfillTries: number;
-  /** plant_config.temp_next (0045): next local day of the inverter-temperature walk; null = not started */
-  tempNext: string | null;
-  tempTries: number;
   /** plant_config.has_grid (0042): false = off-grid, null = not known yet */
   hasGrid: boolean | null;
   /** billing.plants.version (0246): writes for the plant carry it; null before the billing switch-over */
@@ -290,11 +283,6 @@ export async function pollJobs(shard: number, shards: number, account?: string):
       plantName: r.plant_name ?? null,
       timezone: String(r.timezone),
       battPositiveMeans: r.batt_positive_means ?? null,
-      backfillNext: r.backfill_next ?? null,
-      backfillUntil: r.backfill_until ?? null,
-      backfillTries: Number(r.backfill_tries),
-      tempNext: r.temp_next ?? null,
-      tempTries: Number(r.temp_tries),
       hasGrid: r.has_grid ?? null,
       version: r.plant_version == null ? null : Number(r.plant_version),
       account: acc,

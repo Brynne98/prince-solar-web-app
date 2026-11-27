@@ -52,35 +52,43 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
   const clock = dayClock(s.timezone, s.day!);
 
   // 1. per-inverter history, one inverter at a time (4 calls in flight, not 4 x inverters)
-  let banked = 0, failed = 0, gotSpine = false;
+  let banked = 0, failed = 0;
+  const days = [];
   try {
-    const days = [];
     for (const sn of sns) {
       const d = await H(s).inverterDay(s.login, sn, s.day!, true);
       days.push(d);
       failed += d.failed ?? 0;
-      const rows = H(s).historyRows(d, clock);
-      if (rows.length) await write(s, "extras", { sn, rows });
-      if (s.refused) return { result: "refused" };
-    }
-    const spine = H(s).plantSpine(days, clock);
-    gotSpine = spine.size > 0;
-    const rows = gaps.map((ts) => ({ ts, row: spine.get(ts) }))
-      .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
-      .map(({ ts, row }) => ({ ts, ...row }));
-    if (rows.length) {
-      banked += await write(s, "minutes", { rows, source: "invhistory" });
-      if (s.refused) return { result: "refused" };
-      const filled = new Set(rows.map((r) => r.ts));
-      gaps = gaps.filter((ts) => !filled.has(ts));
     }
   } catch (e) {
     failed++;
     noteError("invhistory_failed", e, { plant: s.plant, hourly: true });
     if (!s.feed) return { result: "failed", note: `history: ${e instanceof Error ? e.message : e}` };
   }
-  const historyFailed = failed > 0 || !gotSpine;
-  if (!gaps.length) return { result: "ok", banked };
+  // past the days the feed keeps, a day where an endpoint failed banks no minutes: a partial sum
+  // (no SoC, say) would stand for good; it is tried again whole (as the old walk did)
+  if (!s.feed && failed > 0) return { result: "failed", note: `${failed} history endpoint(s) did not answer` };
+  // a write that fails (a lock held over 1 s, H21) fails the step, so it is tried again; it does
+  // not fall through to the plant feed's coarser rows
+  for (const [k, d] of days.entries()) {
+    const rows = H(s).historyRows(d, clock);
+    if (rows.length) await write(s, "extras", { sn: sns[k], rows });
+    if (s.refused) return { result: "refused" };
+  }
+  const spine = H(s).plantSpine(days, clock);
+  const spineRows = gaps.map((ts) => ({ ts, row: spine.get(ts) }))
+    .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
+    .map(({ ts, row }) => ({ ts, ...row }));
+  if (spineRows.length) {
+    banked += await write(s, "minutes", { rows: spineRows, source: "invhistory" });
+    if (s.refused) return { result: "refused" };
+    const filled = new Set(spineRows.map((r) => r.ts));
+    gaps = gaps.filter((ts) => !filled.has(ts));
+  }
+  // every endpoint answered and none had minutes (before the plant ran, a dead logger): nothing
+  // to try again
+  const historyFailed = failed > 0;
+  if (!gaps.length || (!historyFailed && !spine.size && !s.feed)) return { result: "ok", banked, note: spine.size ? undefined : "no history for this day" };
   // past the days the feed keeps: a day whose history did not answer is retried (SOLAR-525)
   if (!s.feed) return historyFailed ? { result: "failed", note: `${failed} history endpoint(s) did not answer`, banked } : { result: "ok", banked };
 

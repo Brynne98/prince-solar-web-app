@@ -409,7 +409,9 @@ begin
      and not plants.throttled(x.lane, p_at - interval '2 minutes')
      and not exists (select 1 from history.lanes hl where hl.lane = x.lane and hl.backoff_until > p_at);
 
-  for ln in select distinct x.lane from _ht_route x order by 1 loop
+  -- the logins in a new order each call, so the share of the cap is not always spent on the same ones
+  for ln in select y.lane from (select distinct x.lane from _ht_route x) y order by random() loop
+    exit when used >= cap;
     continue when exists (select 1 from history.days d where d.lane = ln and d.status = 'queued' and d.claimed_until > p_at)
                or exists (select 1 from history.totals t where t.lane = ln and t.claimed_until > p_at);
     -- the import this login is walking, when its next step is due; else a new one
@@ -453,8 +455,8 @@ begin
       order by due, pri
     loop
       c := history.cost(r.kind, r.plant, r.grid_only, r.full_sweep);
-      -- within the group's share; one step a minute always, so a large plant is never shut out
-      exit when used > 0 and used + c > cap;
+      -- a step goes while the group's share is not spent (the last one may go over by its own
+      -- cost), so a dear step (kWh totals, a plant of many inverters) is never shut out by cheap ones
       cl := gen_random_uuid();
       if r.k = 'day' then
         -- the import first, then the day (one lock order with step_done and stop: import, then day)
@@ -490,7 +492,6 @@ begin
          where x.plant = r.plant));
       exit;   -- one step per login
     end loop;
-    exit when used >= cap;
   end loop;
   insert into history.calls as hc (minute, shard, calls) values (date_trunc('minute', p_at), p_shard, used)
   on conflict (minute, shard) do update set calls = excluded.calls;

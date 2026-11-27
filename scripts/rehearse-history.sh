@@ -24,6 +24,7 @@ log "reset the local stack to 0283"
 supabase db reset --local --workdir "$WD" --version 0283 --no-seed >/dev/null
 "$PSQL" -Xq "$DB" -c "select cron.unschedule(jobid) from cron.job" >/dev/null 2>&1 || true
 
+if [ ! -s "$OUT/data.sql" ]; then
 log "dump production data (read only)"
 supabase db dump --remote="$REF" --data-only --use-copy -s public,private,billing,plants,msg \
   -x plants.logins -x billing.payment_methods -x billing.payment_events -x msg.outbox -x msg.push_sends \
@@ -34,6 +35,8 @@ supabase db query --remote="$REF" --read-only -o csv \
   "select id, account, user_id, brand, kind, username, status, linked_at, last_ok_at, last_error, last_try_at, last_try from plants.logins" \
   2>/dev/null | sed 1d > "$OUT/logins.csv"
 supabase db query --remote="$REF" --read-only -o csv "select id from auth.users" 2>/dev/null | sed 1d > "$OUT/users.csv"
+fi
+sed -i '' '1{/^id/d;}' "$OUT/logins.csv" "$OUT/users.csv"
 
 log "load the copy"
 "$PSQL" -Xq -v ON_ERROR_STOP=1 "$DB" <<SQL
@@ -75,3 +78,13 @@ log "stand-in reader: $(grep -c . "$OUT/saves.log") saves, $(grep -c failed "$OU
 "$PSQL" -XAt "$DB" -c "select 'after: open imports ' || (select count(*) from history.imports where status = 'open') || ', queued days ' ||
   (select count(*) from history.days where status = 'queued') || ', lanes ' || (select count(*) from history.lanes) ||
   ', old jobs left ' || (select count(*) from cron.job where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy'))" | tee -a "$OUT/rehearsal.log"
+
+log "the way back, with the copy's open work in it"
+git -C "$REPO" show main:supabase/schemas/functions/private/schedule_jobs.sql >/dev/null
+bash "$REPO/scripts/history-way-back.sh" main > "$OUT/way-back.sql"
+B0=$(python3 -c 'import time; print(time.time())')
+"$PSQL" -X -v ON_ERROR_STOP=1 "$DB" -f "$OUT/way-back.sql" > "$OUT/way-back.out" 2>&1 && ok=yes || ok=no
+log "way back: ran=$ok in $(python3 -c "import time; print(round(time.time() - $B0, 1))") s; $("$PSQL" -XAt "$DB" -c "select 'history schema gone: ' || (to_regnamespace('history') is null) || ', first loads ' ||
+  (select count(*) from public.plant_config where backfill_next is not null) || ', fetches ' ||
+  (select count(*) from billing.history_fetches where status in ('queued','running')) || ', old jobs ' ||
+  (select count(*) from cron.job where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy'))")"
