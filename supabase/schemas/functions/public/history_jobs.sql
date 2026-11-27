@@ -9,7 +9,8 @@ begin
     when 'take'      then history.take(coalesce((p_args->>'shard')::int, 0), coalesce((p_args->>'shards')::int, 1))
     when 'renew'     then to_jsonb(history.renew(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid))
     when 'done'      then history.step_done(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid,
-                                            p_args->>'result', p_args->>'note')
+                                            p_args->>'result', p_args->>'note', now(), (p_args->>'calls')::int)
+    when 'next'      then to_jsonb(history.next_due())
     when 'missing'   then coalesce((select jsonb_agg(m.ts order by m.ts) from history.missing((p_args->>'id')::bigint) m), '[]')
     when 'minutes'   then to_jsonb(history.bank_minutes((p_args->>'id')::bigint, (p_args->>'claim')::uuid, p_args->'rows', p_args->>'source'))
     when 'extras'    then to_jsonb(history.bank_extras(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid,

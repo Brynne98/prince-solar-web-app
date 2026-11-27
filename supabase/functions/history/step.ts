@@ -14,6 +14,7 @@ export type Step = {
   kind: "minutes" | "extras" | "totals";
   day: string | null;
   why: "import" | "gap" | "check" | null;
+  tries: number;
   grid_only: boolean;
   full: boolean;
   feed: boolean;

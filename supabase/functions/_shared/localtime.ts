@@ -35,12 +35,28 @@ const nextDay = (day: string) => {
 };
 
 /**
- * A local day's clock: its first and last epoch second (a day is 23, 24 or 25 hours long), and
- * the epoch of a wall-clock time on it. Brands send history at wall-clock times.
+ * A local day's clock: its first and last epoch second (a day is 23, 24 or 25 hours long), the
+ * epoch of a wall-clock time on it, and the wall-clock time of an epoch. Brands send history at
+ * wall-clock times. On the day the clocks go back an hour repeats: a time in its second pass is
+ * given as wall seconds + 86400 (the adapter sees the brand's times step back, SECOND_PASS).
  */
-export type DayClock = { start: number; end: number; at: (wallSec: number) => number };
+export const SECOND_PASS = 86400;
+export type DayClock = { start: number; end: number; at: (wallSec: number) => number; wall: (epoch: number) => number };
 export function dayClock(tz: string, day: string): DayClock {
   const start = dayStartEpoch(tz, day), end = dayStartEpoch(tz, nextDay(day));
-  const plain = end - start === 86400 && offsetMin(tz, start * 1000) === offsetMin(tz, (end - 1) * 1000);
-  return { start, end, at: plain ? (s) => start + s : (s) => wallEpoch(tz, day, s) };
+  const off0 = offsetMin(tz, start * 1000);
+  const plain = end - start === 86400 && off0 === offsetMin(tz, (end - 1) * 1000);
+  if (plain) return { start, end, at: (s) => start + s, wall: (e) => e - start };
+  // a wall time is the before-change or after-change offset; in the repeated hour both are real
+  // (the first pass is the earlier), in the skipped hour neither (the before-change one is used)
+  const off1 = offsetMin(tz, (end - 1) * 1000);
+  const [y, m, d] = day.split("-").map(Number);
+  const at = (s: number) => {
+    const late = s >= SECOND_PASS, w = late ? s - SECOND_PASS : s;
+    const asUtc = Date.UTC(y, m - 1, d) / 1000 + w;
+    const real = [asUtc - off0 * 60, asUtc - off1 * 60].filter((t) => offsetMin(tz, t * 1000) * 60 === asUtc - t);
+    if (!real.length) return asUtc - off0 * 60;
+    return late ? Math.max(...real) : Math.min(...real);
+  };
+  return { start, end, at, wall: (e) => e - start + (offsetMin(tz, e * 1000) - off0) * 60 };
 }

@@ -22,3 +22,11 @@ Deno.test("H20 London, clocks back (27 Oct 2030): the day is 25 h", () => {
   assertEquals((c.end - c.start) / 60, 1500);
   assertEquals(c.at(12 * 3600), Date.UTC(2030, 9, 27, 12) / 1000);   // noon GMT
 });
+
+Deno.test("H20 London, clocks back: the repeated hour's second pass has its own minutes", () => {
+  const c = dayClock("Europe/London", "2030-10-27");
+  const first = c.at(3600 + 1800), second = c.at(86400 + 3600 + 1800);   // 01:30 BST, then 01:30 GMT
+  assertEquals(second - first, 3600);
+  assertEquals(c.wall(second), 3600 + 1800);
+  assertEquals(c.wall(c.at(12 * 3600)), 12 * 3600);
+});

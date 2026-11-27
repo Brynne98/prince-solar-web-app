@@ -638,6 +638,7 @@
    "part": "history",
    "writers": [
     "supabase/schemas/functions/history/clean.sql",
+    "supabase/schemas/functions/history/spent.sql",
     "supabase/schemas/functions/history/take.sql"
    ]
   }

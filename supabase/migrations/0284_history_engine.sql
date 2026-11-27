@@ -67,6 +67,8 @@ create table history.days (
   claimed_until timestamptz,
   lane          uuid,
   version       bigint,
+  calls         integer,
+  shard         integer,
   note          text,
   created_at    timestamptz not null default now(),
   closed_at     timestamptz
@@ -76,6 +78,7 @@ create unique index days_one_open on history.days (plant, day, kind) where statu
 create index days_due on history.days (due_at) where status = 'queued';
 create index days_import on history.days (import, status);
 create index days_closed on history.days (closed_at) where status <> 'queued';
+create index days_lane on history.days (lane) where status = 'queued' and claimed_until is not null;
 
 create table history.totals (
   plant         bigint primary key references plants.plants (id) on delete cascade,
@@ -86,8 +89,11 @@ create table history.totals (
   claimed_until timestamptz,
   lane          uuid,
   version       bigint,
+  calls         integer,
+  shard         integer,
   note          text
 );
+create index totals_lane on history.totals (lane) where claimed_until is not null;
 
 create table history.lanes (
   lane          uuid primary key,
@@ -95,9 +101,13 @@ create table history.lanes (
   backoff_until timestamptz
 );
 
+-- per minute and group: each group of 25 logins spends its share of the fleet cap, so no group
+-- waits on another's lock (H9)
 create table history.calls (
-  minute        timestamptz primary key,
-  calls         integer not null default 0
+  minute        timestamptz not null,
+  shard         integer not null,
+  calls         integer not null default 0,
+  primary key (minute, shard)
 );
 
 revoke all on all tables in schema history from public, anon, authenticated;
@@ -130,15 +140,16 @@ create function history.cost(p_kind text, p_plant bigint, p_grid_only boolean, p
          end
 $$;
 
--- does the plant hold temperatures for a day already (an import after a switch back skips it)
+-- does the plant hold a day's temperatures already (an import after a switch back skips it): most
+-- of the day's samples, with both temperatures (the web host's day carries AC only)
 create function history.has_extras(p_plant bigint, p_day date) returns boolean
   language sql stable security definer set search_path to '' as $$
   with b as (select public.day_start_epoch_tz(p_day, plants.tz(p_plant)) lo,
                     public.day_start_epoch_tz(p_day + 1, plants.tz(p_plant)) hi)
-  select exists (select 1 from public.inverter_history h, b
-                  where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_c is not null)
-      or exists (select 1 from public.inverter_history_5m h, b
-                  where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_max is not null)
+  select (select count(*) from public.inverter_history h, b
+           where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_c is not null and h.dc_c is not null) >= 100
+      or (select count(*) from public.inverter_history_5m h, b
+           where h.plant_id = p_plant and h.ts >= b.lo and h.ts < b.hi and h.ac_max is not null and h.dc_max is not null) >= 100
 $$;
 
 -- the oldest minute History may fill for a plant: its first stored minute or its oldest import
@@ -316,14 +327,25 @@ create function history.shards(p_at timestamptz default now()) returns table(sha
   select g, n.k from n, generate_series(0, n.k - 1) g
 $$;
 
--- Accounts that stopped holding a plant leave its import; an import with nobody left stops.
+-- Billing's door for History (H8): does the account have an open seat on the plant (its plan's
+-- state aside: a trial over or an unpaid plan keeps the seat, and the import waits)
+create function billing.has_seat(p_account uuid, p_plant bigint, p_at timestamptz) returns boolean
+  language sql stable security definer set search_path to '' as $$
+  select exists (select 1 from billing.seats s where s.account = p_account and s.plant = p_plant
+                    and s.chosen_at <= p_at and (s.closed_at is null or s.closed_at > p_at))
+$$;
+revoke all on function billing.has_seat(uuid, bigint, timestamptz) from public, anon, authenticated;
+
+-- An account whose seat on a plant closed (switched out) leaves its import; an import with nobody
+-- left stops. A plant past its trial or over the seat count keeps its import and its days: it
+-- waits until it is read again (H8).
 create function history.tidy(p_at timestamptz) returns void
   language plpgsql security definer set search_path to '' as $$
 begin
   update history.import_accounts a set left_at = p_at
     from history.imports i
    where i.id = a.import and i.status = 'open' and a.left_at is null
-     and not billing.holds_plant(a.account, i.plant, p_at);
+     and not billing.has_seat(a.account, i.plant, p_at);
   perform history.stop_import(i.id, case when private.history_deleting(i.plant) then 'deleted' else 'switched_out' end, p_at)
      from history.imports i
     where i.status = 'open'
@@ -331,38 +353,40 @@ begin
            or not exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null));
 end $$;
 
--- Hand out at most one step per login (lane) of this group: a gap or check day first, then the
--- import the login is walking, then a new import (the account whose last import on the login
--- started longest ago first), then kWh totals. Only through a route Billing reads now (H8), a
--- login that is ok, not backed off, and not answered 429 by the reader in the last 2 minutes;
--- under the fleet cap of calls a minute (H9).
+-- Hand out at most one step per login (lane) of this group: of a hole or check day, the import the
+-- login is walking (or a new one: the account whose last import on the login started longest ago
+-- first) and the plant's kWh totals, the one due longest ago, so none starves another. Only
+-- through a route Billing reads now (H8), a login that is ok, not backed off, and not answered 429
+-- by the reader in the last 2 minutes; within this group's share of the fleet cap (H9).
 create function history.take(p_shard integer default 0, p_shards integer default 1, p_at timestamptz default now())
 returns jsonb
   language plpgsql security definer set search_path to '' as $$
 declare
-  cap int := history.setting('HISTORY_CALLS_PER_MINUTE', 600);
+  cap int := ceil(history.setting('HISTORY_CALLS_PER_MINUTE', 600)::numeric / greatest(p_shards, 1));
   used int;
   out jsonb := '[]';
   ln uuid;
-  k text; sid bigint; pl bigint; kd text; go boolean; fs boolean;
+  r record;
   imp bigint;
   c int;
-  v bigint;
   cl uuid;
+  got boolean;
 begin
   if p_shards < 1 or p_shard < 0 or p_shard >= p_shards then
     raise exception 'history.take: shard % of %', p_shard, p_shards;
   end if;
   if p_shard = 0 then perform history.tidy(p_at); end if;
-  insert into history.calls as hc (minute, calls) values (date_trunc('minute', p_at), 0)
-  on conflict (minute) do update set calls = hc.calls returning hc.calls into used;
+  used := coalesce((select hc.calls from history.calls hc where hc.minute = date_trunc('minute', p_at) and hc.shard = p_shard), 0);
 
-  create temp table if not exists _ht_route (plant bigint primary key, account uuid, lane uuid) on commit drop;
+  -- the routes and the plants' versions in one statement (one snapshot): a step carries the version
+  -- its route was read at, so a route that changes before the write is refused (H8)
+  create temp table if not exists _ht_route (plant bigint primary key, account uuid, lane uuid, version bigint) on commit drop;
   truncate _ht_route;
   insert into _ht_route
-  select distinct on (rr.plant) rr.plant, rr.account, rr.lane
+  select distinct on (rr.plant) rr.plant, rr.account, rr.lane, p.version
     from billing.reading_routes(p_at) rr
     join plants.login_info l on l.id = rr.lane and l.status = 'ok'
+    join plants.plant_info p on p.id = rr.plant
    where abs(hashtext(rr.lane::text)) % p_shards = p_shard
      and not plants.throttled(rr.lane, p_at - interval '2 minutes')
      and not exists (select 1 from history.lanes hl where hl.lane = rr.lane and hl.backoff_until > p_at)
@@ -372,77 +396,91 @@ begin
                      where i.plant = rr.plant and i.status = 'open' and ia.left_at is null and ia.account = rr.account) desc,
             rr.account;
 
-  for ln in select distinct r.lane from _ht_route r order by 1 loop
+  for ln in select distinct x.lane from _ht_route x order by 1 loop
     continue when exists (select 1 from history.days d where d.lane = ln and d.status = 'queued' and d.claimed_until > p_at)
                or exists (select 1 from history.totals t where t.lane = ln and t.claimed_until > p_at);
-    k := null; sid := null; imp := null;
-    -- 1. a hole or a check day
-    select 'day', d.id, d.plant, d.kind, d.grid_only, false into k, sid, pl, kd, go, fs
-      from history.days d join _ht_route r on r.plant = d.plant and r.lane = ln
-     where d.status = 'queued' and d.import is null and d.due_at <= p_at
-       and (d.claimed_until is null or d.claimed_until <= p_at)
-     order by (d.why = 'gap') desc, d.day desc, (d.kind = 'minutes') desc, d.id limit 1;
-    -- 2. the import this login is walking, when its next day is due; else a new one
-    if sid is null then
-      select i.id into imp from history.imports i join _ht_route r on r.plant = i.plant and r.lane = ln
-       where i.status = 'open' and i.started_at is not null and i.next_at <= p_at
-         and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = r.account)
-       order by i.started_at, i.id limit 1;
-      if imp is null then
-        select i.id into imp from history.imports i join _ht_route r on r.plant = i.plant and r.lane = ln
-         where i.status = 'open' and i.started_at is null
-           and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = r.account)
-         order by (select max(o.started_at) from history.imports o join history.import_accounts oa on oa.import = o.id
-                    where o.lane = ln and o.id <> i.id
-                      and oa.account in (select a.account from history.import_accounts a where a.import = i.id)) nulls first,
-                  i.requested_at, i.id
-         limit 1;
-      end if;
-      if imp is not null then
-        select 'day', d.id, d.plant, d.kind, d.grid_only, false into k, sid, pl, kd, go, fs
-          from history.days d
-         where d.import = imp and d.status = 'queued' and d.due_at <= p_at
-           and (d.claimed_until is null or d.claimed_until <= p_at)
-         order by d.day desc, (d.kind = 'minutes') desc, d.id limit 1;
-      end if;
+    -- the import this login is walking, when its next step is due; else a new one
+    imp := null;
+    select i.id into imp from history.imports i join _ht_route x on x.plant = i.plant and x.lane = ln
+     where i.status = 'open' and i.started_at is not null and i.next_at <= p_at
+       and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = x.account)
+     order by i.started_at, i.id limit 1;
+    if imp is null and not exists (select 1 from history.imports i join _ht_route x on x.plant = i.plant and x.lane = ln
+                                    where i.status = 'open' and i.started_at is not null and i.next_at <= p_at + interval '5 seconds') then
+      select i.id into imp from history.imports i join _ht_route x on x.plant = i.plant and x.lane = ln
+       where i.status = 'open' and i.started_at is null
+         and exists (select 1 from history.import_accounts a where a.import = i.id and a.left_at is null and a.account = x.account)
+       order by (select max(o.started_at) from history.imports o join history.import_accounts oa on oa.import = o.id
+                  where o.lane = ln and o.id <> i.id
+                    and oa.account in (select a.account from history.import_accounts a where a.import = i.id)) nulls first,
+                i.requested_at, i.id
+       limit 1;
     end if;
-    -- 3. kWh totals
-    if sid is null then
-      select 'totals', t.plant, t.plant, 'totals', false, t.full_sweep into k, sid, pl, kd, go, fs
-        from history.totals t join _ht_route r on r.plant = t.plant and r.lane = ln
-       where t.due_at <= p_at and (t.claimed_until is null or t.claimed_until <= p_at)
-       order by t.due_at, t.plant limit 1;
-    end if;
-    continue when sid is null;
 
-    c := history.cost(kd, pl, go, fs);
-    exit when used > 0 and used + c > cap;
-    used := used + c;
-    v := (select p.version from plants.plant_info p where p.id = pl);
-    cl := gen_random_uuid();
-    if k = 'day' then
-      update history.days set claim = cl, claimed_until = p_at + interval '90 seconds', lane = ln, version = v where id = sid;
-      update history.imports set started_at = p_at, next_at = p_at, lane = ln
-       where id = (select d.import from history.days d where d.id = sid) and started_at is null;
-    else
-      update history.totals set claim = cl, claimed_until = p_at + interval '90 seconds', lane = ln, version = v where plant = sid;
-    end if;
-    out := out || jsonb_build_array((
-      select jsonb_build_object(
-        'step', k, 'id', sid, 'claim', cl, 'plant', pl, 'version', v, 'kind', kd,
-        'day', d.day, 'why', d.why, 'grid_only', go, 'full', fs, 'calls', c,
-        -- the plant feed fills what inverter history cannot, for the days it still holds (H11)
-        'feed', coalesce(d.why <> 'import' or d.day >= (p_at at time zone plants.tz(pl))::date - 13, false),
-        'timezone', plants.tz(pl), 'brand', p.brand, 'vendor_plant_id', p.vendor_id,
-        'login', jsonb_build_object('id', l.id, 'user_id', l.user_id, 'username', l.username, 'brand', l.brand,
-                                    'access_token', tk.access_token, 'access_expires_at', tk.access_expires_at))
-        from plants.plant_info p
-        join plants.login_info l on l.id = ln
-        join plants.login_tokens tk on tk.id = l.id
-        left join history.days d on k = 'day' and d.id = sid
-       where p.id = pl));
+    -- the candidates, the one due longest ago first; a hole before totals before an import on a tie
+    got := false;
+    for r in
+      select * from (
+        (select 'day' as k, d.id, d.plant, d.kind, d.grid_only, false as full_sweep, d.due_at as due, 0 as pri, d.import
+           from history.days d join _ht_route x on x.plant = d.plant and x.lane = ln
+          where d.status = 'queued' and d.import is null and d.due_at <= p_at
+            and (d.claimed_until is null or d.claimed_until <= p_at)
+          order by (d.why = 'gap') desc, d.day desc, (d.kind = 'minutes') desc, d.id limit 1)
+        union all
+        (select 'totals', t.plant, t.plant, 'totals', false, t.full_sweep, t.due_at, 1, null::bigint
+           from history.totals t join _ht_route x on x.plant = t.plant and x.lane = ln
+          where t.due_at <= p_at and (t.claimed_until is null or t.claimed_until <= p_at)
+          order by t.due_at, t.plant limit 1)
+        union all
+        (select 'day', d.id, d.plant, d.kind, d.grid_only, false, coalesce((select i.next_at from history.imports i where i.id = d.import), d.due_at), 2, d.import
+           from history.days d
+          where imp is not null and d.import = imp and d.status = 'queued' and d.due_at <= p_at
+            and (d.claimed_until is null or d.claimed_until <= p_at)
+          order by d.day desc, (d.kind = 'minutes') desc, d.id limit 1)) cand
+      order by due, pri
+    loop
+      c := history.cost(r.kind, r.plant, r.grid_only, r.full_sweep);
+      -- within the group's share; one step a minute always, so a large plant is never shut out
+      exit when used > 0 and used + c > cap;
+      cl := gen_random_uuid();
+      if r.k = 'day' then
+        -- the import first, then the day (one lock order with step_done and stop: import, then day)
+        if r.import is not null then
+          update history.imports set started_at = coalesce(started_at, p_at), next_at = coalesce(next_at, p_at), lane = ln
+           where id = r.import and status = 'open';
+        end if;
+        update history.days d set claim = cl, claimed_until = p_at + interval '90 seconds', lane = ln, calls = c, shard = p_shard,
+                                  version = (select x.version from _ht_route x where x.plant = d.plant)
+         where d.id = r.id and d.status = 'queued' and (d.claimed_until is null or d.claimed_until <= p_at);
+      else
+        update history.totals t set claim = cl, claimed_until = p_at + interval '90 seconds', lane = ln, calls = c, shard = p_shard,
+                                    version = (select x.version from _ht_route x where x.plant = t.plant)
+         where t.plant = r.id and (t.claimed_until is null or t.claimed_until <= p_at);
+      end if;
+      continue when not found;   -- another run took or closed it in the meantime
+      used := used + c;
+      got := true;
+      out := out || jsonb_build_array((
+        select jsonb_build_object(
+          'step', r.k, 'id', r.id, 'claim', cl, 'plant', r.plant, 'version', x.version, 'kind', r.kind,
+          'day', d.day, 'why', d.why, 'tries', coalesce(d.tries, 0), 'grid_only', r.grid_only, 'full', r.full_sweep, 'calls', c,
+          -- the plant feed fills what inverter history cannot, for the days it still holds (H11)
+          'feed', coalesce(d.why <> 'import' or d.day >= (p_at at time zone plants.tz(r.plant))::date - 13, false),
+          'timezone', plants.tz(r.plant), 'brand', p.brand, 'vendor_plant_id', p.vendor_id,
+          'login', jsonb_build_object('id', l.id, 'user_id', l.user_id, 'username', l.username, 'brand', l.brand,
+                                      'access_token', tk.access_token, 'access_expires_at', tk.access_expires_at))
+          from _ht_route x
+          join plants.plant_info p on p.id = x.plant
+          join plants.login_info l on l.id = ln
+          join plants.login_tokens tk on tk.id = l.id
+          left join history.days d on r.k = 'day' and d.id = r.id
+         where x.plant = r.plant));
+      exit;   -- one step per login
+    end loop;
+    exit when used >= cap;
   end loop;
-  update history.calls set calls = used where minute = date_trunc('minute', p_at);
+  insert into history.calls as hc (minute, shard, calls) values (date_trunc('minute', p_at), p_shard, used)
+  on conflict (minute, shard) do update set calls = excluded.calls;
   if p_shard = 0 then
     perform billing.heartbeat('history', p_at, jsonb_build_object('handed_out', jsonb_array_length(out)));
   end if;
@@ -466,13 +504,16 @@ end $$;
 -- The end of a step (H7). ok: done. failed: retried twice a minute apart, then given up.
 -- throttled: the login backs off, doubling from 60 s to 1 h; no try spent. wait (no inverter
 -- serials yet, out of time): handed back, no try spent. refused: the plant is not read now; the
--- step waits for tidy or a route.
+-- step waits for tidy or a route. Only the holder of a live claim ends a step (H6). p_calls: the
+-- calls the step made, so the fleet count is what was spent, not what was reserved (H9).
+-- Locks: the import, then the day (as take and stop).
 create function history.step_done(p_step text, p_id bigint, p_claim uuid, p_result text, p_note text default null,
-                                  p_at timestamptz default now()) returns jsonb
+                                  p_at timestamptz default now(), p_calls integer default null) returns jsonb
   language plpgsql security definer set search_path to '' as $$
 declare
   d history.days;
   t history.totals;
+  imp bigint;
   wait_s int;
   pace int;
   done_n int;
@@ -485,10 +526,11 @@ begin
   if p_step = 'totals' then
     select * into t from history.totals where plant = p_id for update;
     if not found then return jsonb_build_object('status', 'gone'); end if;
-    if t.claim is distinct from p_claim then return jsonb_build_object('status', 'not_yours'); end if;
+    if t.claim is distinct from p_claim or t.claimed_until <= p_at then return jsonb_build_object('status', 'not_yours'); end if;
+    perform history.spent(t.shard, t.calls, p_calls, p_at);
     if p_result = 'throttled' then perform history.back_off(t.lane, p_at); end if;
     if p_result = 'ok' or (p_result = 'failed' and t.tries + 1 >= 3) then
-      perform history.lane_ok(t.lane) where p_result = 'ok';
+      if p_result = 'ok' then perform history.lane_ok(t.lane); end if;
       delete from history.totals where plant = p_id;
       return jsonb_build_object('status', case when p_result = 'ok' then 'done' else 'given_up' end);
     end if;
@@ -500,9 +542,12 @@ begin
     return jsonb_build_object('status', 'queued');
   end if;
 
+  imp := (select x.import from history.days x where x.id = p_id);
+  if imp is not null then perform 1 from history.imports where id = imp for update; end if;
   select * into d from history.days where id = p_id for update;
   if not found or d.status <> 'queued' then return jsonb_build_object('status', coalesce(d.status, 'gone')); end if;
-  if d.claim is distinct from p_claim then return jsonb_build_object('status', 'not_yours'); end if;
+  if d.claim is distinct from p_claim or d.claimed_until <= p_at then return jsonb_build_object('status', 'not_yours'); end if;
+  perform history.spent(d.shard, d.calls, p_calls, p_at);
 
   if p_result = 'throttled' then
     wait_s := history.back_off(d.lane, p_at);
@@ -539,6 +584,24 @@ begin
   return jsonb_build_object('status', (select x.status from history.days x where x.id = p_id),
                             'next_at', (select i.next_at from history.imports i where i.id = d.import));
 end $$;
+
+-- the calls a step made, against what take reserved for it (H9)
+create function history.spent(p_shard integer, p_reserved integer, p_calls integer, p_at timestamptz) returns void
+  language sql security definer set search_path to '' as $$
+  insert into history.calls as hc (minute, shard, calls)
+  select date_trunc('minute', p_at), coalesce(p_shard, 0), greatest(p_calls - coalesce(p_reserved, 0), 0)
+   where p_calls is not null and p_calls > coalesce(p_reserved, 0)
+  on conflict (minute, shard) do update set calls = hc.calls + excluded.calls
+$$;
+
+-- seconds until the next step of any group is due, for an idle worker (H4: a paced import's next day)
+create function history.next_due(p_at timestamptz default now()) returns integer
+  language sql stable security definer set search_path to '' as $$
+  select greatest(0, ceil(extract(epoch from least(
+           (select min(i.next_at) from history.imports i where i.status = 'open' and i.started_at is not null),
+           (select min(d.due_at) from history.days d where d.status = 'queued' and d.import is null and d.claimed_until is null),
+           (select min(t.due_at) from history.totals t where t.claimed_until is null)) - p_at)))::integer
+$$;
 
 create function history.back_off(p_lane uuid, p_at timestamptz) returns integer
   language sql security definer set search_path to '' as $$
@@ -700,7 +763,8 @@ begin
     when 'take'      then history.take(coalesce((p_args->>'shard')::int, 0), coalesce((p_args->>'shards')::int, 1))
     when 'renew'     then to_jsonb(history.renew(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid))
     when 'done'      then history.step_done(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid,
-                                            p_args->>'result', p_args->>'note')
+                                            p_args->>'result', p_args->>'note', now(), (p_args->>'calls')::int)
+    when 'next'      then to_jsonb(history.next_due())
     when 'missing'   then coalesce((select jsonb_agg(m.ts order by m.ts) from history.missing((p_args->>'id')::bigint) m), '[]')
     when 'minutes'   then to_jsonb(history.bank_minutes((p_args->>'id')::bigint, (p_args->>'claim')::uuid, p_args->'rows', p_args->>'source'))
     when 'extras'    then to_jsonb(history.bank_extras(p_args->>'step', (p_args->>'id')::bigint, (p_args->>'claim')::uuid,
@@ -1608,102 +1672,136 @@ drop function billing.history_renew(bigint, uuid, timestamp with time zone);
 
 -- ---------------------------------------------------------------------------
 -- the copy (H23): whatever the old engines hold at this moment, into the new queue; then the
--- compare, which raises unless it finds 0 differences. Writers of the old bookmarks wait on the
--- locks below; the functions that wrote them are replaced above, in this transaction.
+-- compare against the old tables themselves, which raises unless every bookmark, fetch, refill
+-- and back-off has its new row. Writers of the old bookmarks wait on the locks below; the
+-- functions that wrote them are replaced above, in this transaction.
+
+-- the old engines must have stopped first (the release's pre-step, DEPLOY.md): their cron jobs
+-- unscheduled and their last call over 3 minutes ago, so nothing moves an old bookmark after the copy.
+-- A hosted project only; a local stack built from migrations has no old calls in flight.
+do $$
+begin
+  if coalesce((select v.decrypted_secret from vault.decrypted_secrets v where v.name = 'functions_url'), '') like '%.supabase.co%' and exists (select 1 from pg_extension where extname = 'pg_cron') then
+    if exists (select 1 from cron.job where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy')) then
+      raise exception 'SOLAR-686: unschedule recover, billing-history, first-load-continue and plant-energy, wait 3 minutes, then release (DEPLOY.md)';
+    end if;
+    if exists (select 1 from cron.job_run_details r where r.start_time > now() - interval '3 minutes'
+                 and (r.command ilike '%recover%' or r.command ilike '%sync-plant-energy%' or r.command ilike '%first_load_continue%')) then
+      raise exception 'SOLAR-686: an old history call ran in the last 3 minutes: wait, then release again';
+    end if;
+  end if;
+  if coalesce((select v.decrypted_secret from vault.decrypted_secrets v where v.name = 'functions_url'), '') like '%.supabase.co%' and exists (select 1 from private.recover_kicks k where k.at > now() - interval '3 minutes') then
+    raise exception 'SOLAR-686: a link kicked recover in the last 3 minutes: wait, then release again';
+  end if;
+end $$;
+
 lock table public.plant_config, billing.history_fetches, billing.history_lanes, private.refill_queue in exclusive mode;
 
-create temp table _want (plant bigint, day date, kind text, why text, tries int, import_key text) on commit drop;
-create temp table _want_acc (import_key text, plant bigint, account uuid, reason text, pace_s int, fetch_no int,
-                             requested_at timestamptz, started_at timestamptz) on commit drop;
+create temp table _seat on commit drop as
+  select distinct s.plant, s.account from billing.seats s where s.closed_at is null;
+create temp table _fetch on commit drop as
+  select distinct on (h.account, h.plant) h.* from billing.history_fetches h
+   where h.status in ('queued', 'running') order by h.account, h.plant, h.id desc;
 
--- 1. a first load still walking (plant_config.backfill_*): an import of every account reading it
-insert into _want_acc
-select 'bf:' || c.plant_id, c.plant_id, r.account, 'link', 0, 0, now(), now()
-  from public.plant_config c join (select distinct plant, account from billing.reading_routes(now())) r on r.plant = c.plant_id
- where c.backfill_next is not null;
-insert into _want
-select c.plant_id, g::date, 'minutes', 'import', case when g::date = coalesce(c.backfill_until, c.backfill_next) then coalesce(c.backfill_tries, 0) else 0 end,
-       'bf:' || c.plant_id
-  from public.plant_config c,
-       generate_series(c.backfill_next, coalesce(c.backfill_until, c.backfill_next), interval '1 day') g
- where c.backfill_next is not null and exists (select 1 from _want_acc a where a.import_key = 'bf:' || c.plant_id);
-
--- 2. a queued or running seat-switch fetch (billing.history_fetches): its account, pace and days left
-insert into _want_acc
-select 'hf:' || h.plant, h.plant, h.account, 'switch', h.target_s, h.fetch_no, h.requested_at, h.started_at
-  from billing.history_fetches h
- where h.status in ('queued', 'running') and not exists (select 1 from _want_acc a where a.plant = h.plant);
-insert into _want
-select h.plant, g::date, 'minutes', 'import', case when g::date = h.day_next then h.tries else 0 end, 'hf:' || h.plant
-  from billing.history_fetches h,
-       lateral (select (now() at time zone plants.tz(h.plant))::date - 1 as top) t,
-       generate_series(coalesce(h.day_floor, t.top - 59), coalesce(h.day_next, t.top), interval '1 day') g
- where h.status in ('queued', 'running') and h.id = (select max(o.id) from billing.history_fetches o
-                                                     where o.plant = h.plant and o.status in ('queued', 'running'))
-   and not exists (select 1 from _want w where w.plant = h.plant);
-
--- 3. temperatures behind (plant_config.temp_next before yesterday): with the import, or on their own
-insert into _want
-select c.plant_id, g::date, 'extras', case when a.k is null then 'check' else 'import' end,
-       case when g::date = c.temp_next then coalesce(c.temp_tries, 0) else 0 end, a.k
-  from public.plant_config c
-  cross join lateral (select (now() at time zone plants.tz(c.plant_id))::date as today) t
-  left join lateral (select x.import_key k from _want_acc x where x.plant = c.plant_id limit 1) a on true
-  cross join generate_series(greatest(c.temp_next, t.today - 60), t.today - 1, interval '1 day') g
- where c.temp_next is not null and c.temp_next < t.today
-   and c.plant_id in (select r.plant from billing.reading_routes(now()) r);
-
--- 4. holes waiting for a refill (private.refill_queue): today and yesterday
-insert into _want
-select q.plant_id, (now() at time zone plants.tz(q.plant_id))::date - g, 'minutes', 'gap', 0, null
-  from private.refill_queue q, generate_series(0, 1) g
- where not exists (select 1 from _want w where w.plant = q.plant_id and w.kind = 'minutes'
-                      and w.day = (now() at time zone plants.tz(q.plant_id))::date - g);
-
--- the new rows
-create temp table _imp (import_key text, id bigint) on commit drop;
-with k as (select distinct on (a.import_key) a.* from _want_acc a order by a.import_key, a.started_at nulls last),
-ins as (
-  insert into history.imports (plant, reason, requested_at, started_at, next_at, floor_day, top_day)
-  select k.plant, k.reason, k.requested_at, k.started_at, k.started_at,
-         (select min(w.day) from _want w where w.import_key = k.import_key),
-         (now() at time zone plants.tz(k.plant))::date - 1
-    from k where exists (select 1 from _want w where w.import_key = k.import_key)
-  returning id, plant)
-insert into _imp select k.import_key, ins.id from ins join k on k.plant = ins.plant;
+-- one import per plant with a first load still walking or a seat-switch fetch open, for the
+-- accounts that hold it: a fetch's account keeps its pace, a first load's accounts go at once
+insert into history.imports (plant, reason, requested_at, started_at, next_at, floor_day, top_day)
+select x.plant, case when bool_or(x.bf) then 'link' else 'switch' end, min(x.requested_at), min(x.started_at),
+       min(x.next_at), min(x.floor_day), (now() at time zone plants.tz(x.plant))::date - 1
+  from (select c.plant_id as plant, true as bf, now() as requested_at, now() as started_at, now() as next_at, c.backfill_next as floor_day
+          from public.plant_config c where c.backfill_next is not null and exists (select 1 from _seat s where s.plant = c.plant_id)
+        union all
+        select f.plant, false, f.requested_at, f.started_at, coalesce(f.next_step_at, f.requested_at),
+               coalesce(f.day_floor, (now() at time zone plants.tz(f.plant))::date - 60)
+          from _fetch f) x
+ group by x.plant;
 insert into history.import_accounts (import, account, reason, pace_s, fetch_no, requested_at)
-select distinct on (i.id, a.account) i.id, a.account, a.reason, a.pace_s, a.fetch_no, a.requested_at
-  from _want_acc a join _imp i on i.import_key = a.import_key;
+select distinct on (i.id, y.account) i.id, y.account, y.reason, y.pace_s, y.fetch_no, y.requested_at
+  from history.imports i
+  join (select f.plant, f.account, 'switch' as reason, f.target_s as pace_s, f.fetch_no, f.requested_at, 0 as o from _fetch f
+        union all
+        select c.plant_id, s.account, 'link', 0, 0, now(), 1 from public.plant_config c join _seat s on s.plant = c.plant_id
+         where c.backfill_next is not null) y on y.plant = i.plant
+ order by i.id, y.account, y.o;
+-- the days still to walk: a first load's backfill_next..backfill_until; a fetch's floor..day_next
+-- (all 60 days for one not started); a retry count stays on the day it was for
 insert into history.days (plant, import, day, kind, why, tries, due_at)
-select w.plant, i.id, w.day, w.kind, w.why, w.tries, now()
-  from _want w left join _imp i on i.import_key = w.import_key;
+select i.plant, i.id, g.day, 'minutes', 'import', max(g.tries), now()
+  from history.imports i
+  join (select c.plant_id as plant, d::date as day,
+               case when d::date = coalesce(c.backfill_until, c.backfill_next) then coalesce(c.backfill_tries, 0) else 0 end as tries
+          from public.plant_config c, generate_series(c.backfill_next, coalesce(c.backfill_until, c.backfill_next), interval '1 day') d
+         where c.backfill_next is not null
+        union all
+        select f.plant, d::date, case when d::date = f.day_next then f.tries else 0 end
+          from _fetch f,
+               generate_series(coalesce(f.day_floor, (now() at time zone plants.tz(f.plant))::date - 60),
+                               coalesce(f.day_next, (now() at time zone plants.tz(f.plant))::date - 1), interval '1 day') d) g
+    on g.plant = i.plant
+ group by i.plant, i.id, g.day;
+-- temperatures behind (temp_next before today), for a plant someone holds: with its import, or on their own
+insert into history.days (plant, import, day, kind, why, tries, due_at)
+select c.plant_id, i.id, d::date, 'extras', case when i.id is null then 'check' else 'import' end,
+       case when d::date = c.temp_next then coalesce(c.temp_tries, 0) else 0 end, now()
+  from public.plant_config c
+  left join history.imports i on i.plant = c.plant_id and i.status = 'open'
+  cross join generate_series(greatest(c.temp_next, (now() at time zone plants.tz(c.plant_id))::date - 60),
+                             (now() at time zone plants.tz(c.plant_id))::date - 1, interval '1 day') d
+ where c.temp_next is not null and c.temp_next < (now() at time zone plants.tz(c.plant_id))::date
+   and exists (select 1 from _seat s where s.plant = c.plant_id);
+-- holes waiting for a refill: today and yesterday, unless an import day holds them
+insert into history.days (plant, day, kind, why, due_at)
+select q.plant_id, (now() at time zone plants.tz(q.plant_id))::date - g, 'minutes', 'gap', q.queued_at
+  from private.refill_queue q, generate_series(0, 1) g
+on conflict (plant, day, kind) where status = 'queued' do nothing;
 insert into history.lanes (lane, backoff_s, backoff_until)
 select l.lane, l.backoff_s, l.backoff_until from billing.history_lanes l where l.backoff_s > 0 or l.backoff_until > now();
 
--- the compare: every bookmark, queued fetch, refill and back-off has its new row, and nothing else
+-- the compare, against the old tables: each count is what has no new row; every one must be 0.
+-- Bookmarks of plants nobody holds are not carried (nothing reads such a plant; a restart asks
+-- again): their count is reported, not compared.
 do $$
-declare n int;
+declare miss jsonb; left_out int;
 begin
-  select count(*) into n from (
-    (select plant, day, kind, why, tries from _want
-     except select plant, day, kind, why, tries from history.days where status = 'queued')
-    union all
-    (select plant, day, kind, why, tries from history.days where status = 'queued'
-     except select plant, day, kind, why, tries from _want)) x;
-  if n <> 0 then raise exception 'SOLAR-686 copy: % day rows differ', n; end if;
-  select count(*) into n from (
-    (select lane, backoff_s, backoff_until from billing.history_lanes where backoff_s > 0 or backoff_until > now()
-     except select lane, backoff_s, backoff_until from history.lanes)
-    union all
-    (select lane, backoff_s, backoff_until from history.lanes
-     except select lane, backoff_s, backoff_until from billing.history_lanes)) x;
-  if n <> 0 then raise exception 'SOLAR-686 copy: % lane rows differ', n; end if;
-  select count(*) into n from (
-    select distinct plant from _want_acc where exists (select 1 from _want w where w.import_key = _want_acc.import_key)
-    except select plant from history.imports where status = 'open') x;
-  if n <> 0 then raise exception 'SOLAR-686 copy: % imports missing', n; end if;
-  raise notice 'SOLAR-686 copy: % day rows, % imports, % lanes; compare 0',
-    (select count(*) from history.days), (select count(*) from history.imports), (select count(*) from history.lanes);
+  select jsonb_build_object(
+    'first_load_days', (select count(*) from public.plant_config c,
+                          generate_series(c.backfill_next, coalesce(c.backfill_until, c.backfill_next), interval '1 day') d
+                         where c.backfill_next is not null and exists (select 1 from _seat s where s.plant = c.plant_id)
+                           and not exists (select 1 from history.days x join history.imports i on i.id = x.import and i.status = 'open'
+                                            where x.plant = c.plant_id and x.day = d::date and x.kind = 'minutes' and x.status = 'queued')),
+    'fetch_accounts', (select count(*) from _fetch f
+                        where not exists (select 1 from history.import_accounts a join history.imports i on i.id = a.import
+                                           where i.plant = f.plant and i.status = 'open' and a.account = f.account
+                                             and a.pace_s = f.target_s and a.fetch_no = f.fetch_no)),
+    'fetch_days', (select count(*) from _fetch f,
+                     generate_series(coalesce(f.day_floor, (now() at time zone plants.tz(f.plant))::date - 60),
+                                     coalesce(f.day_next, (now() at time zone plants.tz(f.plant))::date - 1), interval '1 day') d
+                    where not exists (select 1 from history.days x where x.plant = f.plant and x.day = d::date
+                                        and x.kind = 'minutes' and x.status = 'queued')),
+    'retries', (select count(*) from _fetch f where f.tries > 0
+                  and not exists (select 1 from history.days x where x.plant = f.plant and x.day = f.day_next and x.tries = f.tries)),
+    'temperature_days', (select count(*) from public.plant_config c,
+                           generate_series(greatest(c.temp_next, (now() at time zone plants.tz(c.plant_id))::date - 60),
+                                           (now() at time zone plants.tz(c.plant_id))::date - 1, interval '1 day') d
+                          where c.temp_next is not null and c.temp_next < (now() at time zone plants.tz(c.plant_id))::date
+                            and exists (select 1 from _seat s where s.plant = c.plant_id)
+                            and not exists (select 1 from history.days x where x.plant = c.plant_id and x.day = d::date
+                                              and x.kind = 'extras' and x.status = 'queued')),
+    'refills', (select count(*) from private.refill_queue q
+                 where not exists (select 1 from history.days x where x.plant = q.plant_id and x.kind = 'minutes' and x.status = 'queued'
+                                     and x.day = (now() at time zone plants.tz(q.plant_id))::date)),
+    'lanes', (select count(*) from billing.history_lanes l where (l.backoff_s > 0 or l.backoff_until > now())
+               and not exists (select 1 from history.lanes n where n.lane = l.lane and n.backoff_s = l.backoff_s
+                                 and n.backoff_until is not distinct from l.backoff_until)))
+    into miss;
+  select count(*) into left_out from public.plant_config c
+   where (c.backfill_next is not null or c.temp_next < (now() at time zone plants.tz(c.plant_id))::date)
+     and not exists (select 1 from _seat s where s.plant = c.plant_id);
+  if exists (select 1 from jsonb_each_text(miss) e where e.value::int <> 0) then
+    raise exception 'SOLAR-686 copy: differences %', miss;
+  end if;
+  raise notice 'SOLAR-686 copy: % day rows, % imports, % lanes; compare 0 (%); % plants nobody holds left out',
+    (select count(*) from history.days), (select count(*) from history.imports), (select count(*) from history.lanes), miss, left_out;
 end $$;
 
 -- the old cron jobs off, the new ones on (H23): run as postgres

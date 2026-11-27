@@ -6,6 +6,7 @@
 //      side by side, 100 times: no deadlock, no save waits over 1 s
 //   2. an import write that meets a lock held for 3 s gives up after 1 s (lock_timeout), and its
 //      step is retried
+//   3. a day ending while its account switches the plant out, 50 times: no deadlock
 // The rows it makes are removed at the end. Exit 0: all held. Exit 1: one did not.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -86,6 +87,26 @@ check(blocked.code !== 0 && /lock timeout/i.test(blocked.err) && blocked.ms < 20
 const r = JSON.parse(must(sql(`select history.step_done('day', ${step.id}, '${step.claim}', 'failed', 'lock timeout')::text`), 'done'));
 check(r.status === 'queued' && must(sql(`select tries from history.days where id = ${step.id}`), 'tries') === '1',
   'its step is retried (try 1, a minute later)');
+
+// 3. a day ending while its account switches the plant out (step_done: import, then day; leave:
+//    import, then days), 50 times
+let dl3 = 0, bad3 = '';
+for (let i = 0; i < 50; i++) {
+  must(sql(`begin; update history.imports set status = 'stopped' where plant = ${P} and status = 'open';
+    update history.days set status = 'dropped', closed_at = now() where plant = ${P} and status = 'queued';
+    delete from history.totals where plant = ${P};
+    select history.start(${P}, '${a}', 'switch'); delete from history.totals where plant = ${P}; commit;`), 'restart');
+  const s3 = JSON.parse(must(sql(`select history.take(0, 1)::text`), 'take')).find((x) => x.plant === P);
+  if (!s3) { bad3 = 'no step'; break; }
+  const [d, l] = await Promise.all([
+    run(`select history.step_done('day', ${s3.id}, '${s3.claim}', 'ok');`),
+    run(`select history.leave(${P}, '${a}');`)]);
+  for (const r of [d, l]) {
+    if (/deadlock/i.test(r.err)) dl3++;
+    else if (r.code !== 0) bad3 = r.err.trim();
+  }
+}
+check(dl3 === 0 && !bad3, `a day ending beside a switch-out, 50 times: ${dl3} deadlocks${bad3 ? `, ${bad3}` : ''}`);
 
 clean();
 process.exit(failed ? 1 : 0);

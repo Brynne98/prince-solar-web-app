@@ -17,12 +17,28 @@ old() { git -C "$REPO" show "$REF:$F/$1.sql"; echo; }
 cat <<'SQL'
 begin;
 set local lock_timeout = '5s';
--- the work History holds now, back into the old bookmarks and queues
+-- the work History holds now, back into the old bookmarks and queues: every old bookmark cleared
+-- first (the release left them as they were, and finished work must not run again)
+-- (temp_next parks at today: null would walk 60 days again)
+update public.plant_config set backfill_next = null, backfill_until = null, backfill_tries = 0,
+       temp_next = case when temp_next is null then null else (now() at time zone plants.tz(plant_id))::date end, temp_tries = 0
+ where backfill_next is not null or temp_next is not null;
+update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = now(), claimed_until = null, claim = null
+ where status in ('queued', 'running');
+-- an open seat-switch import: its accounts' fetches, each at its own pace, from the newest day left
+insert into billing.history_fetches (account, plant, fetch_no, target_s, requested_at, day_floor, day_next, days_total)
+select a.account, i.plant, a.fetch_no, a.pace_s, a.requested_at, i.floor_day,
+       (select max(d.day) from history.days d where d.import = i.id and d.status = 'queued' and d.kind = 'minutes'),
+       (i.top_day - i.floor_day + 1)
+  from history.imports i join history.import_accounts a on a.import = i.id and a.left_at is null
+ where i.status = 'open' and a.reason = 'switch'
+   and exists (select 1 from history.days d where d.import = i.id and d.status = 'queued' and d.kind = 'minutes');
+-- a link or restart import: the first-load bookmark
 update public.plant_config c
    set backfill_next = x.floor_day, backfill_until = x.top, backfill_tries = 0
   from (select i.plant, i.floor_day, max(d.day) filter (where d.kind = 'minutes') as top
           from history.imports i join history.days d on d.import = i.id and d.status = 'queued'
-         where i.status = 'open' group by i.plant, i.floor_day) x
+         where i.status = 'open' and i.reason <> 'switch' group by i.plant, i.floor_day) x
  where c.plant_id = x.plant and x.top is not null;
 update public.plant_config c set temp_next = x.d, temp_tries = 0
   from (select plant, min(day) d from history.days where status = 'queued' and kind = 'extras' group by plant) x

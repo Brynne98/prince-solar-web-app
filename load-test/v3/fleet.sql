@@ -30,6 +30,7 @@ begin
   delete from history.imports where plant >= 980000000 and plant < 990000000;
   delete from history.totals where plant >= 980000000 and plant < 990000000;
   delete from history.lanes; delete from history.calls;
+  if to_regclass('lt3.late') is not null then truncate lt3.late; end if;
   delete from private.history_delete_queue where plant_id >= 980000000 and plant_id < 990000000;
 end $$;
 
@@ -154,10 +155,23 @@ create or replace function lt3.history_result(p_from timestamptz, p_to timestamp
          where plant >= 980000000 and plant < 990000000 and why = 'import' and closed_at between p_from and p_to group by 1) x),
     'gap_days_closed', (select count(*) from history.days where plant >= 980000000 and why = 'gap' and status <> 'queued'),
     'calls_per_minute', (select jsonb_agg(calls order by minute) from history.calls where minute between p_from and p_to),
-    -- rows added after a plant was switched out or deleted (the delete job removes rows, so never below 0)
-    'rows_after_fence', (select coalesce(sum(greatest(0, (select count(*) from public.agg_minute a where a.plant_id = f.plant and a.source in ('invhistory', 'plantfeed')) - f.minutes)
-                                + greatest(0, (select count(*) from public.inverter_history h where h.plant_id = f.plant) - f.extras)), 0)
-                           from lt3.fenced f),
+    -- rows written after a plant was switched out or deleted, each one as it was written (lt3.late)
+    'rows_after_fence', (select count(*) from lt3.late),
     'brand_429', (select jsonb_object_agg(kind, calls) from plants.brand_calls where result in ('429', '403_throttle')),
     'brand_calls_by_kind', (select jsonb_object_agg(kind, calls) from (select kind, sum(calls) calls from plants.brand_calls group by 1) x))
 $$;
+
+-- every History row written for a plant after it was fenced, caught as it is written (a later
+-- delete cannot hide it)
+create table if not exists lt3.late (plant bigint, tbl text, at timestamptz default clock_timestamp());
+create or replace function lt3.catch_late() returns trigger language plpgsql as $$
+begin
+  if exists (select 1 from lt3.fenced f where f.plant = new.plant_id and f.at < clock_timestamp())
+     and (tg_table_name <> 'agg_minute' or new.source in ('invhistory', 'plantfeed')) then
+    insert into lt3.late (plant, tbl) values (new.plant_id, tg_table_name);
+  end if;
+  return null;
+end $$;
+create or replace trigger lt3_late after insert on public.agg_minute for each row execute function lt3.catch_late();
+create or replace trigger lt3_late after insert on public.inverter_history for each row execute function lt3.catch_late();
+create or replace trigger lt3_late after insert on public.plant_energy for each row execute function lt3.catch_late();

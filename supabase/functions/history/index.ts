@@ -26,13 +26,13 @@ const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { sta
 // every minute from pg_cron: stop well inside the minute so runs do not pile up
 const QUEUE_BUDGET_MS = 45_000;
 const RENEW_MS = 30_000;
-const IDLE_WAIT_MS = 5_000;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One step, start to end. Throws nothing: an error is a failed step. */
 export async function runStep(s: Step & { refused?: boolean }): Promise<Result> {
-  const h = brandOf(s.login.brand).history;
-  const before = h.throttled(s.login);
+  const b = brandOf(s.login.brand), h = b.history;
+  const before = h.throttled(s.login), calls0 = b.callCount(s.login);
   let lost = false;
   const renew = setInterval(() => {
     jobs("renew", { step: s.step, id: s.id, claim: s.claim }).then((ok) => { if (ok !== true) { lost = true; s.refused = true; } })
@@ -53,7 +53,9 @@ export async function runStep(s: Step & { refused?: boolean }): Promise<Result> 
   if (lost) return { result: "refused", note: "claim lost" };
   // a 429 that outlasted the adapter's retries: the login backs off, no try spent (H7)
   if (r.result === "failed" && h.throttled(s.login) > before) r = { result: "throttled", note: r.note };
-  const end = await jobs<{ status?: string }>("done", { step: s.step, id: s.id, claim: s.claim, result: r.result, note: r.note ?? null });
+  // the calls it made, retries and the feed included, so the fleet count is what was spent (H9)
+  const end = await jobs<{ status?: string }>("done", { step: s.step, id: s.id, claim: s.claim, result: r.result, note: r.note ?? null,
+    calls: b.callCount(s.login) - calls0 });
   if (end?.status === "given_up") {
     noteError("history_day_given_up", new Error(`history ${s.plant} ${s.day ?? "totals"} ${s.kind} given up: ${r.note ?? ""}`), { plant: s.plant, hourly: true });
   }
@@ -66,12 +68,14 @@ async function runQueue(shard: number, shards: number, started: number) {
     if (Date.now() - started > QUEUE_BUDGET_MS) break;
     const steps = ((await jobs<Step[]>("take", { shard, shards })) ?? []).filter(Boolean);
     if (!steps.length) {
-      // a paced import's next row may be seconds away; look once more, then leave it to the next minute
-      if (Date.now() - started + IDLE_WAIT_MS > QUEUE_BUDGET_MS) break;
-      await sleep(IDLE_WAIT_MS);
-      const again = ((await jobs<Step[]>("take", { shard, shards })) ?? []).filter(Boolean);
-      if (!again.length) break;
-      steps.push(...again);
+      // a paced import's next day may be seconds away: wait for it inside the minute (H4), else
+      // leave it to the next one
+      const next = await jobs<number | null>("next");
+      if (next == null) break;   // nothing queued anywhere
+      const wait = Math.max(5, Number(next)) * 1000;   // at most one idle look every 5 s
+      if (Date.now() - started + wait > QUEUE_BUDGET_MS) break;
+      await sleep(wait);
+      continue;
     }
     const done = await Promise.all(steps.map((s) => runStep(s)));
     out.steps += steps.length;

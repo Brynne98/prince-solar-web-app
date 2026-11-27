@@ -8,7 +8,7 @@ begin
   update history.import_accounts a set left_at = p_at
     from history.imports i
    where i.id = a.import and i.status = 'open' and a.left_at is null
-     and not billing.holds_plant(a.account, i.plant, p_at);
+     and not billing.has_seat(a.account, i.plant, p_at);
   perform history.stop_import(i.id, case when private.history_deleting(i.plant) then 'deleted' else 'switched_out' end, p_at)
      from history.imports i
     where i.status = 'open'

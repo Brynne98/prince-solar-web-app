@@ -24,7 +24,7 @@
 // SOLAR-612: the web host's `/inverter/{sn}/day?params=<ids>` gives the same series in
 // one call (ids from `/inverter/params`). Tried first; any failure or a missing spine
 // series falls back to the four official calls above.
-import type { DayClock } from "../../localtime.ts";
+import { type DayClock, SECOND_PASS } from "../../localtime.ts";
 import { type Account, apiGet, webGet } from "./api.ts";
 import { num } from "./extract.ts";
 
@@ -88,10 +88,15 @@ export function parseSeries(data: any): SeriesMap {
     const label = String(info?.label ?? "").toLowerCase().trim();
     if (!label) continue;
     const samples: Sample[] = [];
+    // records come in upload order: a time that steps back over half an hour is the hour the
+    // clocks went back, a second time (SOLAR-686 H20); it keeps its own place
+    let last = -1, pass = 0;
     for (const r of info.records || []) {
-      const t = secondsOfDay(r?.time);
-      if (t == null || r?.value == null || r.value === "") continue;
-      samples.push({ t, v: num(r.value) });
+      const t0 = secondsOfDay(r?.time);
+      if (t0 == null || r?.value == null || r.value === "") continue;
+      if (t0 < last - 1800) pass = SECOND_PASS;
+      last = t0;
+      samples.push({ t: t0 + pass, v: num(r.value) });
     }
     samples.sort((a, b) => a.t - b.t);
     if (samples.length) out.set(label, samples);
@@ -283,7 +288,7 @@ export function toMinutes(samples: Sample[] | null, holdS = HOLD_S, minutes = 14
 export function plantSpine(days: InverterDay[], clock: DayClock): Map<number, SpineRow> {
   const minutes = (clock.end - clock.start) / 60;
   // wall-clock sample times -> seconds since the day's start, right across a clock change (SOLAR-686 H20)
-  const el = (xs: Sample[] | null) => xs && xs.map((s) => ({ t: clock.at(s.t) - clock.start, v: s.v }));
+  const el = (xs: Sample[] | null) => xs && xs.map((s) => ({ t: clock.at(s.t) - clock.start, v: s.v })).sort((a, b) => a.t - b.t);
   const per = days.map((d) => ({
     pv: toMinutes(el(d.pv), HOLD_S, minutes), grid: toMinutes(el(d.grid), HOLD_S, minutes),
     load: toMinutes(el(d.load), HOLD_S, minutes), soc: toMinutes(el(d.soc), HOLD_S, minutes),

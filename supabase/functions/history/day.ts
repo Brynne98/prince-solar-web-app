@@ -91,7 +91,8 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
   const scale = (pollerAgg?.length ?? 0) >= 36 ? H(s).feedScale(feed, H(s).bucketsOf(pollerAgg)) : await currentFeedScale(s);
   const rows: Record<string, number | null>[] = [];
   for (const ts of gaps) {
-    const bkt = Math.floor((ts - clock.start) / 300);
+    // the feed's buckets are wall-clock five minutes (H20)
+    const bkt = Math.floor(clock.wall(ts) / 300);
     const e = bkt >= 0 && bkt < feed.length ? feed[bkt] : null;
     if (!e) continue;
     rows.push({
@@ -115,8 +116,9 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
 export async function runExtras(s: Step & { refused?: boolean }): Promise<Result> {
   const sns = await plantSns(s.plant);
   if (!sns.length) return { result: "wait", note: "no inverter serials stored yet; the first poll stores them" };
-  // a day that holds temperatures already (an import after a switch back): nothing to fetch
-  if (!s.grid_only && await jobs<boolean>("has_extras", { plant: s.plant, day: s.day })) return { result: "ok", note: "held already", banked: 0 };
+  // a day that holds its temperatures already (an import after a switch back): nothing to fetch;
+  // a retry always fetches, since a partial write can look whole
+  if (!s.grid_only && !s.tries && await jobs<boolean>("has_extras", { plant: s.plant, day: s.day })) return { result: "ok", note: "held already", banked: 0 };
   const clock = dayClock(s.timezone, s.day!);
   let banked = 0;
   const failed: string[] = [];

@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION history.step_done(p_step text, p_id bigint, p_claim uuid, p_result text, p_note text DEFAULT NULL::text, p_at timestamp with time zone DEFAULT now())
+CREATE OR REPLACE FUNCTION history.step_done(p_step text, p_id bigint, p_claim uuid, p_result text, p_note text DEFAULT NULL::text, p_at timestamp with time zone DEFAULT now(), p_calls integer DEFAULT NULL::integer)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -7,6 +7,7 @@ AS $function$
 declare
   d history.days;
   t history.totals;
+  imp bigint;
   wait_s int;
   pace int;
   done_n int;
@@ -19,10 +20,11 @@ begin
   if p_step = 'totals' then
     select * into t from history.totals where plant = p_id for update;
     if not found then return jsonb_build_object('status', 'gone'); end if;
-    if t.claim is distinct from p_claim then return jsonb_build_object('status', 'not_yours'); end if;
+    if t.claim is distinct from p_claim or t.claimed_until <= p_at then return jsonb_build_object('status', 'not_yours'); end if;
+    perform history.spent(t.shard, t.calls, p_calls, p_at);
     if p_result = 'throttled' then perform history.back_off(t.lane, p_at); end if;
     if p_result = 'ok' or (p_result = 'failed' and t.tries + 1 >= 3) then
-      perform history.lane_ok(t.lane) where p_result = 'ok';
+      if p_result = 'ok' then perform history.lane_ok(t.lane); end if;
       delete from history.totals where plant = p_id;
       return jsonb_build_object('status', case when p_result = 'ok' then 'done' else 'given_up' end);
     end if;
@@ -34,9 +36,12 @@ begin
     return jsonb_build_object('status', 'queued');
   end if;
 
+  imp := (select x.import from history.days x where x.id = p_id);
+  if imp is not null then perform 1 from history.imports where id = imp for update; end if;
   select * into d from history.days where id = p_id for update;
   if not found or d.status <> 'queued' then return jsonb_build_object('status', coalesce(d.status, 'gone')); end if;
-  if d.claim is distinct from p_claim then return jsonb_build_object('status', 'not_yours'); end if;
+  if d.claim is distinct from p_claim or d.claimed_until <= p_at then return jsonb_build_object('status', 'not_yours'); end if;
+  perform history.spent(d.shard, d.calls, p_calls, p_at);
 
   if p_result = 'throttled' then
     wait_s := history.back_off(d.lane, p_at);
