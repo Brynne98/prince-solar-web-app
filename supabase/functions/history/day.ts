@@ -69,9 +69,11 @@ export async function runMinutes(s: Step & { refused?: boolean }): Promise<Resul
     // some inverters only: their sum is not the plant's, so no spine; the feed fills the day
     days = [];
   }
-  // past the days the feed keeps, a day where an endpoint failed banks no minutes: a partial sum
-  // (no SoC, say) would stand for good; it is tried again whole (as the old walk did)
+  // a day where an endpoint failed banks no minutes from history: a partial sum (no SoC, half the
+  // inverters) would stand for good. Past the days the feed keeps it is tried again whole (as the
+  // old walk did); a recent day goes to the feed and is tried again for what that leaves.
   if (!s.feed && failed > 0) return { result: "failed", note: `${failed} history endpoint(s) did not answer` };
+  if (failed > 0) days = [];
   // a write that fails (a lock held over 1 s, H21) fails the step, so it is tried again; it does
   // not fall through to the plant feed's coarser rows
   for (const [k, d] of days.entries()) {

@@ -235,12 +235,13 @@ begin
   end if;
 end $$;
 
+-- the import first, then its days (one lock order with take and step_done)
 create function history.stop_import(p_import bigint, p_reason text, p_at timestamptz) returns void
   language sql security definer set search_path to '' as $$
-  update history.days set status = 'dropped', note = p_reason, closed_at = p_at, claim = null, claimed_until = null
-   where import = p_import and status = 'queued';
   update history.imports set status = 'stopped', stop_reason = p_reason, finished_at = p_at
    where id = p_import and status = 'open';
+  update history.days set status = 'dropped', note = p_reason, closed_at = p_at, claim = null, claimed_until = null
+   where import = p_import and status = 'queued';
 $$;
 
 -- The plant's history is being deleted: nothing more is fetched for it (H8, H15).
@@ -1834,6 +1835,7 @@ begin
                   and not exists (select 1 from history.days x where x.plant = c.plant_id and x.kind = 'minutes'
                                     and x.day = coalesce(c.backfill_until, c.backfill_next) and x.tries >= c.backfill_tries))
              + (select count(*) from public.plant_config c where c.temp_next < (now() at time zone plants.tz(c.plant_id))::date
+                  and c.temp_next >= (now() at time zone plants.tz(c.plant_id))::date - 60
                   and coalesce(c.temp_tries, 0) > 0 and exists (select 1 from _seat s where s.plant = c.plant_id)
                   and not exists (select 1 from history.days x where x.plant = c.plant_id and x.kind = 'extras'
                                     and x.day = c.temp_next and x.tries = c.temp_tries)),

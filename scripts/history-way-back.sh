@@ -67,6 +67,7 @@ cat <<'SQL'
 create trigger email_on_history after update of backfill_next, temp_next on public.plant_config
   for each row execute function private.email_on_history();
 drop function public.history_jobs(text, jsonb);
+drop function billing.has_seat(uuid, bigint, timestamp with time zone);
 drop function public.login_throttled(uuid);
 drop function plants.throttled(uuid, timestamptz);
 drop schema history cascade;
