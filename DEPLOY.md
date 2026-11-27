@@ -355,6 +355,29 @@ frontend second, in this order:
    It keeps `api_offer`, now read from the billing tables, so the website keeps its prices. It
    checks that nothing left reads or calls them, or it stops.
 
+## History engine (SOLAR-686, 0284)
+
+One release moves every past-day fetch to schema `history` and the `history` edge function. The
+migration refuses to run on the live project until the old engines have stopped.
+
+1. Backup: `pg_dump` of `public.plant_config`, `billing.history_fetches`, `billing.history_lanes`,
+   `private.refill_queue`, `private.recover_kicks`, `public.app_config`; check the Supabase daily
+   backup is from today.
+2. Stop the old engines: `supabase db query --remote --yes "select cron.unschedule(jobname) from
+   cron.job where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy')"`.
+   Wait 3 minutes (their last calls end; 0284 checks `cron.job_run_details` and `recover_kicks`).
+3. `npm run release`. 0284 copies the old bookmarks, compares (raises on any difference), switches
+   the callers and schedules `history`, `history-check`, `history-totals`, `history-trim` and the
+   new `temps`. Until the functions stage deploys `history` (a minute or two) its cron calls fail
+   and write nothing.
+4. Check: `select status, count(*) from history.days group by 1`; the `history` heartbeat in
+   `billing.job_heartbeats` moves each minute; `job-check` shows `history-queue` not failing.
+5. Way back, if needed: `bash scripts/history-way-back.sh <commit before 0284> > way-back.sql`,
+   run it, then deploy `recover` and `sync-plant-energy` from that commit. Rehearsed on a full
+   production copy: `scripts/rehearse-history.sh` (deletes nothing in production; delete its dump
+   after).
+6. One release later: SOLAR-693 drops the old columns, tables and the two old functions.
+
 ## Changing the domain
 
 Two places know the origin:
