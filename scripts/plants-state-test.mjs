@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { REPO, psql } from './local-db.mjs';
 
-const FILES = ['plants-tests'];
+const FILES = ['plants-tests', 'grants-tests'];
 
 let failed = 0;
 for (const f of FILES) {
