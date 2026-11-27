@@ -386,7 +386,7 @@ does not change with the site's domain.
 | `public/` | the whole frontend, published as-is |
 | `public/config.js` | version + per-environment Supabase URL/key |
 | `supabase/migrations/` | schema and RPCs |
-| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `link-sunsynk` |
+| `supabase/functions/` | `poll`, `history` (every past day, SOLAR-686), `link-sunsynk`, ... |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
 | `.github/workflows/secrets-guard.yml` + `.gitleaks.toml` | fails if a secret is anywhere in the repo or its history |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |

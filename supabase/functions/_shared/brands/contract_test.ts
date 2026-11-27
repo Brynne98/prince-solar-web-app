@@ -3,6 +3,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { allBrands, type Account, brandOf } from "./index.ts";
 import { LOW_VOLT_V } from "./sunsynk/realtime.ts";
+import { dayClock } from "../localtime.ts";
 
 const LOGIN = "export@mock";   // two plants, a page of one plant (mock-sunsynk.mjs)
 
@@ -41,6 +42,30 @@ for (const b of allBrands()) {
     assertEquals(row.plant_id, 1000000000001);
     assert(row.device_time != null);
     for (const s of b.stringRows(f)) assertEquals(s.sn, inv.sn);
+  });
+  // SOLAR-686 H18: the history half of the interface, as the History engine uses it
+  Deno.test(`${b.code}: an inverter's past day gives a minute spine and inverter rows on the day's clock`, async () => {
+    const acc = await signedIn(b.code);
+    const [inv] = await b.listInverters(acc);
+    const day = new Date(Date.now() - 3 * 86400e3).toISOString().slice(0, 10);
+    const clock = dayClock("Africa/Johannesburg", day);
+    const d = await b.history.inverterDay(acc, inv.sn, day, false);
+    const spine = b.history.plantSpine([d], clock);
+    assert(spine.size > 0, "minutes came back");
+    for (const ts of spine.keys()) assert(ts >= clock.start && ts < clock.end && ts % 60 === 0, `${ts} is a minute of the day`);
+    for (const r of b.history.historyRows(d, clock)) assert(Number(r.ts) >= clock.start && Number(r.ts) < clock.end);
+  });
+  Deno.test(`${b.code}: a past day's extras and the plant's kWh totals`, async () => {
+    const acc = await signedIn(b.code);
+    const [inv] = await b.listInverters(acc);
+    const [p] = await b.listPlants(acc);
+    const day = new Date(Date.now() - 3 * 86400e3).toISOString().slice(0, 10);
+    const x = await b.history.inverterExtras(acc, inv.sn, day, false);
+    assert(Array.isArray(x.failed));
+    const now = new Date();
+    const rows = await b.history.monthRows(acc, p.vendorId, now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+    assert(Array.isArray(rows));
+    assertEquals(typeof b.history.throttled(acc), "number");
   });
   Deno.test(`${b.code}: plant detail is for the plant asked`, async () => {
     const acc = await signedIn(b.code);
