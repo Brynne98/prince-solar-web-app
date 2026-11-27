@@ -403,7 +403,7 @@ load proof is local against a fake; SunSynk's real limit for many logins is not 
 
 ## Built (2026-11-27)
 
-Branch `solar-686-history`. One migration, `0284_history_engine.sql`: schema `history`, the
+Branch `solar-686-history`. One migration, `0285_history_engine.sql` (written as 0284; renumbered after v0.66.1 shipped `0284_figure_fns_granted.sql`): schema `history`, the
 queue, the callers switched, the copy and its compare, the old engines' functions dropped.
 Edge function `history` replaces `recover` and `sync-plant-energy`. Nothing released yet.
 
@@ -442,10 +442,10 @@ reader's late saves rose almost threefold, so the cap stays at 600 (choice 2A: t
 
 **Rehearsal on a full production copy** (`scripts/rehearse-history.sh`; production read only; no
 tokens, Vault, cards, mail or push keys; emails and usernames masked; the dump deleted after):
-309 MB, 94,878 minute rows, 150,400 inverter rows, production's own partitions. 0284 ran in 0.1 s,
+309 MB, 94,878 minute rows, 150,400 inverter rows, production's own partitions. 0285 (then numbered 0284) ran in 0.1 s,
 compare 0; a stand-in reader saved every 2 s through it, 60 saves, 0 failed, longest 102 ms. The
 way back ran with open work in the copy (2 first loads, 1 paced switch): schema `history` gone,
-bookmarks and the fetch back, old jobs back. 0284 then applied again, compare 0.
+bookmarks and the fetch back, old jobs back. It then applied again, compare 0.
 
 **Reviews:** Sol and Neon reviewed the build twice. First pass: both rework / fix then ship (27
 findings); second pass: both fix then ship; every must-fix taken. Accepted, not built:

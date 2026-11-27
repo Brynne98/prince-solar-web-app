@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# SOLAR-686 H23: rehearse 0284 on a full local copy of production, history rows included.
+# SOLAR-686 H23: rehearse 0285 on a full local copy of production, history rows included.
 #
 #   scripts/rehearse-history.sh <folder holding supabase/ of a LOCAL stack> <scratch folder>
 #
-# 1. the local stack is reset to 0283 (production's migration today)
+# 1. the local stack is reset to 0284 (production's newest migration today)
 # 2. production's data, read only (supabase db dump --remote, data only), without tokens, Vault,
 #    sign-ins, payment cards, mail bodies or push keys; logins copied without their tokens;
 #    auth users as ids with masked emails
-# 3. 0284 runs while a stand-in reader saves a minute every 2 s on copied plants; the log has the
+# 3. 0285 runs while a stand-in reader saves a minute every 2 s on copied plants; the log has the
 #    release time, the copy's compare, the saves' longest wait
 # 4. the way back: the old jobs and callers switched back, bookmarks copied back (H23)
 # The dump stays in the scratch folder only; delete it after the proof (it holds production rows).
@@ -20,8 +20,8 @@ case "$DB" in *127.0.0.1*|*localhost*) ;; *) echo "refusing: $DB is not local" >
 REF=pmakzojwhouamawgszrc
 log() { echo "$(date -u +%H:%M:%S) $*" | tee -a "$OUT/rehearsal.log"; }
 
-log "reset the local stack to 0283"
-supabase db reset --local --workdir "$WD" --version 0283 --no-seed >/dev/null
+log "reset the local stack to 0284"
+supabase db reset --local --workdir "$WD" --version 0284 --no-seed >/dev/null
 # production's jobs, as 0283 left them, but paused: the copy calls nothing
 "$PSQL" -Xq -v ON_ERROR_STOP=1 "$DB" -c "create extension if not exists pg_cron" -c "select private.schedule_jobs()" \
   -c "select cron.alter_job(jobid, active := false) from cron.job" >/dev/null
@@ -79,7 +79,7 @@ SQL
 "$PSQL" -XAt "$DB" -c "select 'before: open fetches ' || (select count(*) from billing.history_fetches where status in ('queued','running'))
   || ', refills ' || (select count(*) from private.refill_queue) || ', backfills ' || (select count(*) from public.plant_config where backfill_next is not null)" | tee -a "$OUT/rehearsal.log"
 
-log "release 0284 with a stand-in reader saving every 2 s"
+log "release 0285 with a stand-in reader saving every 2 s"
 ( for i in $(seq 1 60); do
     t0=$(python3 -c 'import time; print(time.time())')
     "$PSQL" -Xq "$DB" -c "begin; select set_config('billing.guarded', 'on', true);
@@ -94,8 +94,8 @@ log "release 0284 with a stand-in reader saving every 2 s"
 SAVER=$!
 sleep 4
 T0=$(python3 -c 'import time; print(time.time())')
-"$PSQL" -X -v ON_ERROR_STOP=1 "$DB" -f "$REPO/supabase/migrations/0284_history_engine.sql" > "$OUT/release.out" 2>&1 \
-  && "$PSQL" -Xq "$DB" -c "insert into supabase_migrations.schema_migrations (version, name) values ('0284', 'history_engine')"
+"$PSQL" -X -v ON_ERROR_STOP=1 "$DB" -f "$REPO/supabase/migrations/0285_history_engine.sql" > "$OUT/release.out" 2>&1 \
+  && "$PSQL" -Xq "$DB" -c "insert into supabase_migrations.schema_migrations (version, name) values ('0285', 'history_engine')"
 "$PSQL" -Xq "$DB" -c "select cron.alter_job(jobid, active := false) from cron.job" >/dev/null
 log "release took $(python3 -c "import time; print(round(time.time() - $T0, 1))") s; $(grep -o 'SOLAR-686 copy:.*' "$OUT/release.out")"
 wait $SAVER
@@ -109,8 +109,8 @@ log "stand-in reader: $(grep -c . "$OUT/saves.log") saves, $(grep -c failed "$OU
 "$PSQL" -XAt "$DB" -c "select 'and ' || count(history.start(r.plant, r.account, 'switch', 1200, 4)) || ' paced switch'
   from (select plant, account from billing.reading_routes(now()) order by plant offset 2 limit 1) r" | tee -a "$OUT/rehearsal.log"
 log "the way back, with the copy's open work in it"
-# the code before 0284: the parent of the commit that added it
-BEFORE="$(git -C "$REPO" log -1 --format=%H --diff-filter=A -- supabase/migrations/0284_history_engine.sql)^"
+# the code before 0285: the parent of the commit that first added it (as 0284, before it was renumbered)
+BEFORE="$(git -C "$REPO" log --follow --diff-filter=A --format=%H -- supabase/migrations/0285_history_engine.sql | tail -1)^"
 bash "$REPO/scripts/history-way-back.sh" "$BEFORE" > "$OUT/way-back.sql"
 B0=$(python3 -c 'import time; print(time.time())')
 "$PSQL" -X -v ON_ERROR_STOP=1 "$DB" -f "$OUT/way-back.sql" > "$OUT/way-back.out" 2>&1 && ok=yes || ok=no

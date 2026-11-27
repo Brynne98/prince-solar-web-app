@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SOLAR-686 H23: the way back from 0284, written from main's function files.
+# SOLAR-686 H23: the way back from 0285, written from main's function files.
 #
-#   scripts/history-way-back.sh <git ref before 0284, e.g. main> > way-back.sql
+#   scripts/history-way-back.sh <git ref before 0285, e.g. main> > way-back.sql
 #   psql "$DB" -v ON_ERROR_STOP=1 -f way-back.sql
 #
 # One transaction: open imports and holes go back into the old bookmarks and queues, the old
@@ -9,7 +9,7 @@
 # back, schema history and the throttle column are dropped. The old edge functions (recover,
 # sync-plant-energy) are deployed again from <ref> after it.
 set -euo pipefail
-REF="${1:?git ref before 0284}"
+REF="${1:?git ref before 0285}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 F=supabase/schemas/functions
 old() { git -C "$REPO" show "$REF:$F/$1.sql"; echo; }
@@ -74,6 +74,6 @@ drop schema history cascade;
 alter table plants.logins drop column throttled_at;
 delete from public.app_config where key in ('HISTORY_DAYS', 'HISTORY_CALLS_PER_MINUTE');
 select private.schedule_jobs();
-delete from supabase_migrations.schema_migrations where version = '0284';
+delete from supabase_migrations.schema_migrations where version = '0285';
 commit;
 SQL

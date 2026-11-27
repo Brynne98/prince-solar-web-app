@@ -355,7 +355,7 @@ frontend second, in this order:
    It keeps `api_offer`, now read from the billing tables, so the website keeps its prices. It
    checks that nothing left reads or calls them, or it stops.
 
-## History engine (SOLAR-686, 0284)
+## History engine (SOLAR-686, 0285)
 
 One release moves every past-day fetch to schema `history` and the `history` edge function. The
 migration refuses to run on the live project until the old engines have stopped.
@@ -365,8 +365,8 @@ migration refuses to run on the live project until the old engines have stopped.
    backup is from today.
 2. Stop the old engines: `supabase db query --remote --yes "select cron.unschedule(jobname) from
    cron.job where jobname in ('recover', 'billing-history', 'first-load-continue', 'plant-energy')"`.
-   Wait 3 minutes (their last calls end; 0284 checks `cron.job_run_details` and `recover_kicks`).
-3. `npm run release`. 0284 copies the old bookmarks, compares (raises on any difference), switches
+   Wait 3 minutes (their last calls end; 0285 checks `cron.job_run_details` and `recover_kicks`).
+3. `npm run release`. 0285 copies the old bookmarks, compares (raises on any difference), switches
    the callers and schedules `history`, `history-check`, `history-totals`, `history-trim` and the
    new `temps`. Until the functions stage deploys `history` (a minute or two) its cron calls fail
    and write nothing.
@@ -375,7 +375,7 @@ migration refuses to run on the live project until the old engines have stopped.
    A link that ran across the release can set an old bookmark after the copy; ask History for
    those: `select history.start(plant_id, null, 'link') from public.plant_config where
    backfill_next is not null` (none is the usual answer).
-5. Way back, if needed: `bash scripts/history-way-back.sh <commit before 0284> > way-back.sql`,
+5. Way back, if needed: `bash scripts/history-way-back.sh <commit before 0285> > way-back.sql`,
    run it, then deploy `recover` and `sync-plant-energy` from that commit. Rehearsed on a full
    production copy: `scripts/rehearse-history.sh` (deletes nothing in production; delete its dump
    after).
