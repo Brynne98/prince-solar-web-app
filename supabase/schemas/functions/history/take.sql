@@ -87,8 +87,10 @@ begin
       order by due, pri
     loop
       c := history.cost(r.kind, r.plant, r.grid_only, r.full_sweep);
-      -- a step goes while the group's share is not spent (the last one may go over by its own
-      -- cost), so a dear step (kWh totals, a plant of many inverters) is never shut out by cheap ones
+      -- within the group's share: a step that does not fit gives way to this login's next one; the
+      -- first step of a minute always goes, so a dear one (kWh totals, many inverters) is never
+      -- shut out (the logins come in a new order each call)
+      continue when used > 0 and used + c > cap;
       cl := gen_random_uuid();
       if r.k = 'day' then
         -- the import first, then the day (one lock order with step_done and stop: import, then day)
