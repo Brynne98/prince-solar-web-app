@@ -3963,6 +3963,164 @@ exception when others then perform pg_temp.ok('Z11 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- SOLAR-686 History (reports/rework-step-3-history.md): one queue for every past day
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.acct('h3a'); b uuid := pg_temp.acct('h3b'); la uuid; lb uuid; p bigint; i bigint; w jsonb;
+        f pg_temp.fetch; s jsonb; n int; d date; v bigint; refused boolean;
+begin
+  -- H3: two accounts on one plant; both switch it in: one import, both on it
+  la := pg_temp.link(a, 'h3a', '{990068601}', pg_temp.t(50)); perform pg_temp.stored(la);
+  lb := pg_temp.link(b, 'h3b', '{990068601}', pg_temp.t(50)); perform pg_temp.stored(lb);
+  p := pg_temp.pid(990068601);
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(50)); perform pg_temp.pay(b, 'home', 'month', pg_temp.t(50));
+  perform pg_temp.choose(a, array[p], pg_temp.t(50)); perform pg_temp.choose(b, array[p], pg_temp.t(50));
+  select count(*) into n from history.imports where plant = p and status = 'open';
+  perform pg_temp.eq('H3 two accounts, one plant: one import', n::text, '1');
+  i := (select id from history.imports where plant = p and status = 'open');
+  perform pg_temp.eq('H3 ... both accounts on it', (select count(*)::text from history.import_accounts where import = i and left_at is null), '2');
+  -- H1, H5: 60 days of minutes and of extras, newest first; HISTORY_DAYS is the setting
+  perform pg_temp.eq('H5 60 days of each kind', (select string_agg(kind || ' ' || c, ', ' order by kind) from
+    (select kind, count(*) c from history.days where import = i group by kind) x), 'extras 60, minutes 60');
+  perform pg_temp.eq('H5 newest day is yesterday, in the plant''s zone',
+    (select max(day)::text from history.days where import = i), ((pg_temp.t(50) at time zone plants.tz(p))::date - 1)::text);
+  -- H1: a gap on a day the import holds joins nothing new: one open row per plant, day and kind
+  d := (pg_temp.t(50) at time zone plants.tz(p))::date - 3;
+  perform history.gap_queue(p, extract(epoch from (d::timestamp at time zone plants.tz(p)))::bigint + 3600,
+                               extract(epoch from (d::timestamp at time zone plants.tz(p)))::bigint + 7200, pg_temp.t(50));
+  perform pg_temp.eq('H1 a gap on an import day: still one open row',
+    (select count(*)::text from history.days where plant = p and day = d and kind = 'minutes' and status = 'queued'), '1');
+  -- H3: the faster pace wins; one account leaving keeps the import for the other
+  update history.import_accounts set pace_s = 86400 where import = i and account = a;
+  update history.import_accounts set pace_s = 0 where import = i and account = b;
+  delete from history.totals where plant = p;
+  w := history.take(0, 1, pg_temp.t(50.01));
+  f := pg_temp.fetch_row(b, p);
+  s := pg_temp.done(f, 'ok', pg_temp.t(50.01));
+  perform pg_temp.ok('H3 the co-owner''s pace, not the slow one''s', (pg_temp.fetch_row(b, p)).next_at <= pg_temp.t(50.01) + interval '1 second');
+  perform pg_temp.choose(a, '{}'::bigint[], pg_temp.t(50.02));
+  perform pg_temp.ok('H3 A switched out: the import goes on for B', (select status = 'open' from history.imports where id = i)
+    and (pg_temp.fetch_row(b, p)).status = 'running');
+  w := history.take(0, 1, pg_temp.t(50.03));
+  perform pg_temp.ok('H3 ... through B''s login', exists (select 1 from jsonb_array_elements(w) x
+    where (x->>'plant')::bigint = p and x->'login'->>'id' = lb::text));
+  -- H7: a failed day is tried 3 times, a minute apart, then given up; the import moves on
+  f := pg_temp.fetch_row(b, p);
+  s := pg_temp.done(f, 'failed', pg_temp.t(50.03));
+  perform pg_temp.eq('H7 failed once: a minute later, try 1', (select tries || ' ' || (due_at = pg_temp.t(50.03) + interval '1 minute')
+    from history.days where id = f.step), '1 true');
+  update history.days set tries = 2 where id = f.step;
+  w := history.take(0, 1, pg_temp.t(50.03) + interval '61 seconds');
+  f := pg_temp.fetch_row(b, p);
+  s := pg_temp.done(f, 'failed', pg_temp.t(50.03) + interval '62 seconds');
+  perform pg_temp.eq('H7 the third failure: given up', (select status from history.days where id = f.step), 'given_up');
+  -- H7: no inverter serials yet: handed back, no try spent
+  w := history.take(0, 1, pg_temp.t(50.04));
+  f := pg_temp.fetch_row(b, p);
+  s := pg_temp.done(f, 'wait', pg_temp.t(50.04));
+  perform pg_temp.eq('H7 wait: no try spent, 5 minutes', (select tries || ' ' || (due_at = pg_temp.t(50.04) + interval '5 minutes')
+    from history.days where id = f.step), '0 true');
+  -- H12: an extras day that lost only the grid endpoint asks that one alone next time
+  update history.days set due_at = pg_temp.t(50.05), claim = null, claimed_until = null where import = i and status = 'queued';
+  update history.days x set status = 'done', closed_at = pg_temp.t(50.05) where import = i and status = 'queued' and kind = 'minutes';
+  w := history.take(0, 1, pg_temp.t(50.05));
+  f := pg_temp.fetch_row(b, p);
+  perform history.step_done('day', f.step, f.claim, 'failed', 'grid only: SN1 grid/day 504', pg_temp.t(50.05));
+  perform pg_temp.ok('H12 grid endpoint alone next time', (select grid_only and kind = 'extras' from history.days where id = f.step));
+  -- H9: the reader's 429 on a login: no import step for 2 minutes
+  update history.days set due_at = pg_temp.t(50.06) where import = i and status = 'queued';
+  update plants.logins set throttled_at = pg_temp.t(50.06) - interval '1 minute' where id = lb;
+  perform pg_temp.ok('H9 reader 429 a minute ago: nothing handed out', not pg_temp.handed(history.take(0, 1, pg_temp.t(50.06)), p));
+  perform pg_temp.ok('H9 ... after 2 minutes: handed out', pg_temp.handed(history.take(0, 1, pg_temp.t(50.06) + interval '2 minutes'), p));
+  update plants.logins set throttled_at = null where id = lb;
+  -- H8: a write after the switch-out is refused; nothing more is handed out
+  f := pg_temp.fetch_row(b, p);
+  perform pg_temp.choose(b, '{}'::bigint[], pg_temp.t(50.07));
+  perform pg_temp.ok('H3 the last account leaves: stopped', (select status = 'stopped' and stop_reason = 'switched_out' from history.imports where id = i));
+  perform pg_temp.fails('H8 a write after the switch-out is refused',
+    format('select history.bank_extras(%L, %s, %L, %L, %L, %L)', 'day', f.step, f.claim, 'SN1',
+           jsonb_build_array(jsonb_build_object('ts', extract(epoch from pg_temp.t(49))::bigint, 'ac', 40)), pg_temp.t(50.07)),
+    'is not read now');
+  -- H25: the browser cannot reach history.*
+  perform pg_temp.ok('H25 authenticated and anon cannot read history.days',
+    not has_table_privilege('authenticated', 'history.days', 'select') and not has_table_privilege('anon', 'history.days', 'select'));
+  perform pg_temp.ok('H25 ... nor call the front door or the edge''s door',
+    not has_function_privilege('authenticated', 'history.start(bigint, uuid, text, integer, integer, timestamptz)', 'execute')
+    and not has_function_privilege('anon', 'history.stop(bigint, text, timestamptz)', 'execute')
+    and not has_function_privilege('authenticated', 'public.history_jobs(text, jsonb)', 'execute')
+    and not has_schema_privilege('authenticated', 'history', 'usage'));
+exception when others then perform pg_temp.ok('H3-H9 runs', false, sqlerrm);
+end $$;
+
+do $$
+declare a uuid := pg_temp.acct('h8'); l uuid; p bigint; i bigint; f pg_temp.fetch; w jsonb; s jsonb; uid uuid; n int;
+begin
+  -- H8: a paused or unread plant queues nothing
+  l := pg_temp.link(a, 'h8', '{990068801,990068802}', pg_temp.t(55)); perform pg_temp.stored(l);
+  perform pg_temp.ok('H8 a plant nobody reads: nothing queued', history.start(pg_temp.pid(990068802), null, 'link', 0, 0, pg_temp.t(55)) is null);
+  -- H17: an import done sends the history-ready mail; a second import done sends none
+  p := pg_temp.pid(990068801);
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(55));
+  perform pg_temp.choose(a, array[p], pg_temp.t(55));
+  i := (select id from history.imports where plant = p and status = 'open');
+  uid := (select user_id from billing.accounts where id = a);
+  perform pg_temp.finish(i, pg_temp.t(55.1));
+  perform pg_temp.eq('H17 import done: one history mail', (select count(*)::text from public.email_queue
+    where user_id = uid and kind = 'history' and key = 'history:' || p), '1');
+  perform pg_temp.ok('H16 progress after it: not fetching', not (history.progress(p)->>'fetching')::boolean);
+  perform history.start(p, a, 'restart', 0, 0, pg_temp.t(56));
+  perform pg_temp.ok('H16 progress during a restart: fetching, from 0', (history.progress(p)->>'fetching')::boolean
+    and (history.progress(p)->>'percent')::int = 0 and history.progress(p)->>'minutesTo' is not null);
+  perform pg_temp.finish((select id from history.imports where plant = p and status = 'open'), pg_temp.t(56.1));
+  perform pg_temp.eq('H17 a second import done: no second mail (choice 1A)', (select count(*)::text from public.email_queue
+    where user_id = uid and kind = 'history' and key = 'history:' || p), '1');
+  -- H8, H15: the plant's history deleted: its import stops, nothing queued
+  perform history.start(p, a, 'restart', 0, 0, pg_temp.t(57));
+  perform history.gap_queue(p, extract(epoch from pg_temp.t(57))::bigint - 7200, extract(epoch from pg_temp.t(57))::bigint, pg_temp.t(57));
+  perform history.stop(p, 'deleted', pg_temp.t(57.01));
+  perform pg_temp.eq('H8 deleted: no open import, no queued day', (select count(*)::text from history.days where plant = p and status = 'queued')
+    || ' ' || (select count(*)::text from history.imports where plant = p and status = 'open'), '0 0');
+  -- H10: closed rows go after 7 days; the stuck alert counts open days due over 30 minutes
+  perform history.clean(pg_temp.t(65));
+  perform pg_temp.eq('H10 closed rows cleared after 7 days', (select count(*)::text from history.days where plant = p), '0');
+exception when others then perform pg_temp.ok('H8-H17 runs', false, sqlerrm);
+end $$;
+
+-- H11, H20: a hole over midnight fills both days; the missing minutes of a day the clocks change
+do $$
+declare p bigint := plants.plant_for('mock', 'h20-london'); m int; lo bigint; d1 date; id1 bigint;
+begin
+  update plants.plants set time_zone = 'Europe/London' where id = p;
+  -- 23:50 to 00:20 local
+  lo := extract(epoch from ('2030-06-10 23:50'::timestamp at time zone 'Europe/London'))::bigint;
+  perform history.gap_queue(p, lo, lo + 1800, now());
+  perform pg_temp.eq('H11 a hole over midnight: both local days', (select string_agg(day::text, ' ' order by day) from history.days
+    where plant = p and why = 'gap'), '2030-06-10 2030-06-11');
+  -- import rows count the whole day: 1500 minutes the day the clocks go back, 1380 when they go forward
+  insert into history.imports (plant, reason, requested_at, floor_day, top_day) values (p, 'link', now(), '2030-03-31', '2030-10-27')
+  returning id into id1;
+  insert into history.days (plant, import, day, kind, why, due_at) values (p, id1, '2030-10-27', 'minutes', 'import', now()),
+    (p, id1, '2030-03-31', 'minutes', 'import', now());
+  select count(*) into m from history.missing((select id from history.days where plant = p and day = '2030-10-27'), '2031-01-01');
+  perform pg_temp.eq('H20 clocks back (London, 27 Oct 2030): 1500 minutes', m::text, '1500');
+  select count(*) into m from history.missing((select id from history.days where plant = p and day = '2030-03-31'), '2031-01-01');
+  perform pg_temp.eq('H20 clocks forward (London, 31 Mar 2030): 1380 minutes', m::text, '1380');
+  -- H11: a complete row is never asked for; a partial one is; the last 10 minutes are the reader's
+  perform set_config('billing.guarded', 'on', true);
+  insert into public.agg_minute (plant_id, ts, pv_w, source) values
+    (p, extract(epoch from ('2030-10-27 08:00'::timestamp at time zone 'Europe/London'))::bigint, 5, 'poller'),
+    (p, extract(epoch from ('2030-10-27 08:01'::timestamp at time zone 'Europe/London'))::bigint, 5, 'poller_partial');
+  perform set_config('billing.guarded', 'off', true);
+  select count(*) into m from history.missing((select id from history.days where plant = p and day = '2030-10-27'), '2031-01-01');
+  perform pg_temp.eq('H11 a complete row is not asked for, a partial one is', m::text, '1499');
+  select count(*) into m from history.missing((select id from history.days where plant = p and day = '2030-10-27'),
+    '2030-10-27 12:00'::timestamp at time zone 'Europe/London');
+  perform pg_temp.eq('H11 the last 10 minutes are the reader''s (noon: 13 h less 10 min, one row held)',
+    m::text, (13 * 60 - 10 - 1)::text);
+exception when others then perform pg_temp.ok('H11-H20 runs', false, sqlerrm);
+end $$;
+
+-- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;
 begin
