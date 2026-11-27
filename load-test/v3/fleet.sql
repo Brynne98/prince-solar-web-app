@@ -109,6 +109,10 @@ returns table (ts bigint, expected bigint, saved bigint, lost bigint) language s
    group by e.ts order by e.ts
 $$;
 
+-- SOLAR-686 H26: plants switched out or deleted mid-run (lt3.fence)
+create table if not exists lt3.fenced (plant bigint primary key, at timestamptz, how text, minutes bigint, extras bigint);
+create table if not exists lt3.late (plant bigint, tbl text, at timestamptz default clock_timestamp());
+
 -- SOLAR-686 H26: as lt3.lost, the reader's rows only (an import can fill a minute the reader missed)
 create or replace function lt3.lost_reader(p_from bigint, p_to bigint)
 returns table (ts bigint, expected bigint, saved bigint, lost bigint) language sql as $$
@@ -124,7 +128,6 @@ $$;
 
 -- SOLAR-686 H26: what History did in the run. Fenced plants (switched out or deleted mid-run) are
 -- recorded in lt3.fenced with the time, and their rows counted then (lt3.fence).
-create table if not exists lt3.fenced (plant bigint primary key, at timestamptz, how text, minutes bigint, extras bigint);
 create or replace function lt3.fence(p_plants bigint[], p_how text) returns void language plpgsql as $$
 begin
   insert into lt3.fenced (plant, at, how, minutes, extras)
@@ -163,12 +166,12 @@ $$;
 
 -- every History row written for a plant after it was fenced, caught as it is written (a later
 -- delete cannot hide it)
-create table if not exists lt3.late (plant bigint, tbl text, at timestamptz default clock_timestamp());
 create or replace function lt3.catch_late() returns trigger language plpgsql as $$
 begin
-  if exists (select 1 from lt3.fenced f where f.plant = new.plant_id and f.at < clock_timestamp())
-     and (tg_table_name <> 'agg_minute' or new.source in ('invhistory', 'plantfeed')) then
-    insert into lt3.late (plant, tbl) values (new.plant_id, tg_table_name);
+  if exists (select 1 from lt3.fenced f where f.plant = new.plant_id and f.at < clock_timestamp()) then
+    if tg_table_name <> 'agg_minute' or to_jsonb(new)->>'source' in ('invhistory', 'plantfeed') then
+      insert into lt3.late (plant, tbl) values (new.plant_id, tg_table_name);
+    end if;
   end if;
   return null;
 end $$;
