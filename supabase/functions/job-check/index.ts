@@ -25,6 +25,8 @@ type Inputs = {
   push?: { waiting: number; oldest: string | null } | null;
   /** job_check_msg() (0261): per outbox channel and lane in use; null when not read */
   msg?: MsgLane[] | null;
+  /** history.stuck() (SOLAR-686 H10): the History queue stopped; null when not read */
+  history?: { waiting: number; last_step_at: string | null; stuck: boolean } | null;
 };
 type MsgLane = { channel: string; lane: string; queued: number; oldest: string | null; expired: number; n429: number };
 // An outbox row queued longer than this, or any that expired in the last hour, fails its lane.
@@ -167,9 +169,12 @@ export function judge(i: Inputs): Verdict[] {
     out.push({ name: `partitions:${p.table}`, job: "ensure-partitions", failing: p.days < PARTITION_MIN_DAYS,
                detail: { days_covered: p.days, needed: PARTITION_MIN_DAYS } });
   }
+  // History's queue (SOLAR-686 H10): work due for 30 minutes and no step ended in 30 minutes.
+  if (i.history) out.push({ name: "history-queue", job: "history", failing: i.history.stuck,
+                            detail: { waiting: i.history.waiting, last_step_at: i.history.last_step_at } });
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
-    if (c.failing && name !== "signin-email" && name !== "push-queue" && !(name.startsWith("msg:") && !i.msg) && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
+    if (c.failing && name !== "signin-email" && name !== "push-queue" && name !== "history-queue" && !(name.startsWith("msg:") && !i.msg) && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
       const job = name.startsWith("poll:") ? "poll" : name.startsWith("msg:push:") ? "notify-push"
         : name.startsWith("msg:") ? "notify-email" : name.replace(/^(cron|call):/, "");
       out.push({ name, job, failing: false, detail: { gone: true } });
@@ -201,6 +206,10 @@ if (import.meta.main) serve("job-check", async (req) => {
     noteError("job_check_push", e, { hourly: true });
     return null;
   }) as Inputs["push"];
+  i.history = await rpc("history_jobs", { p_cmd: "stuck" }).catch((e) => {
+    noteError("job_check_history", e, { hourly: true });
+    return null;
+  }) as Inputs["history"];
   i.msg = await rpc("job_check_msg").catch((e) => {
     noteError("job_check_msg", e, { hourly: true });
     return null;

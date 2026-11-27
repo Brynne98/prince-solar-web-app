@@ -89,17 +89,6 @@ export function emailOutcome(r: AccountResult): { account: string; outcome: stri
 /** the brand requests made for this account since `since`. */
 const callsSince = (acc: Account, since: number) => brandOf(acc.brand).callCount(acc) - since;
 
-// Today's inverter temperatures (SOLAR-398): each inverter's day so far once in ten minutes,
-// on its own minute (spread by serial). One call; the insert keeps what a row already holds (0046).
-export const TEMP_EVERY_MIN = 10;
-export const tempMinute = (sn: string) => [...sn].reduce((h, c) => h + c.charCodeAt(0), 0) % TEMP_EVERY_MIN;
-
-export async function bankTodayTemps(inv: InverterInfo, acc: Account, tz: string, version: number | null): Promise<number> {
-  const rows = await brandOf(acc.brand).todayTemps(inv, acc, tz);
-  if (!rows.length) return 0;
-  return Number(await rpc("q_insert_inverter_history_v2",
-    { p_plant: inv.plantId, p_version: version, p_sn: inv.sn, p_rows: rows }) ?? 0);
-}
 
 
 /** One login's minute as poll_commit_batch takes it (0268); poll_commit_v2 takes the same as p_*. */

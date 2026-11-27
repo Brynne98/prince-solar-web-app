@@ -420,7 +420,8 @@ create function pg_temp.snap() returns jsonb language sql as $$
     'strings',  (select jsonb_agg(to_jsonb(s) order by s.ts, s.sn, s.no) from public.strings s where s.plant_id between 973000000 and 973000099),
     'agg',      (select jsonb_agg(to_jsonb(a) order by a.plant_id, a.ts) from public.agg_minute a where a.plant_id between 973000000 and 973000099),
     'gaps',     (select jsonb_agg(to_jsonb(g) order by g.plant_id, g.from_ts) from private.gaps g where g.plant_id between 973000000 and 973000099),
-    'refill',   (select jsonb_agg(to_jsonb(q) order by q.plant_id) from private.refill_queue q where q.plant_id between 973000000 and 973000099),
+    'refill',   (select jsonb_agg(jsonb_build_object('plant_id', q.plant, 'day', q.day) order by q.plant, q.day) from history.days q
+                  where q.why = 'gap' and q.status = 'queued' and q.plant between 973000000 and 973000099),
     'meta',     (select jsonb_agg(to_jsonb(m) order by m.sn) from private.meta m where m.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
     'inverters',(select jsonb_agg(to_jsonb(i) order by i.sn) from private.inverters i where i.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
     'logins',   (select jsonb_agg(jsonb_build_object('u', sa.username, 'tok', sa.access_token, 'exp', sa.access_expires_at,
@@ -462,7 +463,7 @@ select pg_temp.ok('no rows for refused plants',
 select pg_temp.eq('refused lists', (select jsonb_agg(e->'refused') from jsonb_array_elements(:'res_b'::jsonb) e),
                   '[[973000007, 973000099], [], [973000004], [], [973000005], [973000001]]'::jsonb);
 select pg_temp.eq('gap and refill for plant 3', (select (count(*), max(to_ts - from_ts))::text from private.gaps where plant_id = 973000003), '(1,1200)');
-select pg_temp.ok('plant 3 queued for refill', exists (select 1 from private.refill_queue where plant_id = 973000003));
+select pg_temp.ok('plant 3 queued for refill (SOLAR-686: History''s gap row)', exists (select 1 from history.days where plant = 973000003 and why = 'gap' and status = 'queued'));
 select pg_temp.eq('history deleted mark cleared', (select history_purged_at from billing.plant_facts where plant = 973000003), null::timestamptz);
 select pg_temp.eq('tokens: newer saved, same expiry saved, older kept, kept for a refused login',
   (select string_agg(access_token, ',' order by username) from plants.logins where username like 'v3-c%'),

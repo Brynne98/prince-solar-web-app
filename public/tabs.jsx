@@ -9,7 +9,7 @@ import { Icon, MenuList, TrashIcon, MenuState, PickMenu, STEPS, SUM_MODES, StepF
 import { BotCheck, FieldLabel, PasswordInput, SignOutButton, explainAuthError, invalidProps, resetAsked, signOutHere, takeResetAsk, useFieldErrors } from './auth.jsx';
 import { CalIcon, CalendarPop, DAY_LAST, DateBar, EQ_HOT_AC, EQ_HOT_DC, GapHatch, HEAT_WARM, HM, HistoryView, InverterHistoryChart, OutagePill, OutageTipRow, dayFace, gapRuns, gridOffMinutes, gridOffRuns, lastSlot, niceScale, outageAt, outageMinutes, outageRuns, seriesArea, seriesPath, tipLeftFor, useChartSize, useDayPicker, useLiveOffFrom } from './chart.jsx';
 import { BusyButton, COLORS as CC, Card, InfoDot, LockIcon, SectionTitle, Segmented, SkelLine, Skeleton, StatTile, Switch, Tip, TipRow, Toggle, battShown, cleanTemp, dayText, fmtDuration, fmtEnergyParts, fmtEnergySmart, fmtKwh, fmtPlantTime, fmtPower, fmtPowerParts, fmtRand, fmtRandSmart, fmtTime, localDateStr, moneySymbol, plantDateStr, plantHour, plantLabel, shiftDate } from './components.jsx';
-import { EMAIL_KINDS, PUSH_KINDS, READ_FRESH_MS, dayFor, dayPeak, deleteAccount, emptyText, fetchCompare, fetchDay, fetchEarliest, fetchEmailPrefs, fetchGridToday, fetchHourly, fetchInverterHistory, fetchPlantStates, fetchPushPrefs, fetchStringHealth, fetchTrendDaily, firstLoadSync, isStale, plantNow, pushState, pushTurnOff, pushTurnOn, realPoints, saveEmailPref, saveLinkRemove, savePlantConfig, savePushPref, syncProgress } from './data.jsx';
+import { EMAIL_KINDS, PUSH_KINDS, READ_FRESH_MS, dayFor, dayPeak, deleteAccount, emptyText, fetchCompare, fetchDay, fetchEarliest, fetchEmailPrefs, fetchGridToday, fetchHourly, fetchInverterHistory, fetchPlantStates, fetchPushPrefs, fetchStringHealth, fetchTrendDaily, isStale, plantNow, pushState, pushTurnOff, pushTurnOn, realPoints, saveEmailPref, saveLinkRemove, savePlantConfig, savePushPref, syncProgress } from './data.jsx';
 import { PowerFlow, useFlowMobile } from './flow.jsx';
 import { AT, ChooseDialog, Dialog, LinkDialog, PickAfterPay, accountLoading, addAsked, billingReturn, bookChange, changeCard, pickLogins, reloadAccount, settlePayment, startPlan, takeAddAsk, takeWantPlan, useAccount } from './link.jsx';
 import { sb } from './sb.js';
@@ -2704,7 +2704,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
     const ps = stateOf(p.plant_id);
     const tag = acct && ps ? AT.plantTag(acct, ps) : null, kept = acct && ps ? AT.plantKept(acct, ps) : null;
     const name = plantLabel(p);
-    const st = states[p.plant_id] && { ...states[p.plant_id], sync: firstLoadSync(states[p.plant_id].sync, p.linked_at) };
+    const st = states[p.plant_id];
     // the first 60 days still arriving: its real progress, also before the first reading lands
     const fetching = st ? syncProgress(st.sync) : null;
     // no reading at all 30 minutes after it started, when the No readings email goes too (0174)

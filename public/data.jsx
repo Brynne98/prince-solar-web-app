@@ -9,7 +9,6 @@
 
 import { AccountText } from '../supabase/functions/_shared/text.ts';
 import { checkSession } from './auth.jsx';
-import { localDateStr } from './components.jsx';
 import { reloadAccount } from './link.jsx';
 import { sb } from './sb.js';
 const TYPICAL_DAYS = 7; // Live "usually N%" and Battery's "if the grid goes off".
@@ -343,7 +342,7 @@ function fetchDataDays(fresh) {
   // No plant yet (the empty outlines in Setup): no days to ask about, and the ask would fail.
   if (window.CURRENT_PLANT == null) return Promise.resolve(null);
   const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = plantNow.sync;
-  const old = c && s && (s.pending || s.spinePending) && Date.now() - c.at > 60000;
+  const old = c && s && s.fetching && Date.now() - c.at > 60000;
   // A reading came in on a day the list lacks (the day turned since it was asked): that day
   // has data, so it joins the list here rather than every page asking again at midnight (SOLAR-648)
   const day = plantNow.lastReadDay, had = dataDaysGood[k];
@@ -556,26 +555,12 @@ async function deleteAccount() {
   return data;
 }
 
-// How far a first load has got, 0..1, or null when nothing is loading (SOLAR-176).
-// Minute days and temperature days of the last 60 count together, since the 60-days
-// email waits for both. Temperatures count only while more than a day behind: every
-// plant falls one day behind at midnight (as first-load-continue, 0093).
-// Temperatures behind are a first load only for a plant linked in the last day. On an
-// older plant they are the walk catching up after a dead login, not a plant setting up
-// (SOLAR-373). A restarted plant (0125) still loads its minutes as a first load.
-function firstLoadSync(sync, linkedAt) {
-  if (!sync || !sync.invPending || sync.spinePending) return sync;
-  if (!linkedAt || Date.now() - Date.parse(linkedAt) < 86400000) return sync;
-  return { ...sync, pending: false, invPending: false };
-}
+// How far a history import has got, 0..1, or null when none runs (SOLAR-176). History counts
+// it (history.progress, SOLAR-686): the import's minute days and temperature days together, since
+// the 60-days email waits for both. A link, a switch back and a restart show; hole refills do not.
 function syncProgress(sync) {
-  if (!sync || !sync.pending) return null;
-  const win = sync.window || 60;
-  const days = Math.min(win, sync.days || 0);
-  const behind = sync.invPending && sync.tempNext
-    ? Math.round((Date.parse(localDateStr()) - Date.parse(sync.tempNext)) / 86400000) : 0;
-  const tempDays = behind > 1 ? Math.max(0, win - behind) : win;
-  return days < win || tempDays < win ? (days + tempDays) / (2 * win) : null;
+  if (!sync || !sync.fetching) return null;
+  return Math.min(0.99, (sync.percent || 0) / 100);
 }
 
 // What an empty chart should say. A plant with under a day of history is new, and
@@ -584,7 +569,7 @@ function syncProgress(sync) {
 // a thin log is not a gap either, and says so.
 function emptyText(days, fallback) {
   const sync = plantNow.sync;
-  const fetching = !!(sync && sync.pending && sync.days < sync.window);
+  const fetching = !!(sync && sync.fetching);
   if (days != null && days < 1) return fetching
     ? 'Loading the last 60 days.'
     : 'Collecting your first day. Check back tomorrow.';
@@ -594,4 +579,4 @@ function emptyText(days, fallback) {
   return fallback || 'No data for this range yet.';
 }
 
-export { fetchSnapshot, fetchDay, dayFor, dayPeak, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday, fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS };
+export { fetchSnapshot, fetchDay, dayFor, dayPeak, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday, fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS };

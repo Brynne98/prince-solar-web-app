@@ -29,20 +29,11 @@
   },
   "billing.history_fetches": {
    "part": "history",
-   "writers": [
-    "supabase/schemas/functions/billing/history_renew.sql",
-    "supabase/schemas/functions/billing/history_step.sql",
-    "supabase/schemas/functions/billing/history_take.sql",
-    "supabase/schemas/functions/billing/purge_now.sql",
-    "supabase/schemas/functions/billing/request_history.sql",
-    "supabase/schemas/functions/billing/write_seats.sql"
-   ]
+   "writers": []
   },
   "billing.history_lanes": {
    "part": "history",
-   "writers": [
-    "supabase/schemas/functions/billing/history_step.sql"
-   ]
+   "writers": []
   },
   "billing.invoices": {
    "part": "billing",
@@ -256,6 +247,7 @@
     "supabase/schemas/functions/public/account_mark.sql",
     "supabase/schemas/functions/public/link_login_live.sql",
     "supabase/schemas/functions/public/login_outcomes.sql",
+    "supabase/schemas/functions/public/login_throttled.sql",
     "supabase/schemas/functions/public/share_account_set.sql"
    ]
   },
@@ -407,19 +399,11 @@
   },
   "private.recover_kicks": {
    "part": "history",
-   "writers": [
-    "supabase/schemas/functions/private/first_load_continue.sql",
-    "supabase/schemas/functions/public/plant_bootstrap_kick.sql"
-   ]
+   "writers": []
   },
   "private.refill_queue": {
    "part": "history",
-   "writers": [
-    "supabase/schemas/functions/billing/purge_now.sql",
-    "supabase/schemas/functions/private/first_load_continue.sql",
-    "supabase/schemas/functions/public/poll_commit.sql",
-    "supabase/schemas/functions/public/poll_commit_batch.sql"
-   ]
+   "writers": []
   },
   "private.rollup_progress": {
    "part": "history",
@@ -466,7 +450,6 @@
   "public.app_config": {
    "part": "system",
    "writers": [
-    "supabase/functions/_shared/plants.ts",
     "supabase/schemas/functions/private/alerts_minute.sql"
    ]
   },
@@ -491,12 +474,12 @@
   "public.email_queue": {
    "part": "messages",
    "writers": [
+    "supabase/schemas/functions/history/import_done.sql",
     "supabase/schemas/functions/msg/email_settled.sql",
     "supabase/schemas/functions/plants/list_seen.sql",
     "supabase/schemas/functions/plants/plant_listed.sql",
     "supabase/schemas/functions/private/email_enqueue_plant.sql",
     "supabase/schemas/functions/private/email_on_confirm.sql",
-    "supabase/schemas/functions/private/email_on_history.sql",
     "supabase/schemas/functions/private/email_on_relink.sql",
     "supabase/schemas/functions/public/api_account_delete.sql",
     "supabase/schemas/functions/public/api_link_remove.sql",
@@ -532,13 +515,9 @@
    "part": "plants",
    "writers": [
     "public/data.jsx",
-    "supabase/functions/recover/index.ts",
-    "supabase/schemas/functions/billing/purge_now.sql",
     "supabase/schemas/functions/plants/purge.sql",
-    "supabase/schemas/functions/private/plant_start_fill.sql",
     "supabase/schemas/functions/public/batt_sign_detect.sql",
     "supabase/schemas/functions/public/battery_banks_detect.sql",
-    "supabase/schemas/functions/public/plant_bookmarks_clear.sql",
     "supabase/schemas/functions/public/plant_config_seed.sql",
     "supabase/schemas/functions/public/plant_features_detect.sql"
    ]
@@ -600,6 +579,65 @@
    "writers": [
     "supabase/schemas/functions/private/plant_readings_delete.sql",
     "supabase/schemas/functions/private/rollup_partition.sql"
+   ]
+  },
+  "history.imports": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/clean.sql",
+    "supabase/schemas/functions/history/start.sql",
+    "supabase/schemas/functions/history/step_done.sql",
+    "supabase/schemas/functions/history/stop_import.sql",
+    "supabase/schemas/functions/history/take.sql"
+   ]
+  },
+  "history.import_accounts": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/leave.sql",
+    "supabase/schemas/functions/history/start.sql",
+    "supabase/schemas/functions/history/tidy.sql"
+   ]
+  },
+  "history.days": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/check_queue.sql",
+    "supabase/schemas/functions/history/clean.sql",
+    "supabase/schemas/functions/history/gap_queue.sql",
+    "supabase/schemas/functions/history/renew.sql",
+    "supabase/schemas/functions/history/start.sql",
+    "supabase/schemas/functions/history/step_done.sql",
+    "supabase/schemas/functions/history/stop.sql",
+    "supabase/schemas/functions/history/stop_import.sql",
+    "supabase/schemas/functions/history/take.sql"
+   ]
+  },
+  "history.totals": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/renew.sql",
+    "supabase/schemas/functions/history/start.sql",
+    "supabase/schemas/functions/history/step_done.sql",
+    "supabase/schemas/functions/history/stop.sql",
+    "supabase/schemas/functions/history/take.sql",
+    "supabase/schemas/functions/history/totals_now.sql",
+    "supabase/schemas/functions/history/totals_queue.sql"
+   ]
+  },
+  "history.lanes": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/back_off.sql",
+    "supabase/schemas/functions/history/lane_ok.sql"
+   ]
+  },
+  "history.calls": {
+   "part": "history",
+   "writers": [
+    "supabase/schemas/functions/history/clean.sql",
+    "supabase/schemas/functions/history/spent.sql",
+    "supabase/schemas/functions/history/take.sql"
    ]
   }
  },
@@ -663,9 +701,8 @@
     "supabase/schemas/functions/public/battery_banks_detect.sql",
     "supabase/schemas/functions/public/batt_sign_detect.sql",
     "supabase/schemas/functions/public/plants_configured.sql",
-    "supabase/schemas/functions/public/plant_bookmarks_clear.sql",
-    "supabase/schemas/functions/public/plant_history_loading.sql",
-    "supabase/schemas/functions/public/sync_logins.sql"
+    "supabase/schemas/functions/public/sync_logins.sql",
+    "supabase/schemas/functions/public/login_throttled.sql"
    ],
    "readers": {}
   },
@@ -673,7 +710,10 @@
    "files": []
   },
   "history": {
-   "files": []
+   "files": [
+    "supabase/schemas/functions/history/",
+    "supabase/functions/history/"
+   ]
   },
   "messages": {
    "files": [

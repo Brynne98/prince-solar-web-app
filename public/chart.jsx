@@ -472,11 +472,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   // A past day can be empty for three reasons; say which (0048).
   const sync = plantNow.sync;
   const emptyMsg = invs == null ? '' : isToday
-    ? 'Today’s readings arrive every six hours.'
-    : sync && sync.invPending && sync.tempNext && date >= sync.tempNext
-      ? (sync.tempNext > earliest
-          ? `Not fetched yet. Up to ${dayText(shiftDate(sync.tempNext, -1))} so far, more every six hours.`
-          : 'Not fetched yet. Older days come first, more every six hours.')
+    ? 'Today’s readings arrive every 10 minutes.'
+    : sync && sync.fetching && sync.extrasTo && date >= sync.floor && date <= sync.extrasTo ? 'Not fetched yet.'
       : date < earliest ? 'Older than 60 days, so not available.'
       : 'No readings for this day.';
 
@@ -836,12 +833,12 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   // The server sends no series until today has its first reading (`approx`, 0099).
   // A past day with nothing: still being fetched (fresh link, 0048), before the
   // 60 days the fetch reaches, or a real gap. Say which.
-  // While the first load runs (today, back through two weeks, then back to
-  // backfillNext, SOLAR-171), any empty day from backfillNext on may still come.
+  // While an import runs (newest day first, SOLAR-171), an empty day between its floor and the
+  // newest day still to come may still come (history.progress, SOLAR-686).
   const sync = plantNow.sync;
-  const pastMsg = sync && sync.spinePending && sync.backfillNext && date >= sync.backfillNext
+  const pastMsg = sync && sync.fetching && sync.minutesTo && date >= sync.floor && date <= sync.minutesTo
     ? 'Not fetched yet.'
-    : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Older than 60 days, so not available.'
+    : sync && sync.fetching && date < sync.floor ? 'Older than 60 days, so not available.'
     : 'No readings for this day.';
   const emptyMsg = loading ? 'Loading…'
     : isToday && silent ? 'No readings today.'

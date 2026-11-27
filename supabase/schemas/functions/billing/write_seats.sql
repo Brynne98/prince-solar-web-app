@@ -17,8 +17,8 @@ begin
                                     trial_used_by = coalesce(f.trial_used_by, excluded.trial_used_by)
    where f.trial_used_at is null or f.trial_used_by is null;
   perform plants.bump(array(select x from unnest(p_want || had) x where not (x = any (p_want) and x = any (had))));
-  update billing.history_fetches set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
-   where account = p_account and status in ('queued', 'running') and plant = any (had) and plant <> all (p_want);
+  -- this account leaves the imports of the plants it switched out; another account's go on (SOLAR-686 H3)
+  perform history.leave(x, p_account, p_at) from unnest(had) x where x <> all (p_want);
   -- a seat opening (or a plan restarting) on a deleted plant: it gathers history again. The
   -- caller holds the plant locks, so no write path has to touch the row.
   update billing.plant_facts set history_purged_at = null

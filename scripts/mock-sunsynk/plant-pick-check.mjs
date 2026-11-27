@@ -62,8 +62,8 @@ r = await rpc(u, "api_plant_pick", { p_plants: [a, b, c] });
 check(!r.ok && /no room/.test(r.error) && active(u) === "", `3 ticks on Home are refused, none ticked: ${r.error}`);
 r = await rpc(u, "api_plant_pick", { p_plants: [a, b] });
 check(r.ok && active(u) === `${a},${b}`, `2 ticked run: ${r.error || "ok"} on=${active(u)}`);
-check(sql(`select backfill_next = (now() at time zone coalesce(timezone, 'Africa/Johannesburg'))::date - 60 from public.plant_config where plant_id = ${a}`) === "t",
-  "a ticked plant's history goes back 60 days");
+check(sql(`select floor_day = (now() at time zone plants.tz(plant))::date - 60 from history.imports where plant = ${a} and status = 'open'`) === "t",
+  "a ticked plant's history goes back 60 days (SOLAR-686: History's import)");
 r = await rpc(u, "api_plant_pick", { p_plants: [c] });
 check(!r.ok && /no room/.test(r.error), `a third tick is refused: ${r.error}`);
 check((await status()).every((p) => !p.can_start), "the locked plant has no place open");

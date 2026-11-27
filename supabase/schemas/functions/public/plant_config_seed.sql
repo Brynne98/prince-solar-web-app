@@ -9,20 +9,17 @@ AS $function$
                from jsonb_array_elements(p_rows) r
               where p.id = (r->>'plant_id')::bigint and plants.tz_valid(nullif(r->>'timezone', ''))
                 and p.time_zone is distinct from r->>'timezone' returning p.id)
-  insert into public.plant_config (plant_id, currency, lat, lon, panel_azimuth, geometry_source,
-                                   backfill_next, backfill_until, temp_next)
+  insert into public.plant_config (plant_id, currency, lat, lon, panel_azimuth, geometry_source)
   select (r->>'plant_id')::bigint,
          coalesce(nullif(upper(r->>'currency'), ''), 'ZAR'),
          nullif(r->>'lat', '')::double precision,
          nullif(r->>'lon', '')::double precision,
          case when nullif(r->>'lat', '')::double precision > 0 then 180 else 0 end,
-         'default',
-         case when not paused then (now() at time zone tz)::date - 60 end,
-         case when not paused then (now() at time zone tz)::date - 14 end,
-         case when not paused then (now() at time zone tz)::date - 60 end
-    from jsonb_array_elements(p_rows) r,
-         lateral (select case when plants.tz_valid(nullif(r->>'timezone', '')) then r->>'timezone'
-                              else plants.tz((r->>'plant_id')::bigint) end as tz,
-                         coalesce((r->>'paused')::boolean, false) as paused) z
-  on conflict (plant_id) do nothing
+         'default'
+    from jsonb_array_elements(p_rows) r
+  on conflict (plant_id) do nothing;
+  -- the 60 days, for a plant that is read now (SOLAR-686 H8: History checks that); not paused
+  select history.start((r->>'plant_id')::bigint, null, 'link')
+    from jsonb_array_elements(p_rows) r
+   where not coalesce((r->>'paused')::boolean, false)
 $function$;

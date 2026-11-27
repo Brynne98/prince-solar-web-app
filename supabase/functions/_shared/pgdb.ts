@@ -103,11 +103,6 @@ export function directDb(url: string, { timeoutMs = 25_000 } = {}): DirectDb {
         [JSON.stringify(ids)]);
       return rows.map((r) => Number(r.plant_id));
     },
-    async clearBookmarks(ids) {
-      await run("plant_config",
-        `update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
-          where plant_id = any(array(select jsonb_array_elements_text($1::text::jsonb))::bigint[])`, [JSON.stringify(ids)]);
-    },
     end: () => sql.end({ timeout: 5 }),
   };
 }

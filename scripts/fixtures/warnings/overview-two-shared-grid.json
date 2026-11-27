@@ -1,6 +1,6 @@
 {
   "_source": "api_overview for 538820 at 2026-10-29 16:41 SAST, serials and names replaced. Grid on; one shared battery; S1 is the slave (uploads every 5 min, battery temperature -100). String 1 on both inverters has never made power.",
-  "sync": { "days": 60, "window": 60, "pending": false, "tempNext": "2026-10-29", "invPending": false, "backfillNext": null, "spinePending": false, "backfillUntil": null },
+  "sync": { "days": 60, "window": 60, "fetching": false, "percent": null, "floor": null, "minutesTo": null, "extrasTo": null },
   "plant": { "id": 2, "name": "Plant B" },
   "config": { "hasGrid": true, "reserve": 20, "currency": "ZAR", "timezone": "Africa/Harare", "systemKwp": 12.6, "hasBattery": true, "battCapacity": 25.6, "batteryBanks": "shared", "featuresSource": "detected", "battPositiveMeans": "discharging" },
   "lastTs": 1793284860,

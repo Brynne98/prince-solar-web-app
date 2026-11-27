@@ -11,7 +11,8 @@ begin
   else
     uid := (select l.user_id from plants.logins l where l.id = new.login and l.kind = 'login');
   end if;
-  if uid is not null and exists (select 1 from public.plant_config c where c.plant_id = new.plant and private.history_done(c)) then
+  -- the plant's history is ready already: this account's one mail (SOLAR-686 H17)
+  if uid is not null and exists (select 1 from public.plant_config c where c.plant_id = new.plant) and history.ready(new.plant) then
     insert into public.email_queue (user_id, plant_id, kind, key, priority)
     values (uid, new.plant, 'history', 'history:' || new.plant, 1)
     on conflict do nothing;

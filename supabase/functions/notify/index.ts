@@ -197,10 +197,10 @@ async function historyPending(row: Row): Promise<boolean> {
   if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
   const [{ data: link }, { data: cfg }, open] = await Promise.all([
     db.rpc("plant_link", { p_user: row.user_id, p_plant: row.plant_id }),
-    db.rpc("plant_history_loading", { p_plant: row.plant_id }),
+    db.rpc("history_jobs", { p_cmd: "loading", p_args: { plant: row.plant_id } }),
     historyOpen(row.user_id, row.plant_id),
   ]);
-  // Right after a link the import bookmark isn't set yet and reads as done.
+  // Right after a link the import isn't queued yet and reads as done.
   return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg === true || open;
 }
 
@@ -225,11 +225,11 @@ async function historyWaits(row: Row): Promise<boolean> {
 // The runtime keeps the isolate for this after the response.
 const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
 
-/** Runs the day sync again for a plant whose link kick wrote no day totals. */
-const resync = (plant: number) => background(
-  db.functions.invoke(`sync-plant-energy?plant=${plant}`, { body: {} })
-    .then(({ error }) => { if (error) throw error; })
-    .catch((e) => noteError("history_resync_failed", e, { plant, hourly: true })));
+/** Asks History for a plant's kWh totals again when its link wrote none (SOLAR-686 H2). */
+const resync = (plant: number) => background((async () => {
+  const { error } = await db.rpc("history_jobs", { p_cmd: "totals_now", p_args: { plant } });
+  if (error) noteError("history_resync_failed", new Error(error.message), { plant, hourly: true });
+})());
 
 // ------------------------------------------------------------------- building
 
