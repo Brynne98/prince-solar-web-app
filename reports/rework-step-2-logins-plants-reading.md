@@ -381,13 +381,13 @@ differences once the fake plants' new ids are mapped); plant lists the same both
 fake plants moved to brand `mock` with ids from 1e12, 24 serials prefixed, 22 logins brand
 `mock`, no login listing another brand's plant.
 
-**Left open, on purpose:**
-- `plant_config` still has writers outside this part: History's bookmarks (`recover`,
-  `plant_start_fill`, `purge_now`, step 3) and the browser's own settings (`public/data.jsx`,
-  column grants). Listed in `owners.json`.
-- The save checks a plant's route, not each (plant, login) pair: a sample from a login whose
-  route ended passes while another route to the plant is live (Sol, final review). As before
-  this step.
-- Message kinds and mail words that name SunSynk (`sunsynk_down`, `text.ts`): step 4.
-- Kept names: the admin page's `sunsynkUser` key and the PostHog event `sunsynk_calls_counted`;
-  the `link-sunsynk` alias goes one release after the frontend calls `link`.
+**Left open, on purpose, each with its ticket:**
+- History's bookmark writes to `plant_config` (`recover`, `plant_start_fill`, `purge_now`): SOLAR-686
+  (rework step 3: history).
+- The browser's own settings writes to `plant_config` (column grants): SOLAR-687.
+- The save checks a plant's route, not each (plant, login) pair (as before this step): SOLAR-688.
+- The `link-sunsynk` alias, one release after the frontend calls `link`: SOLAR-689.
+- R22: one reader group a minute-sample started ~60 s late in local load tests; a day of
+  production job-check minutes decides whether the watchdog is built: SOLAR-690.
+- Mail words and message kinds naming SunSynk (`sunsynk_down`, `text.ts`): SOLAR-682 (step 4).
+- Kept names: the admin page's `sunsynkUser` key and the PostHog event `sunsynk_calls_counted`.
