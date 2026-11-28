@@ -300,6 +300,20 @@ export type Database = {
                   Relationships: [
                     
                   ]
+                },"readings_d20261205": {
+                  Row: {
+                    "batt_chg_today_kwh": number | null,"batt_chg_total_kwh": number | null,"batt_current_a": number | null,"batt_dischg_today_kwh": number | null,"batt_dischg_total_kwh": number | null,"batt_power_w": number | null,"batt_soc": number | null,"batt_temp_c": number | null,"batt_voltage_v": number | null,"batt_w": number | null,"batt2_current_a": number | null,"batt2_power_w": number | null,"batt2_soc": number | null,"batt2_temp_c": number | null,"batt2_voltage_v": number | null,"carried": boolean,"device_time": string | null,"grid_export_today_kwh": number | null,"grid_export_total_kwh": number | null,"grid_freq_hz": number | null,"grid_import_today_kwh": number | null,"grid_import_total_kwh": number | null,"grid_pf": number | null,"grid_relay_status": string | null,"grid_volt_l2_v": number | null,"grid_volt_l3_v": number | null,"grid_volt_v": number | null,"grid_w": number | null,"held": number | null,"load_fetched_ts": number | null,"load_freq_hz": number | null,"load_today_kwh": number | null,"load_total_kwh": number | null,"load_w": number | null,"output_fetched_ts": number | null,"output_freq_hz": number | null,"output_volt_l2_v": number | null,"output_volt_l3_v": number | null,"output_volt_v": number | null,"output_w": number | null,"plant_id": number,"pv_today_kwh": number | null,"pv_total_kwh": number | null,"pv_w": number | null,"sn": string,"status": number | null,"ts": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "batt_chg_today_kwh"?: number | null,"batt_chg_total_kwh"?: number | null,"batt_current_a"?: number | null,"batt_dischg_today_kwh"?: number | null,"batt_dischg_total_kwh"?: number | null,"batt_power_w"?: number | null,"batt_soc"?: number | null,"batt_temp_c"?: number | null,"batt_voltage_v"?: number | null,"batt_w"?: number | null,"batt2_current_a"?: number | null,"batt2_power_w"?: number | null,"batt2_soc"?: number | null,"batt2_temp_c"?: number | null,"batt2_voltage_v"?: number | null,"carried"?: boolean,"device_time"?: string | null,"grid_export_today_kwh"?: number | null,"grid_export_total_kwh"?: number | null,"grid_freq_hz"?: number | null,"grid_import_today_kwh"?: number | null,"grid_import_total_kwh"?: number | null,"grid_pf"?: number | null,"grid_relay_status"?: string | null,"grid_volt_l2_v"?: number | null,"grid_volt_l3_v"?: number | null,"grid_volt_v"?: number | null,"grid_w"?: number | null,"held"?: number | null,"load_fetched_ts"?: number | null,"load_freq_hz"?: number | null,"load_today_kwh"?: number | null,"load_total_kwh"?: number | null,"load_w"?: number | null,"output_fetched_ts"?: number | null,"output_freq_hz"?: number | null,"output_volt_l2_v"?: number | null,"output_volt_l3_v"?: number | null,"output_volt_v"?: number | null,"output_w"?: number | null,"plant_id": number,"pv_today_kwh"?: number | null,"pv_total_kwh"?: number | null,"pv_w"?: number | null,"sn": string,"status"?: number | null,"ts": number
+                  }
+                  Update: {
+                    "batt_chg_today_kwh"?: number | null,"batt_chg_total_kwh"?: number | null,"batt_current_a"?: number | null,"batt_dischg_today_kwh"?: number | null,"batt_dischg_total_kwh"?: number | null,"batt_power_w"?: number | null,"batt_soc"?: number | null,"batt_temp_c"?: number | null,"batt_voltage_v"?: number | null,"batt_w"?: number | null,"batt2_current_a"?: number | null,"batt2_power_w"?: number | null,"batt2_soc"?: number | null,"batt2_temp_c"?: number | null,"batt2_voltage_v"?: number | null,"carried"?: boolean,"device_time"?: string | null,"grid_export_today_kwh"?: number | null,"grid_export_total_kwh"?: number | null,"grid_freq_hz"?: number | null,"grid_import_today_kwh"?: number | null,"grid_import_total_kwh"?: number | null,"grid_pf"?: number | null,"grid_relay_status"?: string | null,"grid_volt_l2_v"?: number | null,"grid_volt_l3_v"?: number | null,"grid_volt_v"?: number | null,"grid_w"?: number | null,"held"?: number | null,"load_fetched_ts"?: number | null,"load_freq_hz"?: number | null,"load_today_kwh"?: number | null,"load_total_kwh"?: number | null,"load_w"?: number | null,"output_fetched_ts"?: number | null,"output_freq_hz"?: number | null,"output_volt_l2_v"?: number | null,"output_volt_l3_v"?: number | null,"output_volt_v"?: number | null,"output_w"?: number | null,"plant_id"?: number,"pv_today_kwh"?: number | null,"pv_total_kwh"?: number | null,"pv_w"?: number | null,"sn"?: string,"status"?: number | null,"ts"?: number
+                  }
+                  Relationships: [
+                    
+                  ]
                 },"readings_y2026m11": {
                   Row: {
                     "batt_chg_today_kwh": number | null,"batt_chg_total_kwh": number | null,"batt_current_a": number | null,"batt_dischg_today_kwh": number | null,"batt_dischg_total_kwh": number | null,"batt_power_w": number | null,"batt_soc": number | null,"batt_temp_c": number | null,"batt_voltage_v": number | null,"batt_w": number | null,"batt2_current_a": number | null,"batt2_power_w": number | null,"batt2_soc": number | null,"batt2_temp_c": number | null,"batt2_voltage_v": number | null,"carried": boolean,"device_time": string | null,"grid_export_today_kwh": number | null,"grid_export_total_kwh": number | null,"grid_freq_hz": number | null,"grid_import_today_kwh": number | null,"grid_import_total_kwh": number | null,"grid_pf": number | null,"grid_relay_status": string | null,"grid_volt_l2_v": number | null,"grid_volt_l3_v": number | null,"grid_volt_v": number | null,"grid_w": number | null,"held": number | null,"load_fetched_ts": number | null,"load_freq_hz": number | null,"load_today_kwh": number | null,"load_total_kwh": number | null,"load_w": number | null,"output_fetched_ts": number | null,"output_freq_hz": number | null,"output_volt_l2_v": number | null,"output_volt_l3_v": number | null,"output_volt_v": number | null,"output_w": number | null,"plant_id": number,"pv_today_kwh": number | null,"pv_total_kwh": number | null,"pv_w": number | null,"sn": string,"status": number | null,"ts": number
@@ -385,6 +399,20 @@ export type Database = {
                     
                   ]
                 },"strings_d20261204": {
+                  Row: {
+                    "current_a": number | null,"no": number,"plant_id": number,"power_w": number | null,"sn": string,"today_kwh": number | null,"ts": number,"volt_v": number | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "current_a"?: number | null,"no": number,"plant_id": number,"power_w"?: number | null,"sn": string,"today_kwh"?: number | null,"ts": number,"volt_v"?: number | null
+                  }
+                  Update: {
+                    "current_a"?: number | null,"no"?: number,"plant_id"?: number,"power_w"?: number | null,"sn"?: string,"today_kwh"?: number | null,"ts"?: number,"volt_v"?: number | null
+                  }
+                  Relationships: [
+                    
+                  ]
+                },"strings_d20261205": {
                   Row: {
                     "current_a": number | null,"no": number,"plant_id": number,"power_w": number | null,"sn": string,"today_kwh": number | null,"ts": number,"volt_v": number | null
                   }
