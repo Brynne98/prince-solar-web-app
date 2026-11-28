@@ -80,6 +80,7 @@ async function retryShareLogin() {
 export async function runTemps(ts: number) {
   const out = { inverters: 0, rows: 0, failed: 0 };
   const minute = Math.floor(ts / 60) % TEMP_EVERY_MIN;
+  const dead = new Set<string>();   // a login marked once, however many of its inverters fail
   try {
     const jobs = await pollJobs(0, 1);
     const jobOf = new Map(jobs.map((j) => [j.plantId, j]));
@@ -100,7 +101,8 @@ export async function runTemps(ts: number) {
         out.inverters++;
       } catch (e) {
         out.failed++;
-        if (faultOf(e) === "relink") await accountFailed(accs.get(r.account_id) ?? job.account, [], e);
+        const acc = accs.get(r.account_id) ?? job.account;
+        if (faultOf(e) === "relink") { if (!dead.has(acc.id)) { dead.add(acc.id); await accountFailed(acc, [], e); } }
         else noteError("temps_failed", e, { plant: inv.plantId!, hourly: true });
       }
     });
