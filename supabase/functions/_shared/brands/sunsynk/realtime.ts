@@ -5,6 +5,7 @@ import { clearYesterday, dayTurned, fromPrev, TODAY_COUNTERS } from "../../../po
 import { extrasOf, extrasPaths, historyRows, parseSeries } from "./invhistory.ts";
 import { extractReading, type InverterInfo, num, type RawBundle, realtimePaths } from "./extract.ts";
 import { type Account, apiGet } from "./api.ts";
+import { RelinkNeeded, SignInFailed } from "../types.ts";
 import { dayStartEpoch, localDate } from "../../localtime.ts";
 
 // ---------------------------------------------------------------------------
@@ -153,9 +154,16 @@ export function wantEndpoints(prev: Record<string, unknown> | null | undefined, 
   return want;
 }
 
+// A login we could not sign in is the login's failure, not a missing reading: it must reach
+// the reader's accountFailed (needs_reconnect, the owner's mail), never read as "no upload time".
+// Swallowing it left 495944 unread and still "ok" for 12 h (SOLAR-701).
+const signInDead = (e: unknown) => e instanceof RelinkNeeded || e instanceof SignInFailed;
+
 export async function fetchInto(raw: RawBundle, eps: Endpoint[], sn: string, acc: Account): Promise<void> {
   const paths = realtimePaths(sn);
   const settled = await Promise.allSettled(eps.map((k) => apiGet(paths[k], acc)));
+  const dead = settled.find((s) => s.status === "rejected" && signInDead(s.reason));
+  if (dead) throw (dead as PromiseRejectedResult).reason;
   eps.forEach((k, i) => {
     raw[k] = settled[i].status === "fulfilled" ? (settled[i] as PromiseFulfilledResult<any>).value : null;
   });
@@ -170,7 +178,7 @@ export async function fetchInverter(inv: InverterInfo, acc: Account, ts: number,
     return { inv, raw: { input: null, grid: null, battery: null, load: null, output: null }, carried: true, fetched: new Set(), sign, skipped: true };
   }
   const paths = realtimePaths(inv.sn);
-  const input = await apiGet(paths.input, acc).catch(() => null);
+  const input = await apiGet(paths.input, acc).catch((e) => { if (signInDead(e)) throw e; return null; });
   const inputTime = inputTimeOf(input);
   const raw: RawBundle = { input, grid: null, battery: null, load: null, output: null };
   if (canCarry(inv, inputTime)) return { inv, raw, carried: true, fetched: new Set(), sign };

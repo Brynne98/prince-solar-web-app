@@ -6,9 +6,9 @@
 // Alerts and plant checks run in SQL (private.alerts_minute, private.plant_checks).
 import { noteError } from "./errors.ts";
 import { db, rpc } from "./db.ts";
-import { type Account, brandOf, type InverterInfo, saveAllCalls } from "./brands/index.ts";
+import { type Account, brandOf, faultOf, type InverterInfo, saveAllCalls } from "./brands/index.ts";
 import { liveInverters, type PlantJob, pollJobs, shareAccount, shareSync, syncPlants } from "./plants.ts";
-import { bankTodayTemps, TEMP_EVERY_MIN, tempMinute } from "./poller.ts";
+import { accountFailed, bankTodayTemps, TEMP_EVERY_MIN, tempMinute } from "./poller.ts";
 import { isListMinute, isPlantsMinute } from "../poll/minutes.mts";
 
 const IN_FLIGHT = 10;
@@ -45,7 +45,9 @@ export async function runSync(ts: number) {
         }
       } catch (e) {
         out.failed++;
-        noteError("plant_sync_failed", e, { user: acc.user_id, hourly: true });
+        // a dead login is marked here too, as the reader marks it (SOLAR-701)
+        if (faultOf(e) === "relink") await accountFailed(acc, [], e);
+        else noteError("plant_sync_failed", e, { user: acc.user_id, hourly: true });
       }
     });
     await retryShareLogin();
@@ -98,7 +100,8 @@ export async function runTemps(ts: number) {
         out.inverters++;
       } catch (e) {
         out.failed++;
-        noteError("temps_failed", e, { plant: inv.plantId!, hourly: true });
+        if (faultOf(e) === "relink") await accountFailed(accs.get(r.account_id) ?? job.account, [], e);
+        else noteError("temps_failed", e, { plant: inv.plantId!, hourly: true });
       }
     });
   } finally {
